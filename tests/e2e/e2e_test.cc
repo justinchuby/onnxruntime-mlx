@@ -9,9 +9,9 @@
 //   4. Load the model, run greedy generation (prefill + decode with KV cache)
 //   5. Coherence gate: the MetalEP token stream must be IDENTICAL to a plain CPU session's.
 //
-// The MetalEP partitions the graph (claiming equal-shape float32 Add nodes for Metal, the rest
-// falling back to CPU), so identical output proves partitioning + CPU fallback + the Metal Add
-// path are all correct. Decode tok/s is reported as a Phase-1 baseline.
+// The MetalEP partitions the graph (claiming implemented kernels and falling the rest back to
+// CPU), so identical output proves partitioning, CPU fallback, and the claimed Metal paths are
+// coherent. Decode tok/s is reported as a baseline.
 //
 // Usage: mps_e2e <model.onnx> <ep_lib.dylib> <prompt_tokens.txt> [num_new_tokens]
 

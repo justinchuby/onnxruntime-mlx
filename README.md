@@ -10,9 +10,10 @@ Goal: hand-tuned Metal kernels (int4 `MatMulNBits`, `GroupQueryAttention`, RoPE,
 llama.cpp-Metal-class stacks (LM Studio, Foundry Local) for the models our
 [`onnx-genai`](../onnx-genai) runtime and [`mobius`](../mobius) builder use.
 
-> **Status: design/plan.** See [`docs/DESIGN.md`](docs/DESIGN.md) for the full architecture,
-> operator coverage, kernel design, build/test strategy, and phased plan. No kernel/EP
-> implementation has landed yet.
+> **Status:** the plugin EP skeleton and initial Metal kernels are implemented. Current coverage
+> includes elementwise/activation ops, fp16/fp32 casts, RoPE, block-quantized embedding gather,
+> and basic data movement, with CPU fallback for unsupported nodes. See
+> [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture and phased plan.
 
 ## Layout
 
