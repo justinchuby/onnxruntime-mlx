@@ -1,0 +1,55 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "onnxruntime-mlx"
+version = "0.1.0"
+description = "MLX-native ONNX Runtime execution provider (plugin EP) for Apple Silicon"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "onnxruntime-mlx" }]
+keywords = ["onnxruntime", "mlx", "execution-provider", "apple-silicon", "metal", "coreml"]
+dependencies = ["onnxruntime>=1.22"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS :: MacOS X",
+  "Programming Language :: C++",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/justinchuby/onnxruntime-mlx"
+Repository = "https://github.com/justinchuby/onnxruntime-mlx"
+
+[tool.scikit-build]
+# The wheel package lives under python/src/onnxruntime_mlx; compiled artifacts
+# (the nanobind _core extension, the EP dylib and its bundled mlx deps) are
+# installed into it by CMakeLists.txt.
+wheel.packages = ["src/onnxruntime_mlx"]
+minimum-version = "build-system.requires"
+build-dir = "build/{wheel_tag}"
+
+[tool.scikit-build.cmake.define]
+# Absolute path to the repository root (the parent of python/), which holds the
+# EP sources and the top-level CMake. Defaults to the parent of this project and
+# may be overridden for out-of-tree builds:
+#   pip install python/ -C cmake.define.ORT_MLX_REPO_ROOT=/abs/path/to/repo
+ORT_MLX_REPO_ROOT = ""
+
+[tool.cibuildwheel]
+build = "cp39-macosx_arm64 cp310-macosx_arm64 cp311-macosx_arm64 cp312-macosx_arm64 cp313-macosx_arm64"
+# The EP dylib links mlx-c/mlx (brew) at build time; delocate bundles them into
+# the wheel. onnxruntime is resolved from the host onnxruntime package at runtime
+# (two-level namespace), so it must NOT be vendored.
+[tool.cibuildwheel.macos]
+repair-wheel-command = "delocate-wheel --require-archs arm64 -e libonnxruntime -w {dest_dir} -v {wheel}"

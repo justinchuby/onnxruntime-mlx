@@ -1,0 +1,86 @@
+# Configured by python/CMakeLists.txt (configure_file @ONLY) and run at install
+# time via install(SCRIPT). It makes the bundled MLX EP plugin and its mlx-c/mlx
+# dependencies relocatable inside the wheel:
+#
+#   * plugin's onnxruntime dependency  -> @rpath/libonnxruntime.1.dylib
+#         (resolved from the host `onnxruntime` package already loaded in-process
+#          via macOS two-level-namespace image matching; an rpath into the
+#          sibling onnxruntime/capi dir is added as a best-effort fallback)
+#   * plugin's mlx-c / mlx dependencies -> @loader_path/lib{mlxc,mlx}.dylib
+#   * bundled libmlxc/libmlx install ids -> @loader_path/lib{mlxc,mlx}.dylib
+#   * mlx.metallib copied next to libmlx so MLX finds its default metallib
+#
+# @-substituted (generation-time) values:
+set(_pkg     "${CMAKE_INSTALL_PREFIX}/@ORT_MLX_PKG_DESTDIR@")
+set(_plugin  "${_pkg}/libonnxruntime_mlx_ep.dylib")
+set(_mlxc_src  "@MLXC_DYLIB@")
+set(_mlx_src   "@MLX_DYLIB@")
+set(_metallib_src "@MLX_METALLIB@")
+
+find_program(INSTALL_NAME_TOOL install_name_tool)
+find_program(OTOOL otool)
+find_program(CODESIGN codesign)
+
+# install_name_tool invalidates the (ad-hoc) code signature; on Apple Silicon an
+# invalid signature makes dyld SIGKILL the loading process. Re-sign ad-hoc.
+function(_ort_mlx_resign f)
+  if(CODESIGN AND EXISTS "${f}")
+    execute_process(COMMAND "${CODESIGN}" --force --sign - "${f}" ERROR_QUIET)
+  endif()
+endfunction()
+
+function(_ort_mlx_chmod_w f)
+  if(EXISTS "${f}")
+    execute_process(COMMAND chmod u+w "${f}")
+  endif()
+endfunction()
+
+# --- Bundle the mlx dylibs and metallib next to the plugin --------------------
+foreach(_src "${_mlxc_src}" "${_mlx_src}" "${_metallib_src}")
+  get_filename_component(_name "${_src}" NAME)
+  file(COPY "${_src}" DESTINATION "${_pkg}")
+  _ort_mlx_chmod_w("${_pkg}/${_name}")
+endforeach()
+
+set(_mlxc "${_pkg}/libmlxc.dylib")
+set(_mlx  "${_pkg}/libmlx.dylib")
+
+_ort_mlx_chmod_w("${_plugin}")
+
+# --- Rewrite the bundled mlx install ids -> @loader_path ----------------------
+execute_process(COMMAND "${INSTALL_NAME_TOOL}" -id "@loader_path/libmlxc.dylib" "${_mlxc}")
+execute_process(COMMAND "${INSTALL_NAME_TOOL}" -id "@loader_path/libmlx.dylib"  "${_mlx}")
+# libmlxc depends on libmlx by its absolute install name -> retarget to sibling.
+execute_process(COMMAND "${INSTALL_NAME_TOOL}" -change "${_mlx_src}" "@loader_path/libmlx.dylib" "${_mlxc}")
+
+# --- Rewrite the plugin's dependencies ---------------------------------------
+# mlx-c / mlx -> colocated copies.
+execute_process(COMMAND "${INSTALL_NAME_TOOL}" -change "${_mlxc_src}" "@loader_path/libmlxc.dylib" "${_plugin}")
+execute_process(COMMAND "${INSTALL_NAME_TOOL}" -change "${_mlx_src}"  "@loader_path/libmlx.dylib"  "${_plugin}")
+
+# onnxruntime -> @rpath (resolved from the host onnxruntime package at runtime).
+# Discover the exact current dependency path via otool (it is an absolute path
+# baked in at link time from the dev ORT prebuilt).
+execute_process(COMMAND "${OTOOL}" -L "${_plugin}" OUTPUT_VARIABLE _deps)
+string(REPLACE "\n" ";" _dep_lines "${_deps}")
+foreach(_line ${_dep_lines})
+  if(_line MATCHES "libonnxruntime")
+    string(STRIP "${_line}" _line)
+    string(REGEX REPLACE " \\(compatibility.*$" "" _ort_dep "${_line}")
+    string(STRIP "${_ort_dep}" _ort_dep)
+    if(NOT _ort_dep STREQUAL "" AND NOT _ort_dep MATCHES "^@rpath")
+      execute_process(COMMAND "${INSTALL_NAME_TOOL}" -change "${_ort_dep}" "@rpath/libonnxruntime.1.dylib" "${_plugin}")
+    endif()
+  endif()
+endforeach()
+
+# Best-effort rpath into the sibling onnxruntime/capi dir (same site-packages).
+execute_process(COMMAND "${INSTALL_NAME_TOOL}" -add_rpath "@loader_path/../onnxruntime/capi" "${_plugin}"
+                ERROR_QUIET)
+
+# Re-sign every binary we modified (ad-hoc) so dyld will load them on arm64.
+_ort_mlx_resign("${_mlx}")
+_ort_mlx_resign("${_mlxc}")
+_ort_mlx_resign("${_plugin}")
+
+message(STATUS "onnxruntime-mlx: bundled + relinked plugin and mlx deps in ${_pkg}")
