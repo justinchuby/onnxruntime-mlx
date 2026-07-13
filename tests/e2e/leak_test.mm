@@ -148,7 +148,7 @@ Ort::Session MakeMetalSession(Ort::Env& env, const std::string& model_path,
     if (ep_name != nullptr && registration_name == ep_name) selected.push_back(ep_devices[i]);
   }
   if (selected.empty()) {
-    throw std::runtime_error("MetalEP device not found among registered EP devices");
+    throw std::runtime_error("MLXExecutionProvider device not found among registered EP devices");
   }
   Ort::ThrowOnError(api.SessionOptionsAppendExecutionProvider_V2(
       options, env, selected.data(), selected.size(), nullptr, nullptr, 0));
@@ -244,7 +244,7 @@ int main(int argc, char** argv) {
 
   int result = 0;
   bool registered = false;
-  const std::string registration_name = "MetalEP";
+  const std::string registration_name = "MLXExecutionProvider";
   try {
     const std::vector<int64_t> prompt = ReadTokens(tokens_path);
     Model model;

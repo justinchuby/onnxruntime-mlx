@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MLX op-correctness tests for the MLX-native ONNX Runtime execution provider.
 
-Each ONNX decoder op we translate to MLX is run through the plugin ("MetalEP") and compared,
+Each ONNX decoder op we translate to MLX is run through the plugin ("MLXExecutionProvider") and compared,
 tolerance-gated, against ORT's CPU EP reference. MLX is the SOLE compute path — there are no
 hand-written Metal kernels — so this suite validates the ONNX->MLX translation in mlx_backend.cc.
 
@@ -79,7 +79,7 @@ def compare(
     options.log_severity_level = 3
     cpu = ort.InferenceSession(model, options, providers=["CPUExecutionProvider"])
     metal = ort.InferenceSession(
-        model, options, providers=["MetalEP", "CPUExecutionProvider"]
+        model, options, providers=["MLXExecutionProvider", "CPUExecutionProvider"]
     )
     expected = cpu.run(None, feeds)
     actual = metal.run(None, feeds)
@@ -272,7 +272,7 @@ def main() -> int:
     if len(sys.argv) != 2:
         print("usage: mlx_op_test.py <libonnxruntime_mlx_ep.dylib>", file=sys.stderr)
         return 2
-    ort.register_execution_provider_library("MetalEP", os.path.abspath(sys.argv[1]))
+    ort.register_execution_provider_library("MLXExecutionProvider", os.path.abspath(sys.argv[1]))
 
     # --- Elementwise (fp32/fp16/int64) ----------------------------------------------------------
     a = np.array([[1.0, -2.0, 3.0], [4.0, 5.0, -6.0]], dtype=np.float32)

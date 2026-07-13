@@ -4,12 +4,12 @@
 //
 // It proves the full plugin-EP wiring on a real Qwen2.5-0.5B graph:
 //   1. RegisterExecutionProviderLibrary(our .dylib)
-//   2. GetEpDevices -> select the MetalEP device
-//   3. SessionOptionsAppendExecutionProvider_V2(MetalEP)
+//   2. GetEpDevices -> select the MLXExecutionProvider device
+//   3. SessionOptionsAppendExecutionProvider_V2(MLXExecutionProvider)
 //   4. Load the model, run greedy generation (prefill + decode with KV cache)
-//   5. Coherence gate: the MetalEP token stream must be IDENTICAL to a plain CPU session's.
+//   5. Coherence gate: the MLXExecutionProvider token stream must be IDENTICAL to a plain CPU session's.
 //
-// The MetalEP partitions the graph (claiming implemented kernels and falling the rest back to
+// The MLXExecutionProvider partitions the graph (claiming implemented kernels and falling the rest back to
 // CPU), so identical output proves partitioning, CPU fallback, and the claimed Metal paths are
 // coherent. Decode tok/s is reported as a baseline.
 //
@@ -212,7 +212,7 @@ Ort::Session MakeSession(Ort::Env& env, const std::string& model_path, bool use_
 
   if (use_metal) {
     const OrtApi& api = Ort::GetApi();
-    // Select the MetalEP device that RegisterExecutionProviderLibrary made available.
+    // Select the MLXExecutionProvider device that RegisterExecutionProviderLibrary made available.
     const OrtEpDevice* const* ep_devices = nullptr;
     size_t num_ep_devices = 0;
     Ort::ThrowOnError(api.GetEpDevices(env, &ep_devices, &num_ep_devices));
@@ -225,11 +225,11 @@ Ort::Session MakeSession(Ort::Env& env, const std::string& model_path, bool use_
       }
     }
     if (selected.empty()) {
-      throw std::runtime_error("MetalEP device not found among registered EP devices");
+      throw std::runtime_error("MLXExecutionProvider device not found among registered EP devices");
     }
     Ort::ThrowOnError(api.SessionOptionsAppendExecutionProvider_V2(
         opts, env, selected.data(), selected.size(), nullptr, nullptr, 0));
-    std::cout << "[e2e] Appended MetalEP via SessionOptionsAppendExecutionProvider_V2 ("
+    std::cout << "[e2e] Appended MLXExecutionProvider via SessionOptionsAppendExecutionProvider_V2 ("
               << selected.size() << " device)\n";
   }
 
@@ -253,7 +253,7 @@ int main(int argc, char** argv) {
   // optional prefill-timing iteration count. Both Metal and CPU see the identical padded prompt.
   const int pad_to = argc > 5 ? std::atoi(argv[5]) : 0;
   const int prefill_iters = argc > 6 ? std::atoi(argv[6]) : 3;
-  const std::string registration_name = "MetalEP";
+  const std::string registration_name = "MLXExecutionProvider";
 
   try {
     std::vector<int64_t> prompt = ReadTokens(tokens_path);
@@ -275,7 +275,7 @@ int main(int argc, char** argv) {
 
     // Register our plugin library. This is the plugin-EP registration path (differs from the
     // built-in string EPs): the .dylib's CreateEpFactories is resolved and its factory's
-    // GetSupportedDevices runs, producing the MetalEP OrtEpDevice.
+    // GetSupportedDevices runs, producing the MLXExecutionProvider OrtEpDevice.
     Ort::ThrowOnError(api.RegisterExecutionProviderLibrary(env, registration_name.c_str(),
                                                            ep_lib.c_str()));
     std::cout << "[e2e] RegisterExecutionProviderLibrary(\"" << registration_name << "\", "
@@ -291,8 +291,8 @@ int main(int argc, char** argv) {
     // from the plugin holds references (EP, allocator, data-transfer) into the .dylib, and
     // unloading the library first would leave the session destructor calling into freed code.
     {
-      // --- MetalEP run ---
-      std::cout << "\n===== MetalEP session =====\n";
+      // --- MLXExecutionProvider run ---
+      std::cout << "\n===== MLXExecutionProvider session =====\n";
       Ort::Session metal_session = MakeSession(env, model_path, true, ep_lib, registration_name);
       metal_prefill_secs = MeasurePrefill(metal_session, model, prompt, prefill_iters);
       metal_ids = Generate(metal_session, model, prompt, num_new, metal_decode_secs);
@@ -311,18 +311,18 @@ int main(int argc, char** argv) {
       for (int64_t t : ids) std::cout << t << " ";
       std::cout << "\n";
     };
-    print_ids("[e2e] MetalEP tokens: ", metal_ids);
+    print_ids("[e2e] MLXExecutionProvider tokens: ", metal_ids);
     print_ids("[e2e] CPU     tokens: ", cpu_ids);
 
     // Prefill / TTFT: whole-prompt forward with empty KV (best of `prefill_iters`).
-    std::cout << "[e2e] prefill/TTFT (" << prompt.size() << " tokens): MetalEP "
+    std::cout << "[e2e] prefill/TTFT (" << prompt.size() << " tokens): MLXExecutionProvider "
               << (metal_prefill_secs * 1e3) << " ms vs CPU " << (cpu_prefill_secs * 1e3)
               << " ms  =>  Metal/CPU = " << (metal_prefill_secs / cpu_prefill_secs) << "x  ("
               << (metal_prefill_secs < cpu_prefill_secs ? "Metal FASTER" : "CPU faster") << ")\n";
 
     const int decode_steps = std::max(0, num_new - 1);
     if (metal_decode_secs > 0.0) {
-      std::cout << "[e2e] MetalEP decode: " << decode_steps << " tokens in " << metal_decode_secs
+      std::cout << "[e2e] MLXExecutionProvider decode: " << decode_steps << " tokens in " << metal_decode_secs
                 << "s = " << (decode_steps / metal_decode_secs) << " tok/s\n";
     }
     if (cpu_decode_secs > 0.0) {
@@ -334,7 +334,7 @@ int main(int argc, char** argv) {
     Ort::ThrowOnError(api.UnregisterExecutionProviderLibrary(env, registration_name.c_str()));
 
     const bool coherent = (metal_ids == cpu_ids);
-    std::cout << "\n[e2e] COHERENCE GATE (MetalEP == CPU token stream): "
+    std::cout << "\n[e2e] COHERENCE GATE (MLXExecutionProvider == CPU token stream): "
               << (coherent ? "PASS" : "FAIL") << "\n";
     return coherent ? 0 : 1;
   } catch (const std::exception& ex) {

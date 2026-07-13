@@ -41,22 +41,22 @@ MetalEpFactory::MetalEpFactory(const char* registration_name, ApiPtrs apis,
     const OrtApi& ort_api_ = ort_api;
     const OrtLogger* logger_ = &default_logger_;
     if (metal_) {
-      MPS_LOG(INFO, "MetalEP: initialized Metal device '" << metal_->DeviceName() << "'");
+      MPS_LOG(INFO, "MLXExecutionProvider: initialized Metal device '" << metal_->DeviceName() << "'");
     } else {
-      MPS_LOG(WARNING, "MetalEP: Metal init failed (" << err << "); EP will offer no devices");
+      MPS_LOG(WARNING, "MLXExecutionProvider: Metal init failed (" << err << "); EP will offer no devices");
     }
   }
 
   // Advertise the EP's memory as a GPU device. On Apple unified memory these are shared-storage
   // MTLBuffers whose contents are CPU-addressable, so the data transfer is a memcpy.
-  default_memory_info_ = Ort::MemoryInfo{"MetalEP_Buffer",
+  default_memory_info_ = Ort::MemoryInfo{"MLXExecutionProvider_Buffer",
                                          OrtMemoryInfoDeviceType_GPU,
                                          ORT_MPS_EP_VENDOR_ID, /*device_id*/ 0,
                                          OrtDeviceMemoryType_DEFAULT,
                                          /*alignment*/ 0,
                                          OrtAllocatorType::OrtDeviceAllocator};
 
-  readonly_memory_info_ = Ort::MemoryInfo{"MetalEP_Buffer_readonly",
+  readonly_memory_info_ = Ort::MemoryInfo{"MLXExecutionProvider_Buffer_readonly",
                                           OrtMemoryInfoDeviceType_GPU,
                                           ORT_MPS_EP_VENDOR_ID, /*device_id*/ 0,
                                           OrtDeviceMemoryType_DEFAULT,
@@ -111,7 +111,7 @@ OrtStatus* ORT_API_CALL MetalEpFactory::GetSupportedDevicesImpl(OrtEpFactory* th
     OrtHardwareDeviceType type = factory->ort_api.HardwareDevice_Type(dev);
     const char* vendor = factory->ort_api.HardwareDevice_Vendor(dev);
     uint32_t vendor_id = factory->ort_api.HardwareDevice_VendorId(dev);
-    MPS_LOG(INFO, "MetalEP GetSupportedDevices: hw device " << i << " type="
+    MPS_LOG(INFO, "MLXExecutionProvider GetSupportedDevices: hw device " << i << " type="
                   << static_cast<int>(type) << " vendor='" << (vendor ? vendor : "?")
                   << "' vendor_id=0x" << std::hex << vendor_id << std::dec);
     if (type == OrtHardwareDeviceType_GPU && gpu == nullptr) {
@@ -123,10 +123,10 @@ OrtStatus* ORT_API_CALL MetalEpFactory::GetSupportedDevicesImpl(OrtEpFactory* th
 
   const OrtHardwareDevice* selected = gpu ? gpu : cpu;
   if (selected == nullptr || max_ep_devices < 1) {
-    MPS_LOG(WARNING, "MetalEP: no suitable hardware device enumerated by ORT");
+    MPS_LOG(WARNING, "MLXExecutionProvider: no suitable hardware device enumerated by ORT");
     return nullptr;
   }
-  MPS_LOG(INFO, "MetalEP: binding to " << (gpu ? "GPU" : "CPU")
+  MPS_LOG(INFO, "MLXExecutionProvider: binding to " << (gpu ? "GPU" : "CPU")
                 << " hardware device; advertising unified-memory GPU allocator");
 
   OrtEpDevice* ep_device = nullptr;
@@ -150,7 +150,7 @@ OrtStatus* ORT_API_CALL MetalEpFactory::CreateEpImpl(OrtEpFactory* this_ptr,
   *ep = nullptr;
   if (num_devices != 1) {
     return factory->ort_api.CreateStatus(ORT_INVALID_ARGUMENT,
-                                         "MetalEP expects to be selected for exactly one device");
+                                         "MLXExecutionProvider expects to be selected for exactly one device");
   }
 
   // Partitioning policy. Default: claim all implemented kernels. Set
