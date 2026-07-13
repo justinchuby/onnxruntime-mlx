@@ -42,3 +42,11 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# --- ONNX Runtime Metal/MPS EP (Phase 1) ---
+# CMake build output (the plugin .dylib + e2e binary are rebuilt from source).
+build/
+# Scratch reference material downloaded during development.
+.ref/
+# Generated e2e prompt fixture (regenerate with tests/e2e/prepare_prompt.py).
+tests/e2e/prompt_tokens.txt
