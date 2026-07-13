@@ -64,3 +64,75 @@ kernel void mps_matmulnbits_f32(device const float*   A       [[buffer(0)]],
     Y[(ulong)m * N + n] = has_bias ? (sum + bias[n]) : sum;
   }
 }
+
+// ---------------------------------------------------------------------------
+// int8 dynamic-quant fast path (accuracy_level=4). This is the same numerical
+// scheme ORT's CPU MatMulNBits uses at accuracy_level=4 (which won 2.3x on ARM
+// via SDOT) and mirrors llama.cpp's Metal `mul_mv_q` matvec kernels: dynamically
+// quantize the activation to int8 with a per-K-block (block_size=32) symmetric
+// absmax scale, then compute int8(activation)·int8(weight-8) dot products with
+// **int32 accumulation** per block, dequantizing by (a_scale * w_scale).
+//
+// Single fused kernel: the 256-thread threadgroup owns 8 output columns that all
+// share the same activation row (M=1 decode / one row of prefill). The 8
+// simdgroups cooperatively quantize the shared activation into threadgroup memory
+// ONCE (amortizing the quant 8x and keeping it off the device round-trip), then
+// each simdgroup computes its column's int8 dot straight from threadgroup memory.
+// ---------------------------------------------------------------------------
+kernel void mps_matmulnbits_i8(device const float*   A         [[buffer(0)]],
+                               device const uchar*   B         [[buffer(1)]],
+                               device const float*   scales    [[buffer(2)]],
+                               device float*         Y         [[buffer(3)]],
+                               device const float*   bias      [[buffer(4)]],
+                               constant uint&        M         [[buffer(5)]],
+                               constant uint&        N         [[buffer(6)]],
+                               constant uint&        K         [[buffer(7)]],
+                               constant uint&        nblocks   [[buffer(8)]],
+                               constant uint&        has_bias  [[buffer(9)]],
+                               threadgroup char*     tg_qa     [[threadgroup(0)]],  // [K]
+                               threadgroup float*    tg_ascale [[threadgroup(1)]],  // [nblocks]
+                               uint2 gid  [[thread_position_in_grid]],
+                               uint  sgid [[simdgroup_index_in_threadgroup]],
+                               uint  lane [[thread_index_in_simdgroup]]) {
+  const uint n = gid.x / 32u;   // output column (one per simdgroup)
+  const uint m = gid.y;         // output row (shared across the threadgroup's 8 columns)
+  const uint sgcount = 8u;      // 256 threads / 32 = 8 simdgroups per threadgroup
+
+  // Phase A: cooperatively quantize this row's activation to int8, one absmax scale per K-block.
+  // The 8 simdgroups stride over the blocks; lane L owns within-block element L.
+  if (m < M) {
+    for (uint b = sgid; b < nblocks; b += sgcount) {
+      const uint k = b * 32u + lane;
+      const float a = A[(ulong)m * K + k];
+      const float amax = simd_max(fabs(a));
+      const float scale = amax > 0.0f ? amax / 127.0f : 1.0f;
+      const float inv = amax > 0.0f ? 127.0f / amax : 0.0f;
+      int q = clamp(int(rint(a * inv)), -127, 127);
+      tg_qa[k] = char(q);
+      if (lane == 0) tg_ascale[b] = scale;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (n >= N || m >= M) {
+    return;
+  }
+
+  // Phase B: int8 dot per block from threadgroup-resident activation; int32 reduction per block.
+  const uint bytes_per_block = 16u;                 // block_size(32) * 4 bits / 8
+  device const uchar* wcol = B + (ulong)n * nblocks * bytes_per_block;
+  device const float* wsc  = scales + (ulong)n * nblocks;
+
+  float acc = 0.0f;
+  for (uint b = 0; b < nblocks; ++b) {
+    const uint  k = b * 32u + lane;
+    const uchar packed = wcol[b * bytes_per_block + (lane >> 1)];
+    const int   wq = ((lane & 1u) ? int(packed >> 4) : int(packed & 0x0Fu)) - 8;  // [-8,7]
+    const int   prod = int(tg_qa[k]) * wq;          // int8 * int4  -> int32
+    const int   block_dot = simd_sum(prod);         // int32 accumulation over the block
+    acc += float(block_dot) * (tg_ascale[b] * wsc[b]);  // dequant: a_scale * w_scale
+  }
+  if (lane == 0) {
+    Y[(ulong)m * N + n] = has_bias ? (acc + bias[n]) : acc;
+  }
+}

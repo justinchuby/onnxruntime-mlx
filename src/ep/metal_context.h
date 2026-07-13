@@ -124,6 +124,15 @@ class MetalContext {
   bool MatMulNBitsF32(const float* a, const uint8_t* b, const float* scales, const float* bias,
                       float* y, size_t m, size_t n, size_t k, size_t nblocks, std::string& error);
 
+  // MatMulNBits int8 fast path (accuracy_level=4): dynamically quantizes the activation `a` to
+  // int8 per K-block (symmetric absmax scale), then computes int8(activation)·int8(weight-8) dot
+  // products with int32 accumulation, dequantizing by (a_scale * w_scale) and summing block
+  // results in fp32. Single fused kernel — each 256-thread threadgroup owns 8 columns that share
+  // the row, quantizing the activation once into threadgroup memory. Same inputs/layout as
+  // MatMulNBitsF32; matches ORT's CPU accuracy_level=4 numerics to within its quant tolerance.
+  bool MatMulNBitsI8(const float* a, const uint8_t* b, const float* scales, const float* bias,
+                     float* y, size_t m, size_t n, size_t k, size_t nblocks, std::string& error);
+
   // RMSNormalization (ai.onnx, axis=-1): y = x * rsqrt(mean(x^2)+eps) * gamma, over `rows` rows
   // of width `d`.
   bool RmsNormF32(const float* x, const float* gamma, float* y, size_t rows, size_t d, float eps,

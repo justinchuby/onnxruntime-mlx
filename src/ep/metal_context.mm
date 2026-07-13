@@ -268,7 +268,8 @@ std::unique_ptr<MetalContext> MetalContext::Create(std::string& error) {
         "mps_gather_q4_i64_f16_zp", "mps_gather_q4_i32_f16_zp",
         "mps_copy_bytes",       "mps_transpose_bytes",  "mps_concat_slice_bytes",
         // Mariette core-compute kernels.
-        "mps_matmulnbits_f32",  "mps_rmsnorm_f32",
+        "mps_matmulnbits_f32",  "mps_matmulnbits_i8",
+        "mps_rmsnorm_f32",
         "mps_skip_simplified_layernorm_f32", "mps_softmax_f32",
         "mps_gqa_write_kv_f32", "mps_gqa_attention_f32",
     };
@@ -931,6 +932,107 @@ bool MetalContext::MatMulNBitsF32(const float* a, const uint8_t* b, const float*
     MTLSize tg = MTLSizeMake(256, 1, 1);             // 8 columns per threadgroup
     return RunPass(impl, "mps_matmulnbits_f32", bufs, consts, grid, tg, /*by_threadgroups=*/false,
                    error);
+  }
+}
+
+bool MetalContext::MatMulNBitsI8(const float* a, const uint8_t* b, const float* scales,
+                                 const float* bias, float* y, size_t m, size_t n, size_t k,
+                                 size_t nblocks, std::string& error) {
+  @autoreleasepool {
+    if (m == 0 || n == 0) {
+      return true;
+    }
+    if (k == 0 || nblocks == 0 || k != nblocks * 32) {
+      error = "MetalContext::MatMulNBitsI8 requires block_size==32 (K == nblocks*32)";
+      return false;
+    }
+    Impl& impl = *impl_;
+    auto pipe = impl.pipelines.find("mps_matmulnbits_i8");
+    if (pipe == impl.pipelines.end()) {
+      error = "MetalContext::MatMulNBitsI8 pipeline unavailable";
+      return false;
+    }
+    const size_t bytes_per_block = 16;  // 32 int4 lanes packed two-per-byte
+
+    std::vector<ResolvedBuffer> bufs;
+    bufs.push_back(ResolveMC(impl, a, m * k * sizeof(float), false));
+    bufs.push_back(ResolveMC(impl, b, n * nblocks * bytes_per_block, false));
+    bufs.push_back(ResolveMC(impl, scales, n * nblocks * sizeof(float), false));
+    bufs.push_back(ResolveMC(impl, y, m * n * sizeof(float), true));
+    float dummy_bias = 0.0f;
+    const uint32_t has_bias = bias != nullptr ? 1u : 0u;
+    bufs.push_back(has_bias ? ResolveMC(impl, bias, n * sizeof(float), false)
+                            : ResolveMC(impl, &dummy_bias, sizeof(float), false));
+    for (const ResolvedBuffer& rb : bufs) {
+      if (rb.buffer == nil) {
+        for (const ResolvedBuffer& t : bufs)
+          if (t.owned) [t.buffer release];
+        error = "MetalContext::MatMulNBitsI8 failed to allocate a Metal buffer";
+        return false;
+      }
+    }
+
+    const uint32_t M = static_cast<uint32_t>(m), N = static_cast<uint32_t>(n),
+                   K = static_cast<uint32_t>(k), NB = static_cast<uint32_t>(nblocks);
+    const BytesArg consts[5] = {{&M, sizeof(M)}, {&N, sizeof(N)}, {&K, sizeof(K)},
+                                {&NB, sizeof(NB)}, {&has_bias, sizeof(has_bias)}};
+
+    // Threadgroup memory holds the shared row's int8-quantized activation (K bytes) and its
+    // per-block scales (nblocks floats). Rounded to 16-byte alignment as Metal requires.
+    auto round16 = [](size_t v) { return (v + 15) & ~size_t(15); };
+    const size_t tg_qa_len = round16(std::max<size_t>(k, 1));
+    const size_t tg_asc_len = round16(std::max<size_t>(nblocks * sizeof(float), 1));
+
+    const bool own_command = !impl.batch_active;
+    id<MTLCommandBuffer> command = own_command ? [impl.queue commandBuffer] : impl.batch_command;
+    id<MTLComputeCommandEncoder> encoder =
+        own_command ? [command computeCommandEncoder] : impl.batch_encoder;
+    if (command == nil || encoder == nil) {
+      for (const ResolvedBuffer& t : bufs)
+        if (t.owned) [t.buffer release];
+      error = "MetalContext::MatMulNBitsI8 failed to create a Metal command encoder";
+      return false;
+    }
+
+    [encoder setComputePipelineState:pipe->second];
+    NSUInteger index = 0;
+    for (const ResolvedBuffer& rb : bufs) [encoder setBuffer:rb.buffer offset:rb.offset atIndex:index++];
+    for (const BytesArg& c : consts) [encoder setBytes:c.data length:c.bytes atIndex:index++];
+    [encoder setThreadgroupMemoryLength:tg_qa_len atIndex:0];
+    [encoder setThreadgroupMemoryLength:tg_asc_len atIndex:1];
+    // One 32-lane simdgroup per output column; 256-wide threadgroup = 8 columns sharing the row.
+    [encoder dispatchThreads:MTLSizeMake(n * 32, m, 1)
+       threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+
+    if (!own_command) {
+      for (const ResolvedBuffer& rb : bufs) {
+        if (rb.copy_back && rb.host != nullptr) {
+          impl.batch_copybacks.push_back({rb.host, rb.buffer, rb.bytes});
+        }
+      }
+      for (const ResolvedBuffer& rb : bufs) {
+        if (rb.owned) impl.batch_temps.push_back(rb.buffer);
+      }
+      return true;
+    }
+
+    [encoder endEncoding];
+    [command commit];
+    [command waitUntilCompleted];
+    impl.commit_count++;
+    const bool failed = command.status == MTLCommandBufferStatusError;
+    if (failed) {
+      error = std::string("mps_matmulnbits_i8 command buffer failed: ") +
+              (command.error ? [[command.error localizedDescription] UTF8String] : "unknown");
+    } else {
+      for (const ResolvedBuffer& rb : bufs) {
+        if (rb.copy_back && rb.host != nullptr) memcpy(rb.host, [rb.buffer contents], rb.bytes);
+      }
+    }
+    for (const ResolvedBuffer& rb : bufs) {
+      if (rb.owned) [rb.buffer release];
+    }
+    return !failed;
   }
 }
 

@@ -8,6 +8,7 @@
 
 #include "metal_context.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -352,12 +353,108 @@ void TestGroupQueryAttention(ort_mps::MetalContext& metal) {
 
 }  // namespace
 
+// int8 dynamic-quant fast path (accuracy_level=4). Verifies the Metal int8 kernel against:
+//   (a) a scalar CPU int8 reference that applies the SAME per-block absmax activation quant — the
+//       GPU must match this closely (only fp32 reduction-order differences), and
+//   (b) the pure fp32 dequant reference — the gap here is the intrinsic int8 quantization error,
+//       which we quantify (worst-case relative error) and require to stay within tolerance.
+namespace {
+
+void TestMatMulNBitsInt8(ort_mps::MetalContext& metal) {
+  std::mt19937 rng(9876);
+  const size_t block = 32;
+  float worst_rel = 0.0f;      // int8 GPU vs fp32 reference (the quantization error), non-tiny only
+  float worst_abs = 0.0f;      // int8 GPU vs fp32 reference, absolute
+  float worst_vs_cpu_i8 = 0.0f;  // int8 GPU vs int8 CPU reference (should be ~0)
+
+  // Larger K exercises the block sweep; N a multiple of 8 matches the real-graph tiling.
+  for (const size_t M : {size_t(1), size_t(4)}) {
+    const size_t N = 16;
+    const size_t K = 256;  // 8 blocks
+    const size_t nblocks = K / block;
+    std::vector<uint8_t> packed;
+    std::vector<float> scales, dequant;
+    BuildQuantWeights(N, K, block, rng, packed, scales, dequant);
+
+    std::uniform_real_distribution<float> adist(-1.5f, 1.5f);
+    std::vector<float> a(M * K);
+    for (auto& v : a) v = adist(rng);
+    std::vector<float> bias(N);
+    for (auto& v : bias) v = adist(rng);
+
+    std::vector<float> y(M * N, 0.0f);
+    std::string error;
+    Require(metal.MatMulNBitsI8(a.data(), packed.data(), scales.data(), bias.data(), y.data(), M, N,
+                                K, nblocks, error),
+            error);
+
+    for (size_t m = 0; m < M; ++m) {
+      // Scalar int8 CPU reference: per-block absmax quant of A (scale = absmax/127), int8 dot with
+      // (q-8), dequant by a_scale*w_scale, fp32 across blocks — matches the Metal kernel's math.
+      std::vector<float> ref_i8(N, 0.0f);
+      for (size_t b = 0; b < nblocks; ++b) {
+        float amax = 0.0f;
+        for (size_t e = 0; e < block; ++e) amax = std::max(amax, std::fabs(a[m * K + b * block + e]));
+        const float ascale = amax > 0.0f ? amax / 127.0f : 1.0f;
+        const float inv = amax > 0.0f ? 127.0f / amax : 0.0f;
+        int qa[32];
+        for (size_t e = 0; e < block; ++e) {
+          int q = static_cast<int>(std::rint(a[m * K + b * block + e] * inv));
+          qa[e] = std::max(-127, std::min(127, q));
+        }
+        for (size_t n = 0; n < N; ++n) {
+          const uint8_t* blk = packed.data() + (n * nblocks + b) * (block / 2);
+          int dot = 0;
+          for (size_t e = 0; e < block; ++e) {
+            const int wq = ((e & 1) ? (blk[e / 2] >> 4) : (blk[e / 2] & 0x0F)) - 8;
+            dot += qa[e] * wq;
+          }
+          ref_i8[n] += static_cast<float>(dot) * ascale * scales[n * nblocks + b];
+        }
+      }
+
+      for (size_t n = 0; n < N; ++n) {
+        const float got = y[m * N + n];
+        float ref_fp32 = bias[n];
+        for (size_t k = 0; k < K; ++k) ref_fp32 += a[m * K + k] * dequant[n * K + k];
+        const float expect_i8 = ref_i8[n] + bias[n];
+
+        // GPU int8 must match the CPU int8 reference (identical quantization scheme).
+        CheckNear(got, expect_i8, 5e-3f, "MatMulNBitsI8 vs cpu-int8 M=" + std::to_string(M));
+        worst_vs_cpu_i8 = std::max(worst_vs_cpu_i8, std::fabs(got - expect_i8));
+
+        // Quantify the intrinsic int8 quantization error against the fp32 reference. Use a combined
+        // atol+rtol bound (as ORT's accuracy_level=4 correctness is expressed): near-zero outputs
+        // are cancellation-dominated, so a pure relative error there is not meaningful.
+        const float abs_err = std::fabs(got - ref_fp32);
+        worst_abs = std::max(worst_abs, abs_err);
+        CheckNear(got, ref_fp32, 0.05f + 0.05f * std::fabs(ref_fp32),
+                  "MatMulNBitsI8 vs fp32 M=" + std::to_string(M));
+        if (std::fabs(ref_fp32) >= 0.1f) {
+          worst_rel = std::max(worst_rel, abs_err / std::fabs(ref_fp32));
+        }
+      }
+    }
+  }
+
+  // int8 activation quant (per-block absmax/127) keeps the relative error on non-tiny outputs well
+  // under a few percent here; the accuracy_level=4 tolerance the model was built for is looser.
+  Require(worst_rel < 0.05f,
+          "MatMulNBitsI8 worst-case relative error vs fp32 too high: " + std::to_string(worst_rel));
+  std::cout << "  MatMulNBitsI8: worst rel-err vs fp32 (|ref|>=0.1) = " << worst_rel
+            << ", worst abs-err vs fp32 = " << worst_abs
+            << ", worst |GPU-int8 - CPU-int8| = " << worst_vs_cpu_i8 << "\n";
+}
+
+}  // namespace
+
 int main() {
   try {
     std::string error;
     std::unique_ptr<ort_mps::MetalContext> metal = ort_mps::MetalContext::Create(error);
     Require(metal != nullptr, error);
     TestMatMulNBits(*metal);
+    TestMatMulNBitsInt8(*metal);
     TestRmsNorm(*metal);
     TestSkipSimplifiedLayerNorm(*metal);
     TestSoftmax(*metal);

@@ -861,9 +861,22 @@ OrtStatus* MarietteKernel::ComputeIO(KernelIO& io) {
       std::vector<int64_t> out_shape(a_shape);
       out_shape.back() = static_cast<int64_t>(N);
       IOTensor& out = io.Output(0, out_shape);
-      if (!metal_->MatMulNBitsF32(a_val.Data<float>(), static_cast<const uint8_t*>(b_dev_),
-                                  static_cast<const float*>(scales_dev_), bias,
-                                  out.MutableData<float>(), M, N, K, nblocks, err)) {
+      // Decode GEMV on the Apple GPU is weight-bandwidth-bound (both paths read the identical 4-bit
+      // packed weights — the dominant traffic), so the int8 dynamic-quant fast path that wins ~2.3x
+      // on the SDOT-compute-bound CPU (accuracy_level=4) does NOT win here: it adds activation-quant
+      // overhead + threadgroup-memory occupancy pressure without cutting the bottleneck (measured
+      // ~82 vs ~103 tok/s decode). Default therefore stays on fp32; set ONNX_GENAI_METAL_EP_MATMUL_INT8=1
+      // to select the int8 kernel (correctness-proven; useful for compute-bound / large-M regimes).
+      static const bool use_int8 = std::getenv("ONNX_GENAI_METAL_EP_MATMUL_INT8") != nullptr;
+      const bool ok =
+          use_int8
+              ? metal_->MatMulNBitsI8(a_val.Data<float>(), static_cast<const uint8_t*>(b_dev_),
+                                      static_cast<const float*>(scales_dev_), bias,
+                                      out.MutableData<float>(), M, N, K, nblocks, err)
+              : metal_->MatMulNBitsF32(a_val.Data<float>(), static_cast<const uint8_t*>(b_dev_),
+                                       static_cast<const float*>(scales_dev_), bias,
+                                       out.MutableData<float>(), M, N, K, nblocks, err);
+      if (!ok) {
         return ort_api_.CreateStatus(ORT_EP_FAIL, ("MetalEP MatMulNBits failed: " + err).c_str());
       }
       return nullptr;
