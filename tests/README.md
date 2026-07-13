@@ -3,10 +3,13 @@
 The EP is MLX-native (ONNX fused decoder subgraph → MLX graph, MLX as the sole compute path). Three
 suites run through CTest:
 
-- **`mlx_op_tests`** (`tests/ops/mlx_op_test.py`) — op-correctness: each ONNX decoder op the EP
+- **`mlx_op_tests`** (`tests/ops/`, pytest) — op-correctness: each ONNX decoder op the EP
   translates to MLX (MatMulNBits, GroupQueryAttention, RMSNormalization,
   SkipSimplifiedLayerNormalization, GatherBlockQuantized, Softmax, Add/Mul/Sub/Sigmoid/Cast) is run
-  through the plugin and compared, tolerance-gated, against ORT's CPU EP reference. Models are built
+  through the plugin and compared, tolerance-gated, against ORT's CPU EP reference (fp16 too) or a
+  numpy reference (bf16). Parametrized `pytest` (`test_mlx_ops.py` + `_models.py` builders); the EP
+  is registered once by `conftest.py` from `ONNXRUNTIME_MLX_EP_LIB`. Run standalone with
+  `ONNXRUNTIME_MLX_EP_LIB=build/libonnxruntime_mlx_ep.dylib pytest tests/ops`. Models are built
   with the ONNX IR (`onnx_ir`: `ir.Value`/`ir.Node`/`ir.Graph`/`ir.Model`), not `onnx.helper`.
 - **`mlx_e2e`** (`tests/e2e/e2e_test.cc`) — full-MLX prefill+decode coherence gate: the MetalEP token
   stream must match the ORT CPU reference ("The capital of France is Paris").

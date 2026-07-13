@@ -103,11 +103,11 @@ if(ORT_MLX_BUILD_TESTS)
   if(Python3_Interpreter_FOUND)
     get_filename_component(ORT_LIBRARY_DIR "${ORT_LIBRARY}" DIRECTORY)
     add_test(NAME mlx_op_tests
-      COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/ops/mlx_op_test.py
-        $<TARGET_FILE:onnxruntime_mlx_ep>)
+      COMMAND ${Python3_EXECUTABLE} -m pytest
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/ops -q)
     set_tests_properties(mlx_op_tests PROPERTIES
-      ENVIRONMENT "DYLD_LIBRARY_PATH=${ORT_LIBRARY_DIR}")
+      ENVIRONMENT
+        "DYLD_LIBRARY_PATH=${ORT_LIBRARY_DIR};ONNXRUNTIME_MLX_EP_LIB=$<TARGET_FILE:onnxruntime_mlx_ep>")
   endif()
 endif()
 

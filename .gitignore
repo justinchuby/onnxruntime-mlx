@@ -52,3 +52,23 @@ build/
 tests/e2e/prompt_tokens.txt
 build-mlx/
 .vscode/
+
+# --- Python (op tests, tooling) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+.eggs/
+dist/
+# Virtual environments
+.venv/
+venv/
+env/
+.python-version
