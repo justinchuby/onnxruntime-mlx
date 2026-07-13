@@ -9,6 +9,18 @@
 //     (#6 nonpad_kv_seqlen, opset 24); both share one impl and the claim rejects the nonpad form.
 //   * MultiHeadAttention (com.microsoft) — separate Q/K/V (B,S,D) with optional projection bias,
 //     unidirectional (causal), and custom scale.
+//   * RotaryEmbedding (ai.onnx opset 23 AND com.microsoft) — STANDALONE RoPE (not the in-op RoPE the
+//     GQA handler folds into attention). The two domains only reorder inputs: ai.onnx is
+//     [X, cos_cache, sin_cache, position_ids?] while com.microsoft is
+//     [input, position_ids, cos_cache, sin_cache]. Both apply the same rotate-half / interleaved
+//     rotation the ONNX reference defines (real = cos*x1 - sin*x2, imag = sin*x1 + cos*x2), reusing
+//     the primitive slice/mul/sub/add sequence GQA's in-op RoPE uses. mlx_fast_rope is NOT used: it
+//     synthesizes cos/sin from freqs+offset internally and cannot consume ONNX's explicit cos/sin
+//     cache indexed by arbitrary position_ids, so the cache-driven rotation is applied directly.
+//     Claimed forms: 3D (B,S,H*hd)+num_heads and 4D (B,N,S,hd) float input; per-position gather
+//     (position_ids [B,S]), the offset form (position_ids [1] -> positions offset+[0,S)), and (ai.onnx
+//     only) absent position_ids with a per-position [B,S,half] cache. Partial rotation is supported
+//     implicitly (rot = 2*cos_cache.last_dim; tail dims pass through unrotated).
 //
 // Every op honors the resolved input dtype (fp32/fp16/bf16). GQA head broadcast (q_num_heads a
 // multiple of kv_num_heads) is handled inside MLX SDPA, so K/V are passed with their own head count.
@@ -33,6 +45,21 @@
 //     single token axis, which MLX fast SDPA (dense [B,H,S,hd]) cannot express; detecting the
 //     single-sequence special case would need the runtime cumulative_sequence_length values, which
 //     are not available at claim time. It is left entirely to CPU.
+//
+// Assessed alongside this wave and deliberately left to ORT CPU (not cleanly expressible as a flat,
+// control-flow-free MLX op sequence — forcing them would risk a claimed-but-untranslatable HARD
+// failure, so they stay unclaimed and correct on CPU):
+//   * LinearAttention (com.microsoft) — chunked linear-attention recurrence with several update
+//     rules (linear / delta / gated) and a 4D recurrent state carried across chunks; not a single
+//     MLX op sequence (also noted in ssm_misc.cc).
+//   * MoE (com.microsoft) — fused mixture-of-experts (router top-k → per-expert gather/FFN/scatter →
+//     weighted combine). The token→expert routing depends on runtime gate values, so the
+//     gather/scatter pattern is data-dependent and cannot be lowered to a static MLX graph here.
+//   * LSTM (ai.onnx) — gated recurrent cell unrolled over a (dynamic) time axis; the flat NodeDesc
+//     plan is single-pass with no loop/control-flow primitive, so the time recurrence cannot be
+//     represented (an engine-level control-flow follow-up, same class as Scan).
+//   * Scan (ai.onnx) — carries a nested BODY subgraph the flat NodeDesc plan cannot represent (also
+//     noted in ssm_misc.cc); needs engine-level control-flow support.
 
 #include <cmath>
 #include <cstdint>
@@ -339,6 +366,165 @@ bool MultiHeadAttentionClaim(Ort::ConstNode node) {
   return true;
 }
 
+// ---- RotaryEmbedding (ai.onnx opset 23 / com.microsoft) -------------------------------------
+
+// Apply the RoPE rotation over the first rot (= 2*half) head dims of x4 [B,N,S,hd]; cos4/sin4 are
+// [Bc,1,S,half] (Bc == B for per-position gather, 1 for the offset/absent forms) and broadcast over
+// the head axis. Matches the ONNX RotaryEmbedding reference: real = cos*x1 - sin*x2,
+// imag = sin*x1 + cos*x2 (rotate-half OR interleaved), with tail dims [rot:hd] passed through.
+mlx_array RopeApply(TranslationContext& ctx, mlx_array x4, mlx_array cos4, mlx_array sin4, int half,
+                    bool interleaved) {
+  const std::vector<int> xs = TranslationContext::ShapeOf(x4);  // [B,N,S,hd]
+  const int B = xs[0], N = xs[1], S = xs[2], hd = xs[3];
+  const int rot = 2 * half;
+  mlx_array rotated;
+  if (!interleaved) {
+    mlx_array x1 = ctx.Slice(x4, {0, 0, 0, 0}, {B, N, S, half});
+    mlx_array x2 = ctx.Slice(x4, {0, 0, 0, half}, {B, N, S, rot});
+    mlx_array o1 = ctx.SubA(ctx.Mul(x1, cos4), ctx.Mul(x2, sin4));
+    mlx_array o2 = ctx.AddA(ctx.Mul(x1, sin4), ctx.Mul(x2, cos4));
+    rotated = ctx.Concat2(o1, o2, 3);
+  } else {
+    const int Bc = TranslationContext::ShapeOf(cos4)[0];
+    mlx_array xr = ctx.Reshape(ctx.Slice(x4, {0, 0, 0, 0}, {B, N, S, rot}), {B, N, S, half, 2});
+    mlx_array xe = ctx.Slice(xr, {0, 0, 0, 0, 0}, {B, N, S, half, 1});  // even lanes (x1)
+    mlx_array xo = ctx.Slice(xr, {0, 0, 0, 0, 1}, {B, N, S, half, 2});  // odd lanes (x2)
+    mlx_array c = ctx.Reshape(cos4, {Bc, 1, S, half, 1});
+    mlx_array sn = ctx.Reshape(sin4, {Bc, 1, S, half, 1});
+    mlx_array oe = ctx.SubA(ctx.Mul(xe, c), ctx.Mul(xo, sn));   // real -> even lanes
+    mlx_array oo = ctx.AddA(ctx.Mul(xe, sn), ctx.Mul(xo, c));   // imag -> odd lanes
+    rotated = ctx.Reshape(ctx.Concat2(oe, oo, 4), {B, N, S, rot});
+  }
+  if (rot == hd) return rotated;
+  mlx_array tail = ctx.Slice(x4, {0, 0, 0, rot}, {B, N, S, hd});
+  return ctx.Concat2(rotated, tail, 3);
+}
+
+// Build a [Bc,1,S,half] cos/sin tensor (broadcastable over heads) from a cos/sin cache. pos_rank < 0
+// = absent position_ids (cache is already [B,S,half]); pos_rank == 2 = per-position gather
+// (position_ids [B,S], Bc == B); otherwise the offset form (position_ids [1], positions offset+[0,S),
+// Bc == 1).
+mlx_array GatherCache(TranslationContext& ctx, mlx_array cache, mlx_array pos, int pos_rank, int S) {
+  if (pos_rank < 0) {
+    const std::vector<int> cs = TranslationContext::ShapeOf(cache);  // [B,S,half]
+    return ctx.Reshape(cache, {cs[0], 1, cs[1], cs[2]});
+  }
+  const int half = TranslationContext::ShapeOf(cache)[1];  // cache: [max_seq, half]
+  mlx_array idx;
+  int Bc;
+  if (pos_rank == 2) {
+    idx = ctx.Astype(pos, MLX_INT32);  // [B,S]
+    Bc = TranslationContext::ShapeOf(pos)[0];
+  } else {
+    mlx_array off = ctx.Astype(pos, MLX_INT32);  // [1]
+    mlx_array ar = mlx_array_new();
+    MLX_CHECK(mlx_arange(&ar, 0, S, 1, MLX_INT32, ctx.stream()));  // [S]
+    ctx.Keep(ar);
+    idx = ctx.AddA(off, ar);  // [S] = offset + [0,S)
+    Bc = 1;
+  }
+  mlx_array g = mlx_array_new();
+  MLX_CHECK(mlx_take_axis(&g, cache, idx, 0, ctx.stream()));  // [B,S,half] or [S,half]
+  ctx.Keep(g);
+  return ctx.Reshape(g, {Bc, 1, S, half});
+}
+
+// Standalone RoPE. Reshapes input to [B,N,S,hd], builds the per-position cos/sin, rotates, and
+// restores the input layout. Domain only changes the input ordering (see the file header).
+void RotaryEmbeddingOp(TranslationContext& ctx, const NodeDesc& n) {
+  const bool ms = n.domain == "com.microsoft";
+  const size_t ci = ms ? 2 : 1;
+  const size_t si = ms ? 3 : 2;
+  const size_t pi = ms ? 1 : 3;
+  const bool interleaved = n.ints.count("interleaved") && n.ints.at("interleaved") != 0;
+
+  mlx_array x = ctx.Resolve(n.inputs[0]);
+  const std::vector<int> xs = TranslationContext::ShapeOf(x);
+  const int rank = static_cast<int>(xs.size());
+
+  int B, N, S, hd;
+  mlx_array x4;
+  if (rank == 4) {
+    B = xs[0], N = xs[1], S = xs[2], hd = xs[3];
+    x4 = x;
+  } else {
+    B = xs[0], S = xs[1];
+    N = static_cast<int>(n.ints.at("num_heads"));
+    hd = xs[2] / N;
+    x4 = ctx.Transpose(ctx.Reshape(x, {B, S, N, hd}), {0, 2, 1, 3});  // [B,N,S,hd]
+  }
+
+  int pos_rank = -1;
+  mlx_array pos = mlx_array_empty;
+  if (pi < n.inputs.size() && n.inputs[pi].source != Src::Absent) {
+    pos = ctx.Resolve(n.inputs[pi]);
+    pos_rank = static_cast<int>(mlx_array_ndim(pos));
+  }
+
+  mlx_array cos4 = GatherCache(ctx, ctx.Resolve(n.inputs[ci]), pos, pos_rank, S);
+  mlx_array sin4 = GatherCache(ctx, ctx.Resolve(n.inputs[si]), pos, pos_rank, S);
+  const int half = TranslationContext::ShapeOf(cos4)[3];
+
+  mlx_array out4 = RopeApply(ctx, x4, cos4, sin4, half, interleaved);
+
+  if (rank == 4) {
+    ctx.Bind(n.outputs[0], out4);  // already [B,N,S,hd]
+  } else {
+    ctx.Bind(n.outputs[0], ctx.Reshape(ctx.Transpose(out4, {0, 2, 1, 3}), {B, S, N * hd}));
+  }
+}
+
+// RotaryEmbedding claim. Input ordering differs by domain (ai.onnx: X,cos,sin,pos?; com.microsoft:
+// input,pos,cos,sin). Claims float 3D (B,S,H*hd)+num_heads and 4D (B,N,S,hd) input with either a
+// [B,S] gather, a [1] offset, or (ai.onnx only) absent position_ids and a per-position [B,S,half]
+// cache. Non-float / rank-mismatched / other position_ids forms fall back to ORT CPU.
+bool RotaryEmbeddingClaim(Ort::ConstNode node) {
+  const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
+  const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
+  if (outputs.empty()) return false;
+
+  const bool ms = node.GetDomain() == "com.microsoft";
+  const size_t ci = ms ? 2 : 1;
+  const size_t si = ms ? 3 : 2;
+  const size_t pi = ms ? 1 : 3;
+  const size_t min_inputs = ms ? 4 : 3;
+  if (inputs.size() < min_inputs) return false;
+
+  ONNXTensorElementDataType xd, cd, sd, od;
+  std::vector<int64_t> xshape, cshape;
+  if (!TensorInfo(inputs[0], xd, &xshape) || !TensorInfo(inputs[ci], cd, &cshape) ||
+      !ClaimPresent(inputs, si) || !TensorInfo(inputs[si], sd) || !TensorInfo(outputs[0], od)) {
+    return false;
+  }
+  if (!IsMlxFloatType(xd) || cd != xd || sd != xd || od != xd) return false;
+
+  const int rank = static_cast<int>(xshape.size());
+  if (rank == 3) {
+    const int64_t nh = IntAttribute(node, "num_heads", 0);
+    if (nh <= 0 || xshape[2] <= 0 || xshape[2] % nh != 0) return false;
+  } else if (rank != 4) {
+    return false;
+  }
+
+  const bool has_pos = ClaimPresent(inputs, pi);
+  if (ms && !has_pos) return false;  // com.microsoft position_ids is mandatory
+  if (has_pos) {
+    ONNXTensorElementDataType pd;
+    std::vector<int64_t> pshape;
+    if (!TensorInfo(inputs[pi], pd, &pshape)) return false;
+    if (pd != ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 && pd != ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32) {
+      return false;
+    }
+    const bool gather = pshape.size() == 2;                       // position_ids [B,S] (either domain)
+    const bool offset = ms && pshape.size() == 1 && pshape[0] == 1;  // position_ids [1] (com.microsoft)
+    if (!gather && !offset) return false;
+    if (cshape.size() != 2) return false;  // gather/offset caches are [max_seq, half]
+  } else if (cshape.size() != 3) {
+    return false;  // absent form: cache must be per-position [B,S,half]
+  }
+  return true;
+}
+
 }  // namespace
 
 void RegisterAttentionExtOps(OpRegistry& registry) {
@@ -349,6 +535,11 @@ void RegisterAttentionExtOps(OpRegistry& registry) {
   registry.Register({"", "Attention", 24, kAnyOpset, &AttentionOp, &AttentionClaim});
   registry.Register({"com.microsoft", "MultiHeadAttention", kAnyOpset, kAnyOpset,
                      &MultiHeadAttentionOp, &MultiHeadAttentionClaim});
+  // RotaryEmbedding: standalone RoPE. ai.onnx entered at opset 23; com.microsoft is version-
+  // insensitive. Both share one handler/claim (the handler branches on n.domain for the input order).
+  registry.Register({"", "RotaryEmbedding", 23, kAnyOpset, &RotaryEmbeddingOp, &RotaryEmbeddingClaim});
+  registry.Register({"com.microsoft", "RotaryEmbedding", kAnyOpset, kAnyOpset, &RotaryEmbeddingOp,
+                     &RotaryEmbeddingClaim});
 }
 
 }  // namespace ort_mps_mlx
