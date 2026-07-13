@@ -121,8 +121,17 @@ class MetalContext {
   // weights with symmetric default zero-point 8. `b` is packed uint8 [N, nblocks, block_size/2],
   // `scales` is fp32 [N, nblocks]. Requires block_size == 32 (so K == nblocks*32). `bias` may be
   // nullptr. Returns false and sets `error` on failure.
+  //
+  // `variant` picks the Metal implementation:
+  //   * Auto  (default) — env-selected: bandwidth-optimized fp32 (VectorF32) unless
+  //     ONNX_GENAI_METAL_EP_MATMUL_SCALAR / _FP16 override it.
+  //   * Scalar    — reference byte-load kernel (`mps_matmulnbits_f32`).
+  //   * VectorF32 — uint4 wide-load, fp32 math (the default decode path).
+  //   * VectorF16 — uint4 wide-load, fp16 math (small extra quant error; higher ALU throughput).
+  enum class MatMulNBitsVariant { Auto, Scalar, VectorF32, VectorF16 };
   bool MatMulNBitsF32(const float* a, const uint8_t* b, const float* scales, const float* bias,
-                      float* y, size_t m, size_t n, size_t k, size_t nblocks, std::string& error);
+                      float* y, size_t m, size_t n, size_t k, size_t nblocks, std::string& error,
+                      MatMulNBitsVariant variant = MatMulNBitsVariant::Auto);
 
   // MatMulNBits int8 fast path (accuracy_level=4): dynamically quantizes the activation `a` to
   // int8 per K-block (symmetric absmax scale), then computes int8(activation)·int8(weight-8) dot

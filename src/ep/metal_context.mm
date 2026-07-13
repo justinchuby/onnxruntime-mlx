@@ -268,7 +268,8 @@ std::unique_ptr<MetalContext> MetalContext::Create(std::string& error) {
         "mps_gather_q4_i64_f16_zp", "mps_gather_q4_i32_f16_zp",
         "mps_copy_bytes",       "mps_transpose_bytes",  "mps_concat_slice_bytes",
         // Mariette core-compute kernels.
-        "mps_matmulnbits_f32",  "mps_matmulnbits_i8",
+        "mps_matmulnbits_f32",  "mps_matmulnbits_f32_v", "mps_matmulnbits_f16_v",
+        "mps_matmulnbits_i8",
         "mps_rmsnorm_f32",
         "mps_skip_simplified_layernorm_f32", "mps_softmax_f32",
         "mps_gqa_write_kv_f32", "mps_gqa_attention_f32",
@@ -898,7 +899,8 @@ static bool RunPass(MetalContext::Impl& impl, const char* pipeline_name,
 
 bool MetalContext::MatMulNBitsF32(const float* a, const uint8_t* b, const float* scales,
                                   const float* bias, float* y, size_t m, size_t n, size_t k,
-                                  size_t nblocks, std::string& error) {
+                                  size_t nblocks, std::string& error,
+                                  MatMulNBitsVariant variant) {
   @autoreleasepool {
     if (m == 0 || n == 0) {
       return true;
@@ -929,8 +931,30 @@ bool MetalContext::MatMulNBitsF32(const float* a, const uint8_t* b, const float*
     std::vector<BytesArg> consts = {{&M, sizeof(M)}, {&N, sizeof(N)}, {&K, sizeof(K)},
                                     {&NB, sizeof(NB)}, {&has_bias, sizeof(has_bias)}};
     MTLSize grid = MTLSizeMake(n * 32, m, 1);        // one simdgroup (32 lanes) per output column
-    MTLSize tg = MTLSizeMake(256, 1, 1);             // 8 columns per threadgroup
-    return RunPass(impl, "mps_matmulnbits_f32", bufs, consts, grid, tg, /*by_threadgroups=*/false,
+    // Threadgroup width = (columns per threadgroup)*32. 256 (=8 columns) is the tuned default;
+    // ONNX_GENAI_METAL_EP_MATMUL_TG overrides it for occupancy sweeps.
+    static const NSUInteger tg_width = []() -> NSUInteger {
+      const char* e = std::getenv("ONNX_GENAI_METAL_EP_MATMUL_TG");
+      NSUInteger w = e != nullptr ? static_cast<NSUInteger>(std::atoi(e)) : 256;
+      if (w < 32 || (w % 32) != 0) w = 256;
+      return w;
+    }();
+    MTLSize tg = MTLSizeMake(tg_width, 1, 1);
+    // Default to the bandwidth-optimized uint4-wide-load kernel. The scalar byte-load kernel
+    // (`mps_matmulnbits_f32`) is kept as the correctness reference (force via
+    // ONNX_GENAI_METAL_EP_MATMUL_SCALAR=1); the fp16-math variant via
+    // ONNX_GENAI_METAL_EP_MATMUL_FP16=1. An explicit `variant` argument overrides the env.
+    static const bool force_scalar = std::getenv("ONNX_GENAI_METAL_EP_MATMUL_SCALAR") != nullptr;
+    static const bool use_fp16 = std::getenv("ONNX_GENAI_METAL_EP_MATMUL_FP16") != nullptr;
+    if (variant == MatMulNBitsVariant::Auto) {
+      variant = force_scalar ? MatMulNBitsVariant::Scalar
+                : use_fp16   ? MatMulNBitsVariant::VectorF16
+                             : MatMulNBitsVariant::VectorF32;
+    }
+    const char* pipeline = variant == MatMulNBitsVariant::Scalar     ? "mps_matmulnbits_f32"
+                           : variant == MatMulNBitsVariant::VectorF16 ? "mps_matmulnbits_f16_v"
+                                                                      : "mps_matmulnbits_f32_v";
+    return RunPass(impl, pipeline, bufs, consts, grid, tg, /*by_threadgroups=*/false,
                    error);
   }
 }

@@ -64,12 +64,15 @@ void BuildQuantWeights(size_t N, size_t K, size_t block, std::mt19937& rng,
 }
 
 void TestMatMulNBits(ort_mps::MetalContext& metal) {
+  using Variant = ort_mps::MetalContext::MatMulNBitsVariant;
   std::mt19937 rng(1234);
   const size_t block = 32;
-  // Two shapes: a decode GEMV (M=1) and a small prefill GEMM (M>1).
-  for (const size_t M : {size_t(1), size_t(3)}) {
-    const size_t N = 8;
-    const size_t K = 64;  // 2 blocks
+  // Shapes: a decode GEMV (M=1) and a small prefill GEMM (M>1), at two K sizes. K=64 is 2 blocks
+  // (few active lanes); K=1088 is 34 blocks, which is > the 32-lane simdgroup and not a multiple of
+  // it — this exercises the vectorized kernel's `b += 32` block-stride loop and its ragged tail.
+  struct Shape { size_t M, N, K; };
+  for (const Shape& sh : {Shape{1, 8, 64}, Shape{3, 8, 64}, Shape{1, 8, 1088}, Shape{2, 16, 1088}}) {
+    const size_t M = sh.M, N = sh.N, K = sh.K;
     std::vector<uint8_t> packed;
     std::vector<float> scales, dequant;
     BuildQuantWeights(N, K, block, rng, packed, scales, dequant);
@@ -80,17 +83,34 @@ void TestMatMulNBits(ort_mps::MetalContext& metal) {
     std::vector<float> bias(N);
     for (auto& v : bias) v = adist(rng);
 
-    std::vector<float> y(M * N, 0.0f);
-    std::string error;
-    Require(metal.MatMulNBitsF32(a.data(), packed.data(), scales.data(), bias.data(), y.data(), M,
-                                 N, K, K / block, error),
-            error);
-
-    for (size_t m = 0; m < M; ++m) {
-      for (size_t n = 0; n < N; ++n) {
-        float ref = bias[n];
-        for (size_t k = 0; k < K; ++k) ref += a[m * K + k] * dequant[n * K + k];
-        CheckNear(y[m * N + n], ref, 1e-3f, "MatMulNBits M=" + std::to_string(M));
+    // The scalar byte-load kernel and the bandwidth-optimized uint4 kernel must both match the
+    // fp32 CPU reference tightly; the fp16-math variant carries a small extra quantization error
+    // which we quantify against the same reference and bound with an fp16-aware tolerance.
+    struct Case { Variant variant; float tol; const char* tag; };
+    const Case cases[] = {
+        {Variant::Scalar, 1e-3f, "scalar"},
+        {Variant::VectorF32, 1e-3f, "vec-f32"},
+        {Variant::VectorF16, 5e-2f, "vec-f16"},
+    };
+    for (const Case& c : cases) {
+      std::vector<float> y(M * N, 0.0f);
+      std::string error;
+      Require(metal.MatMulNBitsF32(a.data(), packed.data(), scales.data(), bias.data(), y.data(), M,
+                                   N, K, K / block, error, c.variant),
+              error);
+      float worst = 0.0f;
+      for (size_t m = 0; m < M; ++m) {
+        for (size_t n = 0; n < N; ++n) {
+          float ref = bias[n];
+          for (size_t k = 0; k < K; ++k) ref += a[m * K + k] * dequant[n * K + k];
+          worst = std::max(worst, std::fabs(y[m * N + n] - ref));
+          CheckNear(y[m * N + n], ref, c.tol,
+                    std::string("MatMulNBits ") + c.tag + " M=" + std::to_string(M) +
+                        " K=" + std::to_string(K));
+        }
+      }
+      if (c.variant == Variant::VectorF16 && M == 1 && K == 1088) {
+        std::cout << "  MatMulNBits vec-f16: worst abs-err vs fp32 (K=1088) = " << worst << "\n";
       }
     }
   }

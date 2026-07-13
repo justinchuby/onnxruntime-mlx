@@ -66,6 +66,134 @@ kernel void mps_matmulnbits_f32(device const float*   A       [[buffer(0)]],
 }
 
 // ---------------------------------------------------------------------------
+// Bandwidth-optimized decode GEMV (M=1 default; also correct for M>1).
+//
+// Decode is weight-bandwidth-bound: each of the 169 nodes streams its full packed
+// int4 weight matrix once per token (~350 MB/token total), doing tiny math per byte.
+// The scalar `mps_matmulnbits_f32` above reads the weights one byte at a time, with
+// two adjacent simd lanes hitting the SAME byte — narrow (8-bit) loads and only
+// 16 bytes of weight moved per simdgroup per loop step.
+//
+// This kernel maximizes achieved weight bandwidth instead:
+//   * Each simd lane owns a WHOLE 32-element block and loads its 16 packed bytes in
+//     a single **uint4** (128-bit) transaction. The 32 lanes of a simdgroup thus read
+//     32 consecutive blocks = **512 contiguous bytes** per step — one wide, fully
+//     coalesced burst (the layout llama.cpp's `kernel_mul_mv_*` relies on), with no
+//     redundant loads and no byte-granularity accesses.
+//   * A lane strides `nblocks` in steps of 32, so consecutive lanes always read
+//     consecutive blocks (contiguous addresses => coalesced cache-line fills).
+//   * Activations for a block are read as float4 (also 128-bit, aligned since
+//     block_size==32 and K is a multiple of 32).
+//   * One `simd_sum` at the very end reduces the 32 lanes' partials (each lane summed
+//     the complete blocks it owned) into the output — no per-block reduction.
+// Accumulation stays fp32 to hold the ORT CPU reference tolerance on long-K reductions.
+kernel void mps_matmulnbits_f32_v(device const float*  A       [[buffer(0)]],
+                                  device const uchar*  B       [[buffer(1)]],
+                                  device const float*  scales  [[buffer(2)]],
+                                  device float*        Y       [[buffer(3)]],
+                                  device const float*  bias    [[buffer(4)]],
+                                  constant uint&       M       [[buffer(5)]],
+                                  constant uint&       N       [[buffer(6)]],
+                                  constant uint&       K       [[buffer(7)]],
+                                  constant uint&       nblocks [[buffer(8)]],
+                                  constant uint&       has_bias[[buffer(9)]],
+                                  uint2 gid  [[thread_position_in_grid]],
+                                  uint  lane [[thread_index_in_simdgroup]]) {
+  const uint n = gid.x / 32u;   // output column (one per simdgroup)
+  const uint m = gid.y;         // output row
+  if (n >= N || m >= M) {
+    return;
+  }
+
+  // Column-major packed weights: [nblocks][16 bytes]; 16-byte aligned per column => uint4-safe.
+  device const uint4* wcol = reinterpret_cast<device const uint4*>(B + (ulong)n * nblocks * 16u);
+  device const float* srow = scales + (ulong)n * nblocks;
+  device const float* arow = A + (ulong)m * K;
+
+  float acc = 0.0f;
+  for (uint b = lane; b < nblocks; b += 32u) {
+    const uint4 packed = wcol[b];              // whole 32-element block, one 128-bit load
+    const float scale = srow[b];
+    device const float4* a4 = reinterpret_cast<device const float4*>(arow + b * 32u);
+
+    float blk = 0.0f;
+    // 4 packed uints, each holding 8 int4 lanes; nibble j (bits j*4) => within-block index k0+j.
+    for (uint u = 0; u < 4u; ++u) {
+      const uint word = packed[u];
+      const float4 av0 = a4[u * 2u];           // activations k0+0..k0+3
+      const float4 av1 = a4[u * 2u + 1u];      // activations k0+4..k0+7
+      const float4 w0 = float4(float((word >>  0u) & 0xFu), float((word >>  4u) & 0xFu),
+                               float((word >>  8u) & 0xFu), float((word >> 12u) & 0xFu)) - 8.0f;
+      const float4 w1 = float4(float((word >> 16u) & 0xFu), float((word >> 20u) & 0xFu),
+                               float((word >> 24u) & 0xFu), float((word >> 28u) & 0xFu)) - 8.0f;
+      blk += dot(av0, w0) + dot(av1, w1);
+    }
+    acc += blk * scale;
+  }
+
+  const float sum = simd_sum(acc);
+  if (lane == 0) {
+    Y[(ulong)m * N + n] = has_bias ? (sum + bias[n]) : sum;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// fp16-math variant of the bandwidth-optimized GEMV: identical wide uint4 weight
+// loads, but the activation is converted to half and the multiply is done in half
+// (native M-series fp16 ALU throughput, halved register/vector pressure), with the
+// per-block partial promoted to fp32 for the cross-block reduction. Weight bytes are
+// byte-identical to the fp32 path (the dominant traffic is unchanged); this only
+// speeds the ALU and shrinks the activation vector registers. Selectable via
+// ONNX_GENAI_METAL_EP_MATMUL_FP16 for the small-accuracy / higher-throughput regime.
+kernel void mps_matmulnbits_f16_v(device const float*  A       [[buffer(0)]],
+                                  device const uchar*  B       [[buffer(1)]],
+                                  device const float*  scales  [[buffer(2)]],
+                                  device float*        Y       [[buffer(3)]],
+                                  device const float*  bias    [[buffer(4)]],
+                                  constant uint&       M       [[buffer(5)]],
+                                  constant uint&       N       [[buffer(6)]],
+                                  constant uint&       K       [[buffer(7)]],
+                                  constant uint&       nblocks [[buffer(8)]],
+                                  constant uint&       has_bias[[buffer(9)]],
+                                  uint2 gid  [[thread_position_in_grid]],
+                                  uint  lane [[thread_index_in_simdgroup]]) {
+  const uint n = gid.x / 32u;
+  const uint m = gid.y;
+  if (n >= N || m >= M) {
+    return;
+  }
+
+  device const uint4* wcol = reinterpret_cast<device const uint4*>(B + (ulong)n * nblocks * 16u);
+  device const float* srow = scales + (ulong)n * nblocks;
+  device const float* arow = A + (ulong)m * K;
+
+  float acc = 0.0f;
+  for (uint b = lane; b < nblocks; b += 32u) {
+    const uint4 packed = wcol[b];
+    const float scale = srow[b];
+    device const float4* a4 = reinterpret_cast<device const float4*>(arow + b * 32u);
+
+    half blk = 0.0h;
+    for (uint u = 0; u < 4u; ++u) {
+      const uint word = packed[u];
+      const half4 av0 = half4(a4[u * 2u]);
+      const half4 av1 = half4(a4[u * 2u + 1u]);
+      const half4 w0 = half4(half((word >>  0u) & 0xFu), half((word >>  4u) & 0xFu),
+                             half((word >>  8u) & 0xFu), half((word >> 12u) & 0xFu)) - 8.0h;
+      const half4 w1 = half4(half((word >> 16u) & 0xFu), half((word >> 20u) & 0xFu),
+                             half((word >> 24u) & 0xFu), half((word >> 28u) & 0xFu)) - 8.0h;
+      blk += dot(av0, w0) + dot(av1, w1);
+    }
+    acc += float(blk) * scale;                 // promote per-block partial; fp32 across blocks
+  }
+
+  const float sum = simd_sum(acc);
+  if (lane == 0) {
+    Y[(ulong)m * N + n] = has_bias ? (sum + bias[n]) : sum;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // int8 dynamic-quant fast path (accuracy_level=4). This is the same numerical
 // scheme ORT's CPU MatMulNBits uses at accuracy_level=4 (which won 2.3x on ARM
 // via SDOT) and mirrors llama.cpp's Metal `mul_mv_q` matvec kernels: dynamically
