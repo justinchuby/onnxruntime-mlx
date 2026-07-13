@@ -6,7 +6,8 @@ suites run through CTest:
 - **`mlx_op_tests`** (`tests/ops/mlx_op_test.py`) — op-correctness: each ONNX decoder op the EP
   translates to MLX (MatMulNBits, GroupQueryAttention, RMSNormalization,
   SkipSimplifiedLayerNormalization, GatherBlockQuantized, Softmax, Add/Mul/Sub/Sigmoid/Cast) is run
-  through the plugin and compared, tolerance-gated, against ORT's CPU EP reference.
+  through the plugin and compared, tolerance-gated, against ORT's CPU EP reference. Models are built
+  with the ONNX IR (`onnx_ir`: `ir.Value`/`ir.Node`/`ir.Graph`/`ir.Model`), not `onnx.helper`.
 - **`mlx_e2e`** (`tests/e2e/e2e_test.cc`) — full-MLX prefill+decode coherence gate: the MetalEP token
   stream must match the ORT CPU reference ("The capital of France is Paris").
 - **`mlx_leak_test`** (`tests/e2e/leak_test.mm`) — memory-leak regression (below).

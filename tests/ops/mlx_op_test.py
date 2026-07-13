@@ -5,12 +5,14 @@ Each ONNX decoder op we translate to MLX is run through the plugin ("MetalEP") a
 tolerance-gated, against ORT's CPU EP reference. MLX is the SOLE compute path — there are no
 hand-written Metal kernels — so this suite validates the ONNX->MLX translation in mlx_backend.cc.
 
-Only ops the EP CLAIMS (see ep.cc CocoClaimable/MarietteClaimable/AddClaimable) and the MLX
-translator supports (see mlx_backend.cc Supported()) are exercised here: MatMulNBits,
-GroupQueryAttention (rope in-op), RMSNormalization, SkipSimplifiedLayerNormalization,
-GatherBlockQuantized, Softmax, Add, Mul, Sub, Sigmoid, Cast. Ops the EP no longer claims
-(Div, Gelu, RotaryEmbedding, Reshape, Transpose, Concat) are intentionally NOT tested: they
-fall back to ORT CPU and would only compare CPU-vs-CPU.
+Models are constructed with the ONNX IR (``onnx_ir``: ``ir.Value`` / ``ir.Node`` / ``ir.Graph`` /
+``ir.Model``), not ``onnx.helper``.
+
+Only ops the EP CLAIMS and the MLX translator supports (see mlx_backend.cc ``Supported()``) are
+exercised here: MatMulNBits, GroupQueryAttention (rope in-op), RMSNormalization,
+SkipSimplifiedLayerNormalization, GatherBlockQuantized, Softmax, Add, Mul, Sub, Sigmoid, Cast.
+Ops the EP no longer claims (Div, Gelu, RotaryEmbedding, Reshape, Transpose, Concat) are
+intentionally NOT tested: they fall back to ORT CPU and would only compare CPU-vs-CPU.
 """
 
 from __future__ import annotations
@@ -19,36 +21,50 @@ import os
 import sys
 
 import numpy as np
-import onnx
+import onnx_ir as ir
 import onnxruntime as ort
-from onnx import TensorProto, helper
+
+DataType = ir.DataType
+
+
+def tensor(name: str, dtype: ir.DataType, shape: list[int]) -> ir.Value:
+    """A named, typed, shaped IR value — used for graph inputs and outputs."""
+    return ir.Value(name=name, type=ir.TensorType(dtype), shape=ir.Shape(shape))
+
+
+def _attr(name: str, value: object) -> ir.Attr:
+    # bool is a subclass of int, but no boolean attributes are used here.
+    if isinstance(value, float):
+        return ir.AttrFloat32(name, value)
+    if isinstance(value, int):
+        return ir.AttrInt64(name, int(value))
+    raise TypeError(f"unsupported attribute type for {name!r}: {type(value)!r}")
 
 
 def make_model(
     op_type: str,
-    inputs: list[onnx.ValueInfoProto],
-    outputs: list[onnx.ValueInfoProto],
+    inputs: list[ir.Value],
+    outputs: list[ir.Value],
     *,
     domain: str = "",
     attributes: dict[str, object] | None = None,
     opset: int = 24,
 ) -> bytes:
-    node = helper.make_node(
+    node = ir.Node(
+        domain,
         op_type,
-        [value.name for value in inputs],
-        [value.name for value in outputs],
-        domain=domain,
-        **(attributes or {}),
+        inputs,
+        attributes=[_attr(k, v) for k, v in (attributes or {}).items()],
+        outputs=outputs,
     )
-    imports = [helper.make_opsetid("", opset)]
+    opset_imports = {"": opset}
     if domain:
-        imports.append(helper.make_opsetid(domain, 1))
-    model = helper.make_model(
-        helper.make_graph([node], f"mlx_{op_type}", inputs, outputs),
-        opset_imports=imports,
+        opset_imports[domain] = 1
+    graph = ir.Graph(
+        inputs, outputs, nodes=[node], name=f"mlx_{op_type}", opset_imports=opset_imports
     )
-    model.ir_version = 11
-    return model.SerializeToString()
+    model = ir.Model(graph, ir_version=11)
+    return ir.to_proto(model).SerializeToString()
 
 
 def compare(
@@ -74,10 +90,6 @@ def compare(
             got, want, rtol=rtol, atol=atol, err_msg=f"{name} output {index}"
         )
     print(f"PASS {name}")
-
-
-def tensor(name: str, dtype: int, shape: list[int]) -> onnx.ValueInfoProto:
-    return helper.make_tensor_value_info(name, dtype, shape)
 
 
 def rotary_caches(max_seq: int, rotary_dim: int) -> tuple[np.ndarray, np.ndarray]:
@@ -122,20 +134,20 @@ def gqa_case(
         "rotary_interleaved": interleaved,
     }
     inputs = [
-        tensor("query", TensorProto.FLOAT, [batch, seq, num_heads * head]),
-        tensor("key", TensorProto.FLOAT, [batch, seq, kv_heads * head]),
-        tensor("value", TensorProto.FLOAT, [batch, seq, kv_heads * head]),
-        tensor("past_key", TensorProto.FLOAT, [batch, kv_heads, past, head]),
-        tensor("past_value", TensorProto.FLOAT, [batch, kv_heads, past, head]),
-        tensor("seqlens_k", TensorProto.INT32, [batch]),
-        tensor("total_sequence_length", TensorProto.INT32, [1]),
-        tensor("cos_cache", TensorProto.FLOAT, [max_seq, head // 2]),
-        tensor("sin_cache", TensorProto.FLOAT, [max_seq, head // 2]),
+        tensor("query", DataType.FLOAT, [batch, seq, num_heads * head]),
+        tensor("key", DataType.FLOAT, [batch, seq, kv_heads * head]),
+        tensor("value", DataType.FLOAT, [batch, seq, kv_heads * head]),
+        tensor("past_key", DataType.FLOAT, [batch, kv_heads, past, head]),
+        tensor("past_value", DataType.FLOAT, [batch, kv_heads, past, head]),
+        tensor("seqlens_k", DataType.INT32, [batch]),
+        tensor("total_sequence_length", DataType.INT32, [1]),
+        tensor("cos_cache", DataType.FLOAT, [max_seq, head // 2]),
+        tensor("sin_cache", DataType.FLOAT, [max_seq, head // 2]),
     ]
     outputs = [
-        tensor("attn_output", TensorProto.FLOAT, [batch, seq, num_heads * head]),
-        tensor("present_key", TensorProto.FLOAT, [batch, kv_heads, present, head]),
-        tensor("present_value", TensorProto.FLOAT, [batch, kv_heads, present, head]),
+        tensor("attn_output", DataType.FLOAT, [batch, seq, num_heads * head]),
+        tensor("present_key", DataType.FLOAT, [batch, kv_heads, present, head]),
+        tensor("present_value", DataType.FLOAT, [batch, kv_heads, present, head]),
     ]
     feeds = {
         "query": q,
@@ -182,13 +194,13 @@ def matmulnbits_case(name: str, *, M: int, K: int, N: int, block: int = 32) -> N
     n_blocks = (K + block - 1) // block
     # Packed int4: [N, n_blocks, block/2] uint8, two nibbles per byte.
     b = rng.integers(0, 256, size=(N, n_blocks, block // 2), dtype=np.uint8)
-    scales = (rng.standard_normal((N * n_blocks,)).astype(np.float32) * 0.05)
+    scales = rng.standard_normal((N * n_blocks,)).astype(np.float32) * 0.05
     inputs = [
-        tensor("a", TensorProto.FLOAT, [1, M, K]),
-        tensor("b", TensorProto.UINT8, [N, n_blocks, block // 2]),
-        tensor("scales", TensorProto.FLOAT, [N * n_blocks]),
+        tensor("a", DataType.FLOAT, [1, M, K]),
+        tensor("b", DataType.UINT8, [N, n_blocks, block // 2]),
+        tensor("scales", DataType.FLOAT, [N * n_blocks]),
     ]
-    outputs = [tensor("out", TensorProto.FLOAT, [1, M, N])]
+    outputs = [tensor("out", DataType.FLOAT, [1, M, N])]
     compare(
         name,
         make_model(
@@ -210,10 +222,10 @@ def rmsnorm_case(name: str, *, rows: int, hidden: int) -> None:
     x = rng.standard_normal((1, rows, hidden)).astype(np.float32)
     scale = rng.standard_normal((hidden,)).astype(np.float32)
     inputs = [
-        tensor("x", TensorProto.FLOAT, [1, rows, hidden]),
-        tensor("scale", TensorProto.FLOAT, [hidden]),
+        tensor("x", DataType.FLOAT, [1, rows, hidden]),
+        tensor("scale", DataType.FLOAT, [hidden]),
     ]
-    outputs = [tensor("out", TensorProto.FLOAT, [1, rows, hidden])]
+    outputs = [tensor("out", DataType.FLOAT, [1, rows, hidden])]
     compare(
         name,
         make_model(
@@ -233,33 +245,23 @@ def skip_simplified_layernorm_case(name: str, *, rows: int, hidden: int) -> None
     x = rng.standard_normal((1, rows, hidden)).astype(np.float32)
     skip = rng.standard_normal((1, rows, hidden)).astype(np.float32)
     gamma = rng.standard_normal((hidden,)).astype(np.float32)
-    # SkipSimplifiedLayerNormalization emits 4 outputs; only output 0 (and the summed input,
-    # output 3) are consumed by the decoder. Compare output 0 only for robustness.
-    node = helper.make_node(
-        "SkipSimplifiedLayerNormalization",
-        ["x", "skip", "gamma"],
-        ["out"],
-        domain="com.microsoft",
-        epsilon=1e-6,
-    )
-    graph = helper.make_graph(
-        [node],
-        f"mlx_{name}",
-        [
-            tensor("x", TensorProto.FLOAT, [1, rows, hidden]),
-            tensor("skip", TensorProto.FLOAT, [1, rows, hidden]),
-            tensor("gamma", TensorProto.FLOAT, [hidden]),
-        ],
-        [tensor("out", TensorProto.FLOAT, [1, rows, hidden])],
-    )
-    model = helper.make_model(
-        graph,
-        opset_imports=[helper.make_opsetid("", 24), helper.make_opsetid("com.microsoft", 1)],
-    )
-    model.ir_version = 11
+    # SkipSimplifiedLayerNormalization emits up to 4 outputs; only output 0 (the normed result)
+    # is compared here for robustness — declaring a single output makes the trailing ones optional.
+    inputs = [
+        tensor("x", DataType.FLOAT, [1, rows, hidden]),
+        tensor("skip", DataType.FLOAT, [1, rows, hidden]),
+        tensor("gamma", DataType.FLOAT, [hidden]),
+    ]
+    outputs = [tensor("out", DataType.FLOAT, [1, rows, hidden])]
     compare(
         name,
-        model.SerializeToString(),
+        make_model(
+            "SkipSimplifiedLayerNormalization",
+            inputs,
+            outputs,
+            domain="com.microsoft",
+            attributes={"epsilon": 1e-6},
+        ),
         {"x": x, "skip": skip, "gamma": gamma},
         rtol=2e-3,
         atol=2e-3,
@@ -275,36 +277,45 @@ def main() -> int:
     # --- Elementwise (fp32/fp16/int64) ----------------------------------------------------------
     a = np.array([[1.0, -2.0, 3.0], [4.0, 5.0, -6.0]], dtype=np.float32)
     b = np.array([2.0, -4.0, 0.5], dtype=np.float32)
-    binary_inputs = [
-        tensor("a", TensorProto.FLOAT, [2, 3]),
-        tensor("b", TensorProto.FLOAT, [3]),
-    ]
-    binary_output = [tensor("out", TensorProto.FLOAT, [2, 3])]
+    # IR values are graph-bound, so build fresh inputs/outputs for each model.
     for op in ("Mul", "Sub"):  # fp32 Add is covered by the residual-add pattern below
-        compare(op, make_model(op, binary_inputs, binary_output), {"a": a, "b": b})
+        compare(
+            op,
+            make_model(
+                op,
+                [tensor("a", DataType.FLOAT, [2, 3]), tensor("b", DataType.FLOAT, [3])],
+                [tensor("out", DataType.FLOAT, [2, 3])],
+            ),
+            {"a": a, "b": b},
+        )
 
     compare(
         "Add fp32",
         make_model(
             "Add",
-            [tensor("a", TensorProto.FLOAT, [2, 3]), tensor("b", TensorProto.FLOAT, [2, 3])],
-            [tensor("out", TensorProto.FLOAT, [2, 3])],
+            [tensor("a", DataType.FLOAT, [2, 3]), tensor("b", DataType.FLOAT, [2, 3])],
+            [tensor("out", DataType.FLOAT, [2, 3])],
         ),
         {"a": a, "b": a * 0.5},
     )
 
-    unary_input = [tensor("x", TensorProto.FLOAT, [2, 3])]
-    unary_output = [tensor("out", TensorProto.FLOAT, [2, 3])]
-    compare("Sigmoid", make_model("Sigmoid", unary_input, unary_output), {"x": a})
+    compare(
+        "Sigmoid",
+        make_model(
+            "Sigmoid",
+            [tensor("x", DataType.FLOAT, [2, 3])],
+            [tensor("out", DataType.FLOAT, [2, 3])],
+        ),
+        {"x": a},
+    )
 
-    add16_inputs = [
-        tensor("a", TensorProto.FLOAT16, [2, 3]),
-        tensor("b", TensorProto.FLOAT16, [3]),
-    ]
-    add16_output = [tensor("out", TensorProto.FLOAT16, [2, 3])]
     compare(
         "Add fp16",
-        make_model("Add", add16_inputs, add16_output),
+        make_model(
+            "Add",
+            [tensor("a", DataType.FLOAT16, [2, 3]), tensor("b", DataType.FLOAT16, [3])],
+            [tensor("out", DataType.FLOAT16, [2, 3])],
+        ),
         {"a": a.astype(np.float16), "b": b.astype(np.float16)},
         rtol=2e-3,
         atol=2e-3,
@@ -314,9 +325,9 @@ def main() -> int:
         "Cast fp32->fp16",
         make_model(
             "Cast",
-            [tensor("x", TensorProto.FLOAT, [2, 3])],
-            [tensor("out", TensorProto.FLOAT16, [2, 3])],
-            attributes={"to": TensorProto.FLOAT16},
+            [tensor("x", DataType.FLOAT, [2, 3])],
+            [tensor("out", DataType.FLOAT16, [2, 3])],
+            attributes={"to": int(DataType.FLOAT16)},
         ),
         {"x": a},
         rtol=0,
@@ -326,9 +337,9 @@ def main() -> int:
         "Cast fp16->fp32",
         make_model(
             "Cast",
-            [tensor("x", TensorProto.FLOAT16, [2, 3])],
-            [tensor("out", TensorProto.FLOAT, [2, 3])],
-            attributes={"to": TensorProto.FLOAT},
+            [tensor("x", DataType.FLOAT16, [2, 3])],
+            [tensor("out", DataType.FLOAT, [2, 3])],
+            attributes={"to": int(DataType.FLOAT)},
         ),
         {"x": a.astype(np.float16)},
         rtol=0,
@@ -339,8 +350,8 @@ def main() -> int:
         "Sub int64 scalar",
         make_model(
             "Sub",
-            [tensor("a", TensorProto.INT64, [3]), tensor("b", TensorProto.INT64, [])],
-            [tensor("out", TensorProto.INT64, [3])],
+            [tensor("a", DataType.INT64, [3]), tensor("b", DataType.INT64, [])],
+            [tensor("out", DataType.INT64, [3])],
         ),
         {"a": np.array([5, -2, 9], dtype=np.int64), "b": np.array(3, dtype=np.int64)},
         rtol=0,
@@ -352,8 +363,8 @@ def main() -> int:
         "Softmax",
         make_model(
             "Softmax",
-            [tensor("x", TensorProto.FLOAT, [2, 5])],
-            [tensor("out", TensorProto.FLOAT, [2, 5])],
+            [tensor("x", DataType.FLOAT, [2, 5])],
+            [tensor("out", DataType.FLOAT, [2, 5])],
             attributes={"axis": -1},
         ),
         {"x": np.random.default_rng(1).standard_normal((2, 5)).astype(np.float32)},
@@ -371,11 +382,11 @@ def main() -> int:
         make_model(
             "GatherBlockQuantized",
             [
-                tensor("data", TensorProto.UINT8, [2, 16]),
-                tensor("indices", TensorProto.INT64, [2]),
-                tensor("scales", TensorProto.FLOAT, [2, 2]),
+                tensor("data", DataType.UINT8, [2, 16]),
+                tensor("indices", DataType.INT64, [2]),
+                tensor("scales", DataType.FLOAT, [2, 2]),
             ],
-            [tensor("out", TensorProto.FLOAT, [2, 32])],
+            [tensor("out", DataType.FLOAT, [2, 32])],
             domain="com.microsoft",
             attributes={"bits": 4, "block_size": 16, "gather_axis": 0, "quantize_axis": 1},
         ),
