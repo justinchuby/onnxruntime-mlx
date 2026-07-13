@@ -131,3 +131,35 @@ if(ORT_MPS_BUILD_TESTS)
       ENVIRONMENT "DYLD_LIBRARY_PATH=${ORT_LIBRARY_DIR}")
   endif()
 endif()
+
+# --- Metal EP session-lifetime leak regression -------------------------------------
+if(ORT_MPS_BUILD_E2E)
+  enable_testing()
+
+  add_executable(mps_leak_test tests/e2e/leak_test.mm)
+  target_include_directories(mps_leak_test PRIVATE ${ORT_INCLUDE_DIR})
+  target_compile_options(mps_leak_test PRIVATE -Wall -fno-objc-arc)
+  target_link_libraries(mps_leak_test PRIVATE
+    onnxruntime::onnxruntime
+    ${METAL_FRAMEWORK}
+    ${FOUNDATION_FRAMEWORK})
+  set_target_properties(mps_leak_test PROPERTIES
+    BUILD_RPATH "${ORT_HOME}/lib"
+    INSTALL_RPATH "${ORT_HOME}/lib")
+
+  set(ORT_MPS_E2E_MODEL
+    "${CMAKE_CURRENT_SOURCE_DIR}/../onnx-genai/models/qwen2.5-0.5b-cpu-recipe/model.onnx"
+    CACHE FILEPATH "Qwen model used by Metal EP E2E and leak tests")
+  get_filename_component(ORT_MPS_ORT_LIBRARY_DIR "${ORT_LIBRARY}" DIRECTORY)
+  add_test(NAME mps_leak_test
+    COMMAND $<TARGET_FILE:mps_leak_test>
+      "${ORT_MPS_E2E_MODEL}"
+      $<TARGET_FILE:onnxruntime_mps_ep>
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/prompt_tokens.txt"
+      8
+      2)
+  set_tests_properties(mps_leak_test PROPERTIES
+    ENVIRONMENT "DYLD_LIBRARY_PATH=${ORT_MPS_ORT_LIBRARY_DIR}"
+    SKIP_RETURN_CODE 77
+    TIMEOUT 600)
+endif()
