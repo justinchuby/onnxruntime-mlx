@@ -72,36 +72,38 @@ The following table is the current support contract. Do not broaden claims witho
 | **Sigmoid** | `ai.onnx`, `com.microsoft` | `fp32`/`fp16`/`bf16` | MLX elementwise sigmoid | Standalone `SiLU`/`Swish` are not claimed. |
 | **Cast** | `ai.onnx` | float↔float among `fp32`/`fp16`/`bf16`, `int64`→`int32` | MLX cast | Other casts remain on CPU. |
 
-### 2.1 Coverage status (2026-07-13)
+### 2.1 Coverage status (2026-07-13) — full Mobius coverage
 
-Coverage now spans the full Mobius op inventory (~70 op types, up from the 11 in the core table above). The table in §2 lists the decode hot-path core; the complete registered set, by module, is:
+Coverage spans the **full Mobius-emitted op set**: ~85 op types / **92 registrations** on MLX (up from 11), verified by diffing every `op.<OpType>()` emitted in `mobius/src` against the registry. The table in §2 lists the decode hot-path core; the complete registered set, by module, is:
 
 | Module | Registered ops |
 |---|---|
 | `elementwise.cc` | Add, Mul, Sub, Sigmoid, Softmax, Cast |
-| `math.cc` | Div, Relu, Tanh, Softplus, Clip, Gelu, Exp, Log, Sqrt, Reciprocal, Neg, Abs, Floor, Sign, Erf, Sin, Cos, Min, Max, Pow, CastLike, Where, Equal, Less, Greater, GreaterOrEqual, And, Or, Not |
-| `reduction.cc` | ReduceSum, ReduceMax, ReduceMean, ReduceMin, ReduceSumSquare, CumSum, TopK |
-| `shape.cc` | Gather, GatherElements, Concat, Reshape, Transpose, Unsqueeze, Squeeze, Flatten, Expand, Slice, Split, Tile, Pad, Identity, ConstantOfShape |
+| `math.cc` | Div, Relu, Tanh, Softplus, Clip, Gelu, Exp, Log, Sqrt, Reciprocal, Neg, Abs, Floor, Sign, Erf, Sin, Cos, Min, Max, Pow, Mod, Round, CastLike, Where, Equal, Less, Greater, GreaterOrEqual, LessOrEqual, And, Or, Not, Elu, Swish, LogSoftmax, OneHot, Trilu, ArgMin, ArgMax |
+| `reduction.cc` | ReduceSum, ReduceMax, ReduceMean, ReduceMin, ReduceSumSquare, ReduceL2, CumSum, TopK |
+| `shape.cc` | Gather, GatherElements, Concat, Reshape, Transpose, Unsqueeze, Squeeze, Flatten, Expand, Slice, Split, Tile, Pad, Identity, ConstantOfShape, Range, ScatterElements, Shape, Size, SpaceToDepth, Compress, Constant, **Resize** (nearest+linear) |
 | `norm.cc` / `norm_ext.cc` | RMSNormalization, SkipSimplifiedLayerNormalization, LayerNormalization, SimplifiedLayerNormalization, SkipLayerNormalization, GroupNormalization, LpNormalization, BatchNormalization |
-| `attention.cc` / `attention_ext.cc` | GroupQueryAttention, Attention (opset 23 & 24), MultiHeadAttention |
+| `attention.cc` / `attention_ext.cc` | GroupQueryAttention, Attention (opset 23 & 24), MultiHeadAttention, RotaryEmbedding |
+| `matmul.cc` | MatMul, Gemm |
 | `conv.cc` | Conv, ConvTranspose, AveragePool, GlobalAveragePool, MaxPool, GlobalMaxPool |
 | `quant.cc` | MatMulNBits, GatherBlockQuantized (symmetric **and** asymmetric/zero_points) |
 | `ssm_misc.cc` | TensorScatter (opset 24), CausalConvWithState |
 
-Every claim is **conservative**: a handler claims only the ONNX forms it can translate correctly (dtype/shape/attr/opset checked in its `ClaimPredicate`); every other form falls back to ORT CPU, which is always correct. Each op has pytest coverage in `tests/ops/` (251 passing), and the attention tests assert the node actually ran on `MLXExecutionProvider` (no vacuous CPU-fallback passes).
+Every claim is **conservative**: a handler claims only the ONNX forms it can translate correctly (dtype/shape/attr/opset checked in its `ClaimPredicate`); every other form falls back to ORT CPU, which is always correct. Each op has pytest coverage in `tests/ops/` (**380 passing**, 1 skipped); the attention/matmul/resize tests assert the node actually ran on `MLXExecutionProvider` (no vacuous CPU-fallback passes).
 
-**Deliberately left to ORT CPU (documented reasons, not gaps):**
+**The only Mobius-emitted ops left on ORT CPU** — each requires engine-level support the flat plan does not provide, not an op handler:
 
-| Op / form | Reason |
+| Op | Reason |
 |---|---|
-| `Scan` | Nested subgraph BODY — the flat `NodeDesc` plan cannot represent control-flow subgraphs (engine-level follow-up). |
-| `LinearAttention` | Multi-rule chunked recurrence — not a clean MLX sequence. |
-| `LightningAttention` | Not registered in this ORT build. |
-| `PackedMultiHeadAttention` | Variable-length packed layout needs runtime cumulative-seqlen, unavailable at claim time. |
-| MHA with padding-mask / attention-bias / KV-cache, `Attention` softcap / `nonpad_kv_seqlen`, causal+explicit-mask mix | Beyond `mlx_fast_scaled_dot_product_attention`'s expressible modes, or require an omitted **interior** optional input. |
-| Conv 3D / SAME auto-pad / asymmetric-pad / dilated-grouped ConvTranspose, `ceil_mode` pooling, MaxPool indices | Not matched to an MLX form; conservative claims only. |
+| `Scan` | Nested subgraph BODY — a flat `NodeDesc` plan cannot represent control-flow subgraphs. |
+| `LSTM` | Gated recurrence over a dynamic time axis — no loop primitive in the flat plan. |
+| `LinearAttention` | Multi-rule chunked recurrence with 4D carried state — not a single MLX sequence. |
+| `MoE` | Data-dependent router top-k gather/scatter — cannot lower to a static MLX graph. |
+| `PackedMultiHeadAttention` | Ragged packed layout needs runtime cumulative-seqlen, unavailable at claim time. |
 
-**Engine limitation (follow-up):** ORT's `GetCapability` convex-clustering pass in `ep.cc` dereferences the input `OrtValueInfo` of every graph node **before** any claim runs; ORT returns a **null** `ValueInfo` for an omitted *interior* optional input, which crashes session creation graph-wide. Handlers therefore reject interior-optional-gap forms (`HasInteriorGap`). Real exporters keep optionals contiguous, so this does not affect the decoder E2E. A null-guard in the clustering pass would lift this restriction.
+Plus conservative per-op form exclusions (e.g. `Resize` cubic/roi/antialias, Conv 3D/SAME/asymmetric-pad, MHA padding-mask/KV-cache) that also fall back to correct ORT CPU.
+
+**Engine fix (landed):** ORT returns a **null** `OrtValueInfo` for an omitted *interior* optional input (e.g. `Resize` `roi`, `Clip` `min`); the `GetCapability` clustering pass in `ep.cc` dereferenced it and crashed session creation graph-wide. `ep.cc` now null-guards input names at all four iteration sites (`InputName`), so interior-optional-gap ops are safe. (Earlier `HasInteriorGap` claim guards in attention/ssm modules can now be relaxed as a follow-up.)
 
 ---
 
