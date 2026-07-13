@@ -1,8 +1,8 @@
 // Copyright (c) 2026. Licensed under the MIT License.
 //
-// Shape / data-movement op handlers (Gather, GatherElements, Concat, Reshape, Transpose, Unsqueeze,
-// Squeeze, Flatten, Expand, Slice, Split, Tile, Pad, Identity, ConstantOfShape). See
-// docs/OP_ARCHITECTURE.md §5/§6 for the add-an-op recipe.
+// Shape / data-movement op handlers (Gather, GatherElements, ScatterElements, Concat, Reshape,
+// Transpose, Unsqueeze, Squeeze, Flatten, Expand, Slice, Split, Tile, Pad, Identity, Range, Shape,
+// Size, SpaceToDepth, Compress, Constant, ConstantOfShape). See docs/OP_ARCHITECTURE.md §5/§6.
 //
 // These ops are dtype-agnostic (pure data movement): the handler resolves each data input to an MLX
 // array carrying its ACTUAL dtype (fp32/fp16/bf16 AND int/uint/bool) and MLX moves the bytes through
@@ -14,8 +14,11 @@
 // unclaimed and run on ORT CPU (correct, just not accelerated).
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "mlx_engine.h"
@@ -54,6 +57,12 @@ bool IsIntIndexType(ONNXTensorElementDataType t) {
   return t == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 || t == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;
 }
 
+bool IsRangeType(ONNXTensorElementDataType t) {
+  return t == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16 ||
+         t == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 ||
+         t == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;
+}
+
 // ---- claim-time constant-initializer helpers ------------------------------------------------
 
 // True iff `vi` is a tensor(int64) constant initializer (the shape/axes/starts/ends/steps/pads/
@@ -81,6 +90,65 @@ bool ReadConstInt64AtClaim(Ort::ConstValueInfo vi, std::vector<int64_t>& out) {
   return true;
 }
 
+bool ReadConstBoolAtClaim(Ort::ConstValueInfo vi, std::vector<bool>& out) {
+  ONNXTensorElementDataType t;
+  std::vector<int64_t> shape;
+  if (!TensorInfo(vi, t, &shape) || t != ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL ||
+      shape.size() != 1 || !vi.IsConstantInitializer()) {
+    return false;
+  }
+  Ort::ConstValue value{nullptr};
+  if (!vi.GetInitializer(value).IsOK() || static_cast<const OrtValue*>(value) == nullptr) {
+    return false;
+  }
+  auto info = value.GetTensorTypeAndShapeInfo();
+  size_t count = info.GetElementCount();
+  const auto* p = static_cast<const bool*>(value.GetTensorRawData());
+  if (p == nullptr && count != 0) return false;
+  out.clear();
+  if (count != 0) out.assign(p, p + count);
+  return true;
+}
+
+bool StaticTensorInfo(Ort::ConstValueInfo vi, ONNXTensorElementDataType& type,
+                      std::vector<int64_t>& shape) {
+  if (!TensorInfo(vi, type, &shape)) return false;
+  return std::all_of(shape.begin(), shape.end(), [](int64_t d) { return d >= 0; });
+}
+
+bool ReadConstRangeScalarAtClaim(Ort::ConstValueInfo vi, ONNXTensorElementDataType expected,
+                                 double& out) {
+  ONNXTensorElementDataType type;
+  std::vector<int64_t> shape;
+  if (!TensorInfo(vi, type, &shape) || type != expected || !shape.empty() ||
+      !vi.IsConstantInitializer()) {
+    return false;
+  }
+  Ort::ConstValue value{nullptr};
+  if (!vi.GetInitializer(value).IsOK() || static_cast<const OrtValue*>(value) == nullptr) {
+    return false;
+  }
+  const void* raw = value.GetTensorRawData();
+  if (raw == nullptr) return false;
+  switch (type) {
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16:
+      out = *static_cast<const int16_t*>(raw);
+      return true;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32:
+      out = *static_cast<const int32_t*>(raw);
+      return true;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: {
+      int64_t v = *static_cast<const int64_t*>(raw);
+      constexpr int64_t kMaxExactDoubleInteger = int64_t{1} << 53;
+      if (v < -kMaxExactDoubleInteger || v > kMaxExactDoubleInteger) return false;
+      out = static_cast<double>(v);
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
 // True iff the node carries an attribute named `name` (any genuine type). Used to reject
 // ConstantOfShape with an explicit `value` TENSOR attribute, which NodeDesc does not carry.
 bool HasAttribute(Ort::ConstNode node, const char* name) {
@@ -88,6 +156,40 @@ bool HasAttribute(Ort::ConstNode node, const char* name) {
   Ort::Status status = node.GetAttributeByName(name, attr);
   return status.IsOK() && static_cast<const OrtOpAttr*>(attr) != nullptr &&
          attr.GetType() != ORT_OP_ATTR_UNDEFINED;
+}
+
+bool TensorScalarIsInt64(Ort::ConstNode node, const char* name, int64_t expected) {
+  Ort::ConstOpAttr attr;
+  if (!node.GetAttributeByName(name, attr).IsOK() ||
+      static_cast<const OrtOpAttr*>(attr) == nullptr || attr.GetType() != ORT_OP_ATTR_TENSOR) {
+    return false;
+  }
+  Ort::Value value{nullptr};
+  if (!attr.GetTensorAttributeAsOrtValue(value).IsOK() ||
+      static_cast<const OrtValue*>(value) == nullptr) {
+    return false;
+  }
+  auto info = value.GetTensorTypeAndShapeInfo();
+  return info.GetElementType() == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 &&
+         info.GetElementCount() == 1 &&
+         *static_cast<const int64_t*>(value.GetTensorRawData()) == expected;
+}
+
+bool TensorScalarIsFloat32(Ort::ConstNode node, const char* name, float expected) {
+  Ort::ConstOpAttr attr;
+  if (!node.GetAttributeByName(name, attr).IsOK() ||
+      static_cast<const OrtOpAttr*>(attr) == nullptr || attr.GetType() != ORT_OP_ATTR_TENSOR) {
+    return false;
+  }
+  Ort::Value value{nullptr};
+  if (!attr.GetTensorAttributeAsOrtValue(value).IsOK() ||
+      static_cast<const OrtValue*>(value) == nullptr) {
+    return false;
+  }
+  auto info = value.GetTensorTypeAndShapeInfo();
+  return info.GetElementType() == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT &&
+         info.GetElementCount() == 1 &&
+         *static_cast<const float*>(value.GetTensorRawData()) == expected;
 }
 
 // Read a STRING attribute at claim time, falling back to `default_value` when absent/other type.
@@ -112,6 +214,22 @@ std::vector<int64_t> ReadInts(TranslationContext& ctx, const TensorRef& ref) {
   return std::vector<int64_t>(p, p + h.count);
 }
 
+double ReadRangeScalar(TranslationContext& ctx, const TensorRef& ref) {
+  mlx_array value = ctx.Resolve(ref);
+  HostBytes h = ctx.RawHost(ref);
+  if (h.count != 1 || h.data == nullptr) throw MlxError("Range expected a scalar initializer");
+  switch (mlx_array_dtype(value)) {
+    case MLX_INT16:
+      return *static_cast<const int16_t*>(h.data);
+    case MLX_INT32:
+      return *static_cast<const int32_t*>(h.data);
+    case MLX_INT64:
+      return static_cast<double>(*static_cast<const int64_t*>(h.data));
+    default:
+      throw MlxError("Range initializer dtype is not supported");
+  }
+}
+
 // A 0-d int32 scalar array (kept for teardown).
 mlx_array ScalarI32(TranslationContext& ctx, int32_t v) {
   return ctx.Keep(mlx_array_new_data(&v, nullptr, 0, MLX_INT32));
@@ -132,6 +250,15 @@ mlx_array Contiguous(TranslationContext& ctx, mlx_array a) {
 int NormAxis(int64_t axis, int rank) {
   if (axis < 0) axis += rank;
   return static_cast<int>(axis);
+}
+
+std::pair<int, int> ShapeInterval(int rank, int64_t start, int64_t end) {
+  if (start < 0) start += rank;
+  if (end < 0) end += rank;
+  start = Clamp(start, 0, rank);
+  end = Clamp(end, 0, rank);
+  if (end < start) end = start;
+  return {static_cast<int>(start), static_cast<int>(end)};
 }
 
 // Normalize + adjust negative gather indices into [0, dim) and return them as int32 (the index dtype
@@ -175,6 +302,19 @@ void GatherElementsOp(TranslationContext& ctx, const NodeDesc& n) {
   mlx_array idx = NormalizeIndices(ctx, indices, dim);
   mlx_array r = mlx_array_new();
   MLX_CHECK(mlx_take_along_axis(&r, data, idx, axis, ctx.stream()));
+  ctx.Bind(n.outputs[0], Contiguous(ctx, ctx.Keep(r)));
+}
+
+// ScatterElements (ai.onnx, reduction=none): inverse of GatherElements via put_along_axis.
+void ScatterElementsOp(TranslationContext& ctx, const NodeDesc& n) {
+  mlx_array data = ctx.Resolve(n.inputs[0]);
+  mlx_array indices = ctx.Resolve(n.inputs[1]);
+  mlx_array updates = ctx.Resolve(n.inputs[2]);
+  int rank = static_cast<int>(mlx_array_ndim(data));
+  int axis = NormAxis(n.ints.count("axis") ? n.ints.at("axis") : 0, rank);
+  mlx_array idx = NormalizeIndices(ctx, indices, mlx_array_dim(data, axis));
+  mlx_array r = mlx_array_new();
+  MLX_CHECK(mlx_put_along_axis(&r, data, idx, updates, axis, ctx.stream()));
   ctx.Bind(n.outputs[0], Contiguous(ctx, ctx.Keep(r)));
 }
 
@@ -425,14 +565,112 @@ void IdentityOp(TranslationContext& ctx, const NodeDesc& n) {
   ctx.Bind(n.outputs[0], ctx.Resolve(n.inputs[0]));
 }
 
-// ConstantOfShape (ai.onnx, default value): zeros of the output dtype with shape from the constant
-// int64 `input`. The explicit `value` TENSOR attribute is not carried by NodeDesc, so only the
-// default (float32 zero) form is claimed.
+// Range (ai.onnx): constant scalar integer start/limit/delta inputs mapped to mlx_arange.
+void RangeOp(TranslationContext& ctx, const NodeDesc& n) {
+  double start = ReadRangeScalar(ctx, n.inputs[0]);
+  double limit = ReadRangeScalar(ctx, n.inputs[1]);
+  double delta = ReadRangeScalar(ctx, n.inputs[2]);
+  mlx_array r = mlx_array_new();
+  MLX_CHECK(mlx_arange(&r, start, limit, delta, MlxDtypeFromOnnx(n.outputs[0].type), ctx.stream()));
+  ctx.Bind(n.outputs[0], ctx.Keep(r));
+}
+
+// Shape (ai.onnx): materialize the known input shape (optionally sliced by start/end) as int64.
+void ShapeOp(TranslationContext& ctx, const NodeDesc& n) {
+  std::vector<int> input_shape = TranslationContext::ShapeOf(ctx.Resolve(n.inputs[0]));
+  int rank = static_cast<int>(input_shape.size());
+  int64_t start_attr = n.ints.count("start") ? n.ints.at("start") : 0;
+  int64_t end_attr = n.ints.count("end") ? n.ints.at("end") : rank;
+  auto [start, end] = ShapeInterval(rank, start_attr, end_attr);
+  std::vector<int64_t> result;
+  result.reserve(static_cast<size_t>(end - start));
+  for (int i = start; i < end; ++i) result.push_back(input_shape[i]);
+  int shape[] = {static_cast<int>(result.size())};
+  ctx.Bind(n.outputs[0],
+           ctx.Keep(mlx_array_new_data(result.data(), shape, 1, MLX_INT64)));
+}
+
+// Size (ai.onnx): materialize the total element count as an int64 scalar.
+void SizeOp(TranslationContext& ctx, const NodeDesc& n) {
+  int64_t size = static_cast<int64_t>(mlx_array_size(ctx.Resolve(n.inputs[0])));
+  ctx.Bind(n.outputs[0], ctx.Keep(mlx_array_new_data(&size, nullptr, 0, MLX_INT64)));
+}
+
+// SpaceToDepth (ai.onnx): [N,C,H,W] -> reshape, transpose block axes before C, reshape.
+void SpaceToDepthOp(TranslationContext& ctx, const NodeDesc& n) {
+  mlx_array data = ctx.Resolve(n.inputs[0]);
+  std::vector<int> shape = TranslationContext::ShapeOf(data);
+  int block = static_cast<int>(n.ints.at("blocksize"));
+  int n_batch = shape[0], channels = shape[1], height = shape[2], width = shape[3];
+  mlx_array blocked =
+      ctx.Reshape(data, {n_batch, channels, height / block, block, width / block, block});
+  mlx_array moved = ctx.Transpose(blocked, {0, 3, 5, 1, 2, 4});
+  mlx_array result =
+      ctx.Reshape(moved, {n_batch, channels * block * block, height / block, width / block});
+  ctx.Bind(n.outputs[0], Contiguous(ctx, result));
+}
+
+// Compress (ai.onnx): the condition is a constant initializer, converted once to take indices.
+void CompressOp(TranslationContext& ctx, const NodeDesc& n) {
+  mlx_array data = ctx.Resolve(n.inputs[0]);
+  HostBytes condition = ctx.RawHost(n.inputs[1]);
+  const bool* mask = static_cast<const bool*>(condition.data);
+  std::vector<int32_t> selected;
+  for (size_t i = 0; i < condition.count; ++i) {
+    if (mask[i]) selected.push_back(static_cast<int32_t>(i));
+  }
+  int index_shape[] = {static_cast<int>(selected.size())};
+  mlx_array indices =
+      ctx.Keep(mlx_array_new_data(selected.data(), index_shape, 1, MLX_INT32));
+  int axis = 0;
+  if (n.ints.count("axis")) {
+    axis = NormAxis(n.ints.at("axis"), static_cast<int>(mlx_array_ndim(data)));
+  } else {
+    data = ctx.Reshape(data, {static_cast<int>(mlx_array_size(data))});
+  }
+  mlx_array r = mlx_array_new();
+  MLX_CHECK(mlx_take_axis(&r, data, indices, axis, ctx.stream()));
+  ctx.Bind(n.outputs[0], Contiguous(ctx, ctx.Keep(r)));
+}
+
+// Constant scalar/list attribute forms. TENSOR-valued `value` is deliberately left to CPU because
+// NodeDesc does not carry TENSOR attributes.
+void ConstantOp(TranslationContext& ctx, const NodeDesc& n) {
+  mlx_array result;
+  if (n.ints.count("value_int")) {
+    int64_t value = n.ints.at("value_int");
+    result = mlx_array_new_data(&value, nullptr, 0, MLX_INT64);
+  } else if (n.floats.count("value_float")) {
+    float value = n.floats.at("value_float");
+    result = mlx_array_new_data(&value, nullptr, 0, MLX_FLOAT32);
+  } else if (n.int_arrays.count("value_ints")) {
+    const std::vector<int64_t>& values = n.int_arrays.at("value_ints");
+    int shape[] = {static_cast<int>(values.size())};
+    result = mlx_array_new_data(values.data(), shape, 1, MLX_INT64);
+  } else if (n.float_arrays.count("value_floats")) {
+    const std::vector<float>& values = n.float_arrays.at("value_floats");
+    int shape[] = {static_cast<int>(values.size())};
+    result = mlx_array_new_data(values.data(), shape, 1, MLX_FLOAT32);
+  } else {
+    throw MlxError("Constant attribute form is not supported");
+  }
+  ctx.Bind(n.outputs[0], ctx.Keep(result));
+}
+
+// ConstantOfShape: default/explicit float32 zero, plus Mobius's int64 -1 fill. NodeDesc does not
+// carry TENSOR attrs, so the claim restricts explicit values to forms the handler can infer from the
+// output dtype: float32 always uses zero, while int64 is accepted only when claim verified -1.
 void ConstantOfShapeOp(TranslationContext& ctx, const NodeDesc& n) {
   std::vector<int64_t> shape = ReadInts(ctx, n.inputs[0]);
   std::vector<int> s(shape.begin(), shape.end());
   mlx_array r = mlx_array_new();
-  MLX_CHECK(mlx_zeros(&r, s.data(), s.size(), MlxDtypeFromOnnx(n.outputs[0].type), ctx.stream()));
+  if (n.outputs[0].type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) {
+    int64_t minus_one = -1;
+    mlx_array value = ctx.Keep(mlx_array_new_data(&minus_one, nullptr, 0, MLX_INT64));
+    MLX_CHECK(mlx_full(&r, s.data(), s.size(), value, MLX_INT64, ctx.stream()));
+  } else {
+    MLX_CHECK(mlx_zeros(&r, s.data(), s.size(), MLX_FLOAT32, ctx.stream()));
+  }
   ctx.Bind(n.outputs[0], ctx.Keep(r));
 }
 
@@ -448,6 +686,38 @@ bool GatherLikeClaim(Ort::ConstNode node) {
     return false;
   }
   return IsMovableType(data) && out == data && IsIntIndexType(idx);
+}
+
+bool ScatterElementsClaim(Ort::ConstNode node) {
+  const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
+  const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
+  if (inputs.size() != 3 || outputs.size() != 1 ||
+      StringAttribute(node, "reduction", "none") != "none") {
+    return false;
+  }
+  ONNXTensorElementDataType data, indices, updates, out;
+  std::vector<int64_t> data_shape, index_shape, update_shape, out_shape;
+  if (!StaticTensorInfo(inputs[0], data, data_shape) ||
+      !StaticTensorInfo(inputs[1], indices, index_shape) ||
+      !StaticTensorInfo(inputs[2], updates, update_shape) ||
+      !StaticTensorInfo(outputs[0], out, out_shape)) {
+    return false;
+  }
+  // mlx_put_along_axis's GPU kernel does not support int64 payloads (it aborts instead of returning
+  // an error), so keep the claim to MLX floating types used by Mobius routing/logit scatters.
+  if (!IsMlxFloatType(data) || !IsIntIndexType(indices) || updates != data || out != data ||
+      data_shape.empty() || index_shape != update_shape || index_shape.size() != data_shape.size() ||
+      out_shape != data_shape) {
+    return false;
+  }
+  int rank = static_cast<int>(data_shape.size());
+  int64_t axis = IntAttribute(node, "axis", 0);
+  if (axis < -rank || axis >= rank) return false;
+  int ax = NormAxis(axis, rank);
+  for (int i = 0; i < rank; ++i) {
+    if (i != ax && index_shape[i] > data_shape[i]) return false;
+  }
+  return true;
 }
 
 bool ConcatClaim(Ort::ConstNode node) {
@@ -595,14 +865,171 @@ bool IdentityClaim(Ort::ConstNode node) {
   return IsMovableType(data) && out == data;
 }
 
+bool RangeClaim(Ort::ConstNode node) {
+  const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
+  const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
+  if (inputs.size() != 3 || outputs.size() != 1) return false;
+  ONNXTensorElementDataType type, out;
+  std::vector<int64_t> out_shape;
+  if (!TensorInfo(inputs[0], type) || !IsRangeType(type) ||
+      !StaticTensorInfo(outputs[0], out, out_shape) || out != type || out_shape.size() != 1) {
+    return false;
+  }
+  double start, limit, delta;
+  if (!ReadConstRangeScalarAtClaim(inputs[0], type, start) ||
+      !ReadConstRangeScalarAtClaim(inputs[1], type, limit) ||
+      !ReadConstRangeScalarAtClaim(inputs[2], type, delta) || delta == 0.0) {
+    return false;
+  }
+  double count = std::max(std::ceil((limit - start) / delta), 0.0);
+  return std::isfinite(count) && count <= std::numeric_limits<int>::max() &&
+         out_shape[0] == static_cast<int64_t>(count);
+}
+
+bool ShapeClaim(Ort::ConstNode node) {
+  const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
+  const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
+  if (inputs.size() != 1 || outputs.size() != 1) return false;
+  ONNXTensorElementDataType data, out;
+  std::vector<int64_t> input_shape, output_shape;
+  if (!StaticTensorInfo(inputs[0], data, input_shape) ||
+      !StaticTensorInfo(outputs[0], out, output_shape) || !IsMovableType(data) ||
+      out != ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 || output_shape.size() != 1) {
+    return false;
+  }
+  int rank = static_cast<int>(input_shape.size());
+  auto interval =
+      ShapeInterval(rank, IntAttribute(node, "start", 0), IntAttribute(node, "end", rank));
+  return output_shape[0] == interval.second - interval.first;
+}
+
+bool SizeClaim(Ort::ConstNode node) {
+  const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
+  const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
+  if (inputs.size() != 1 || outputs.size() != 1) return false;
+  ONNXTensorElementDataType data, out;
+  std::vector<int64_t> input_shape, output_shape;
+  return StaticTensorInfo(inputs[0], data, input_shape) &&
+         StaticTensorInfo(outputs[0], out, output_shape) && IsMovableType(data) &&
+         out == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 && output_shape.empty();
+}
+
+bool SpaceToDepthClaim(Ort::ConstNode node) {
+  const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
+  const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
+  if (inputs.size() != 1 || outputs.size() != 1) return false;
+  ONNXTensorElementDataType data, out;
+  std::vector<int64_t> input_shape, output_shape;
+  if (!StaticTensorInfo(inputs[0], data, input_shape) ||
+      !StaticTensorInfo(outputs[0], out, output_shape) || !IsMovableType(data) || out != data ||
+      input_shape.size() != 4 || output_shape.size() != 4) {
+    return false;
+  }
+  int64_t block = IntAttribute(node, "blocksize", 0);
+  if (block <= 0 || input_shape[2] % block != 0 || input_shape[3] % block != 0) return false;
+  std::vector<int64_t> expected = {input_shape[0], input_shape[1] * block * block,
+                                   input_shape[2] / block, input_shape[3] / block};
+  return output_shape == expected;
+}
+
+bool CompressClaim(Ort::ConstNode node) {
+  const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
+  const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
+  if (inputs.size() != 2 || outputs.size() != 1) return false;
+  ONNXTensorElementDataType data, out;
+  std::vector<int64_t> input_shape, output_shape;
+  std::vector<bool> condition;
+  if (!StaticTensorInfo(inputs[0], data, input_shape) ||
+      !StaticTensorInfo(outputs[0], out, output_shape) || !IsMovableType(data) || out != data ||
+      input_shape.empty() || !ReadConstBoolAtClaim(inputs[1], condition)) {
+    return false;
+  }
+  int64_t true_count = static_cast<int64_t>(std::count(condition.begin(), condition.end(), true));
+  if (HasAttribute(node, "axis")) {
+    int rank = static_cast<int>(input_shape.size());
+    int64_t axis = IntAttribute(node, "axis", 0);
+    if (axis < -rank || axis >= rank) return false;
+    int ax = NormAxis(axis, rank);
+    if (condition.size() > static_cast<size_t>(input_shape[ax]) ||
+        output_shape.size() != input_shape.size()) {
+      return false;
+    }
+    std::vector<int64_t> expected = input_shape;
+    expected[ax] = true_count;
+    return output_shape == expected;
+  }
+  int64_t size = 1;
+  for (int64_t dim : input_shape) size *= dim;
+  return condition.size() <= static_cast<size_t>(size) &&
+         output_shape == std::vector<int64_t>{true_count};
+}
+
+bool ConstantClaim(Ort::ConstNode node) {
+  if (!node.GetInputs().empty() || node.GetOutputs().size() != 1) return false;
+  ONNXTensorElementDataType out;
+  std::vector<int64_t> shape;
+  if (!StaticTensorInfo(node.GetOutputs()[0], out, shape)) return false;
+
+  struct Form {
+    const char* name;
+    OrtOpAttrType attr_type;
+    ONNXTensorElementDataType output_type;
+    bool scalar;
+  };
+  const Form forms[] = {
+      {"value_int", ORT_OP_ATTR_INT, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, true},
+      {"value_float", ORT_OP_ATTR_FLOAT, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, true},
+      {"value_ints", ORT_OP_ATTR_INTS, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, false},
+      {"value_floats", ORT_OP_ATTR_FLOATS, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, false},
+  };
+  int matched = 0;
+  for (const Form& form : forms) {
+    Ort::ConstOpAttr attr;
+    Ort::Status status = node.GetAttributeByName(form.name, attr);
+    if (!status.IsOK() || static_cast<const OrtOpAttr*>(attr) == nullptr ||
+        attr.GetType() == ORT_OP_ATTR_UNDEFINED) {
+      continue;
+    }
+    if (attr.GetType() != form.attr_type || out != form.output_type) return false;
+    if (form.scalar) {
+      if (!shape.empty()) return false;
+    } else {
+      size_t count = 0;
+      if (form.attr_type == ORT_OP_ATTR_INTS) {
+        std::vector<int64_t> values;
+        if (!attr.GetValueArray(values).IsOK()) return false;
+        count = values.size();
+      } else {
+        std::vector<float> values;
+        if (!attr.GetValueArray(values).IsOK()) return false;
+        count = values.size();
+      }
+      if (shape != std::vector<int64_t>{static_cast<int64_t>(count)}) return false;
+    }
+    ++matched;
+  }
+  return matched == 1 && !HasAttribute(node, "value") && !HasAttribute(node, "sparse_value");
+}
+
 bool ConstantOfShapeClaim(Ort::ConstNode node) {
   const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
   const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
   if (inputs.size() != 1 || outputs.size() != 1) return false;
   ONNXTensorElementDataType out;
   if (!TensorInfo(outputs[0], out) || !IsMovableType(out)) return false;
-  if (!IsConstInt64(inputs[0])) return false;
-  return !HasAttribute(node, "value");  // explicit value TENSOR attr not carried by NodeDesc
+  std::vector<int64_t> shape;
+  if (!ReadConstInt64AtClaim(inputs[0], shape)) return false;
+  for (int64_t dim : shape) {
+    if (dim < 0 || dim > std::numeric_limits<int>::max()) return false;
+  }
+  if (!HasAttribute(node, "value")) {
+    return out == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+  }
+  if (out == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+    return TensorScalarIsFloat32(node, "value", 0.0f);
+  }
+  return out == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 &&
+         TensorScalarIsInt64(node, "value", -1);
 }
 
 }  // namespace
@@ -611,6 +1038,8 @@ void RegisterShapeOps(OpRegistry& registry) {
   registry.Register({"", "Gather", kAnyOpset, kAnyOpset, &GatherOp, &GatherLikeClaim});
   registry.Register(
       {"", "GatherElements", kAnyOpset, kAnyOpset, &GatherElementsOp, &GatherLikeClaim});
+  registry.Register(
+      {"", "ScatterElements", kAnyOpset, kAnyOpset, &ScatterElementsOp, &ScatterElementsClaim});
   registry.Register({"", "Concat", kAnyOpset, kAnyOpset, &ConcatOp, &ConcatClaim});
   registry.Register({"", "Reshape", kAnyOpset, kAnyOpset, &ReshapeOp, &ReshapeClaim});
   registry.Register({"", "Transpose", kAnyOpset, kAnyOpset, &TransposeOp, &TransposeClaim});
@@ -623,6 +1052,13 @@ void RegisterShapeOps(OpRegistry& registry) {
   registry.Register({"", "Tile", kAnyOpset, kAnyOpset, &TileOp, &TileClaim});
   registry.Register({"", "Pad", kAnyOpset, kAnyOpset, &PadOp, &PadClaim});
   registry.Register({"", "Identity", kAnyOpset, kAnyOpset, &IdentityOp, &IdentityClaim});
+  registry.Register({"", "Range", kAnyOpset, kAnyOpset, &RangeOp, &RangeClaim});
+  registry.Register({"", "Shape", kAnyOpset, kAnyOpset, &ShapeOp, &ShapeClaim});
+  registry.Register({"", "Size", kAnyOpset, kAnyOpset, &SizeOp, &SizeClaim});
+  registry.Register(
+      {"", "SpaceToDepth", kAnyOpset, kAnyOpset, &SpaceToDepthOp, &SpaceToDepthClaim});
+  registry.Register({"", "Compress", kAnyOpset, kAnyOpset, &CompressOp, &CompressClaim});
+  registry.Register({"", "Constant", kAnyOpset, kAnyOpset, &ConstantOp, &ConstantClaim});
   registry.Register(
       {"", "ConstantOfShape", kAnyOpset, kAnyOpset, &ConstantOfShapeOp, &ConstantOfShapeClaim});
 }
