@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${1:-${repo_root}/build}"
 build_dir="$(cd "${build_dir}" && pwd)"
 model_path="${MPS_E2E_MODEL:-${repo_root}/../onnx-genai/models/qwen2.5-0.5b-cpu-recipe/model.onnx}"
-ep_library="${MPS_EP_LIBRARY:-${build_dir}/libonnxruntime_mps_ep.dylib}"
+ep_library="${MPS_EP_LIBRARY:-${build_dir}/libonnxruntime_mlx_ep.dylib}"
 tokens_path="${MPS_PROMPT_TOKENS:-${repo_root}/tests/e2e/prompt_tokens.txt}"
 
 if [[ ! -f "${model_path}" || ! -f "${model_path}.data" ]]; then
@@ -28,8 +28,8 @@ export MTL_SHADER_VALIDATION_ABORT_ON_FAULT=1
 export MTL_DEBUG_LAYER=1
 export MTL_DEBUG_LAYER_WARNING_MODE=nslog
 
-echo "[metal-validation] Running mps_e2e with Metal API and shader validation"
-"${build_dir}/mps_e2e" "${model_path}" "${ep_library}" "${tokens_path}" 4 0 1
+echo "[metal-validation] Running mlx_e2e with Metal API and shader validation"
+"${build_dir}/mlx_e2e" "${model_path}" "${ep_library}" "${tokens_path}" 4 0 1
 
-echo "[metal-validation] Running mps_leak_test with Metal API and shader validation"
-"${build_dir}/mps_leak_test" "${model_path}" "${ep_library}" "${tokens_path}" 8 2
+echo "[metal-validation] Running mlx_leak_test with Metal API and shader validation"
+"${build_dir}/mlx_leak_test" "${model_path}" "${ep_library}" "${tokens_path}" 8 2

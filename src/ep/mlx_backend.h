@@ -1,18 +1,18 @@
 // Copyright (c) 2026. Licensed under the MIT License.
 //
-// MLX (mlx-c) backend for the fused decoder subgraph — Phase-0 GO/NO-GO prototype (Nabil).
+// MLX (mlx-c) backend for the fused decoder subgraph — the SOLE compute path of the MLX-native ORT
+// execution provider.
 //
-// This is a FLAG-GATED, ISOLATED alternative execution path for a single fused subgraph. When the
-// env var ONNX_GENAI_METAL_EP_MLX=1 is set AND the plugin was built with -DORT_MPS_ENABLE_MLX=ON,
-// the EP hands the WHOLE fused decoder subgraph to MLX as one unit: the ONNX op graph is translated
+// The EP hands the WHOLE fused decoder subgraph to MLX as one unit: the ONNX op graph is translated
 // into an MLX lazy graph (mlx_quantized_matmul for MatMulNBits, fast_scaled_dot_product_attention +
 // rope for GroupQueryAttention, fast_rms_norm, elementwise, ...), evaluated with a SINGLE mlx_eval
-// at the subgraph boundary, and the boundary inputs/outputs are copied across the ORT boundary. When
-// the flag is off (or MLX was not compiled in), the default hand-kernel Metal path runs unchanged.
+// at the subgraph boundary, and the boundary inputs/outputs are copied across the ORT boundary. This
+// runs for BOTH prefill and decode; there are no hand-tuned .metal kernels and no fallback path
+// (mlx-c is a hard build dependency).
 //
 // The plan description below (NodeDesc/TensorRef/OutRef) is a self-contained, kernel-agnostic view
 // of the subgraph built in ep.cc::CompileImpl, so this translator has no dependency on the EP's
-// internal kernel objects.
+// internal structures.
 
 #pragma once
 
@@ -66,14 +66,8 @@ struct NodeDesc {
 // Opaque compiled MLX plan (owns the persistent repacked-weight / cos-sin cache MLX arrays).
 struct Plan;
 
-// True if MLX support was compiled into this build (-DORT_MPS_ENABLE_MLX=ON).
-bool Available();
-
-// True if the MLX path is requested at runtime (env ONNX_GENAI_METAL_EP_MLX set) AND Available().
-bool Enabled();
-
 // Build a runnable MLX plan from the node descriptors (topological order). Returns nullptr and sets
-// `error` if an op in the subgraph has no MLX translation (the caller then keeps the hand path).
+// `error` if an op in the subgraph has no MLX translation (a hard error — there is no fallback).
 // Ownership transfers to the caller (wrap with PlanDeleter / DestroyPlan).
 Plan* BuildPlan(std::vector<NodeDesc> nodes, std::string& error);
 

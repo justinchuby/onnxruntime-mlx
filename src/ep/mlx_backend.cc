@@ -1,55 +1,23 @@
 // Copyright (c) 2026. Licensed under the MIT License.
 //
-// MLX (mlx-c) translation of a fused decoder subgraph — Phase-0 GO/NO-GO prototype (Nabil).
+// MLX (mlx-c) translation of a fused decoder subgraph — the SOLE compute path of the MLX-native
+// ORT execution provider. Each claimed ONNX decoder op (MatMulNBits, GroupQueryAttention, RoPE-in-
+// GQA, RMSNormalization, GatherBlockQuantized, elementwise) is translated into MLX ops; the whole
+// fused subgraph runs as one MLX graph for both prefill and decode. There are no hand-tuned .metal
+// kernels and no stub/fallback build — mlx-c is a hard build dependency.
 //
-// Compiled ALWAYS, but only does real work when the plugin was configured with
-// -DORT_MPS_ENABLE_MLX=ON (which defines ORT_MPS_HAS_MLX and links libmlxc/libmlx). Otherwise every
-// entry point is an inert stub so the default hand-kernel build/behaviour is completely unchanged.
-//
-// See mlx_backend.h and docs/MLX_EVALUATION.md §6 (Phase 0).
+// See mlx_backend.h and docs/OP_ARCHITECTURE.md.
 
 #include "mlx_backend.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
-
-namespace ort_mps_mlx {
-
-bool Enabled() { return Available() && std::getenv("ONNX_GENAI_METAL_EP_MLX") != nullptr; }
-
-}  // namespace ort_mps_mlx
-
-#ifndef ORT_MPS_HAS_MLX
-// ---------------------------------------------------------------------------------------------
-// Stub build (MLX not compiled in). Keeps the symbols so ep.cc links either way.
-// ---------------------------------------------------------------------------------------------
-namespace ort_mps_mlx {
-
-bool Available() { return false; }
-Plan* BuildPlan(std::vector<NodeDesc>, std::string& error) {
-  error = "MLX support not compiled in (configure with -DORT_MPS_ENABLE_MLX=ON)";
-  return nullptr;
-}
-void DestroyPlan(Plan*) {}
-bool RunPlan(Plan&, Ort::KernelContext&, std::string& error) {
-  error = "MLX support not compiled in";
-  return false;
-}
-
-}  // namespace ort_mps_mlx
-
-#else
-// ---------------------------------------------------------------------------------------------
-// Real MLX build.
-// ---------------------------------------------------------------------------------------------
-#include <cmath>
 #include <stdexcept>
 
 #include "mlx/c/mlx.h"
 
 namespace ort_mps_mlx {
-
-bool Available() { return true; }
 
 namespace {
 
@@ -90,8 +58,6 @@ struct Plan {
   }
 };
 
-bool Available();  // fwd (defined above)
-
 namespace {
 
 // Per-Compute execution context: builds the MLX graph for one forward pass, evals once, copies out.
@@ -106,14 +72,18 @@ class Run {
   void Execute() {
     for (const NodeDesc& node : plan_.nodes) Translate(node);
 
-    // Collect boundary outputs and evaluate the whole graph in one shot.
+    // Collect boundary outputs and evaluate the whole graph in one shot. Each boundary array is cast
+    // to its ORT output dtype here (before eval) so CopyOut can do a straight typed memcpy — the
+    // fused subgraph can emit non-fp32 boundary tensors (e.g. int64 index math, fp16 activations).
     mlx_vector_array outs = mlx_vector_array_new();
     std::vector<const OutRef*> ext;
     for (const NodeDesc& node : plan_.nodes) {
       for (const OutRef& o : node.outputs) {
         if (o.external && env_.count(o.name)) {
+          mlx_array casted = Astype(env_.at(o.name), ToMlx(o.type));
+          env_[o.name] = casted;  // rebind so CopyOut reads the cast (and evaluated) array
           ext.push_back(&o);
-          mlx_vector_array_append_value(outs, env_.at(o.name));
+          mlx_vector_array_append_value(outs, casted);
         }
       }
     }
@@ -580,14 +550,33 @@ class Run {
   }
 
   void CopyOut(const OutRef& o) {
-    mlx_array a = env_.at(o.name);
+    mlx_array a = env_.at(o.name);  // already cast to ToMlx(o.type) and evaluated in Execute()
     std::vector<int> sh = ShapeOf(a);
     std::vector<int64_t> shp(sh.begin(), sh.end());
     size_t count = 1;
     for (int d : sh) count *= static_cast<size_t>(d);
     Ort::UnownedValue out = ctx_.GetOutput(o.ctx_index, shp);
-    const float* src = mlx_array_data_float32(a);
-    std::memcpy(out.GetTensorMutableRawData(), src, count * sizeof(float));
+    void* dst = out.GetTensorMutableRawData();
+    // Typed memcpy matching the ORT output element type (must mirror ToMlx()).
+    switch (o.type) {
+      case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:
+        std::memcpy(dst, mlx_array_data_float32(a), count * sizeof(float));
+        break;
+      case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16:
+        std::memcpy(dst, mlx_array_data_float16(a), count * sizeof(uint16_t));
+        break;
+      case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64:
+        std::memcpy(dst, mlx_array_data_int64(a), count * sizeof(int64_t));
+        break;
+      case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32:
+        std::memcpy(dst, mlx_array_data_int32(a), count * sizeof(int32_t));
+        break;
+      case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8:
+        std::memcpy(dst, mlx_array_data_uint8(a), count * sizeof(uint8_t));
+        break;
+      default:
+        throw MlxError("MLX: unsupported boundary output dtype for " + o.name);
+    }
   }
 
   Plan& plan_;
@@ -597,7 +586,8 @@ class Run {
   std::vector<mlx_array> transient_;
 };
 
-// Ops we can translate; used to reject a subgraph (keeping the hand path) rather than throw later.
+// Ops we translate to MLX. A claimed subgraph containing anything else is a hard error at BuildPlan
+// (there is no hand-kernel fallback); GetCapability only ever claims ops in this set.
 bool Supported(const std::string& op) {
   static const char* kOps[] = {"MatMulNBits", "GroupQueryAttention", "RMSNormalization",
                                "SkipSimplifiedLayerNormalization", "GatherBlockQuantized",
@@ -639,5 +629,3 @@ bool RunPlan(Plan& plan, Ort::KernelContext& ctx, std::string& error) {
 }
 
 }  // namespace ort_mps_mlx
-
-#endif  // ORT_MPS_HAS_MLX

@@ -1,12 +1,23 @@
-# Metal EP tests
+# MLX EP tests
+
+The EP is MLX-native (ONNX fused decoder subgraph → MLX graph, MLX as the sole compute path). Three
+suites run through CTest:
+
+- **`mlx_op_tests`** (`tests/ops/mlx_op_test.py`) — op-correctness: each ONNX decoder op the EP
+  translates to MLX (MatMulNBits, GroupQueryAttention, RMSNormalization,
+  SkipSimplifiedLayerNormalization, GatherBlockQuantized, Softmax, Add/Mul/Sub/Sigmoid/Cast) is run
+  through the plugin and compared, tolerance-gated, against ORT's CPU EP reference.
+- **`mlx_e2e`** (`tests/e2e/e2e_test.cc`) — full-MLX prefill+decode coherence gate: the MetalEP token
+  stream must match the ORT CPU reference ("The capital of France is Paris").
+- **`mlx_leak_test`** (`tests/e2e/leak_test.mm`) — memory-leak regression (below).
 
 ## Memory-leak regression
 
-`mps_leak_test` loads the plugin EP in-process and measures
-`MTLDevice.currentAllocatedSize` across eight bounded create-session, short-generate,
-destroy-session cycles. The first cycle establishes a post-warmup baseline. Every later cycle
-must return within 16 MiB of it; the test stops immediately on growth and also has a 2 GiB hard
-ceiling.
+`mlx_leak_test` loads the plugin EP in-process and measures `MTLDevice.currentAllocatedSize` (which
+captures both the residual MTLBuffer I/O pool and MLX's Metal allocations) across bounded
+create-session, short-generate, destroy-session cycles. The first cycle establishes a post-warmup
+baseline. Every later cycle must return within a small bound of it; the test stops immediately on
+growth and also has a hard ceiling.
 
 The default model is:
 
@@ -18,16 +29,16 @@ Run through CTest:
 
 ```bash
 cmake --build build -j8
-ctest --test-dir build --output-on-failure
+DYLD_LIBRARY_PATH=<ort-prebuilt/lib> ctest --test-dir build --output-on-failure
 ```
 
-CTest reports the leak test as skipped (return code 77) when the model or its external data file
-is unavailable.
+CTest reports the leak/e2e tests as skipped (return code 77) when the model or its external data
+file is unavailable.
 
 ## Metal validation layers
 
-Run the existing E2E coherence test and the leak regression with Apple's CPU-side API validation,
-GPU shader validation, error reporting, and abort-on-fault enabled:
+Run the E2E coherence test and the leak regression with Apple's CPU-side API validation, GPU shader
+validation, error reporting, and abort-on-fault enabled:
 
 ```bash
 tests/run_with_metal_validation.sh build
@@ -46,3 +57,4 @@ MTL_DEBUG_LAYER_WARNING_MODE=nslog
 ```
 
 Override paths with `MPS_E2E_MODEL`, `MPS_EP_LIBRARY`, or `MPS_PROMPT_TOKENS`.
+

@@ -1,33 +1,61 @@
-# onnxruntime-mps
+# onnxruntime-mlx
 
-A custom **Apple Metal/MPS execution provider** for ONNX Runtime, built as an out-of-tree
+An **MLX-native execution provider** for ONNX Runtime on Apple Silicon, built as an out-of-tree
 **plugin EP** (ORT plugin-EP C ABI, ORT 1.27 / `ORT_API_VERSION 27`). It ships as a standalone
-`libonnxruntime_mps_ep.dylib` loaded by a stock prebuilt `libonnxruntime.dylib` via
+`libonnxruntime_mlx_ep.dylib` loaded by a stock prebuilt `libonnxruntime.dylib` via
 `RegisterExecutionProviderLibrary` — **no ONNX Runtime fork required**.
 
-Goal: hand-tuned Metal kernels (int4 `MatMulNBits`, `GroupQueryAttention`, RoPE, RMSNorm,
-`GatherBlockQuantized`, …) that make ORT the **fastest runtime on Apple Silicon**, beating
-llama.cpp-Metal-class stacks (LM Studio, Foundry Local) for the models our
-[`onnx-genai`](../onnx-genai) runtime and [`mobius`](../mobius) builder use.
+Instead of hand-tuned Metal shaders, the EP **translates a fused ONNX decoder subgraph into an
+[MLX](https://github.com/ml-explore/mlx) graph** and lets MLX compile/schedule the Metal work. One
+efficient implementation (MLX) covers the whole decoder for **both prefill and decode** — there are
+no `.metal` kernels to maintain.
 
-> **Status:** the plugin EP skeleton and initial Metal kernels are implemented. Current coverage
-> includes elementwise/activation ops, fp16/fp32 casts, RoPE, block-quantized embedding gather,
-> and basic data movement, with CPU fallback for unsupported nodes. See
-> [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture and phased plan.
+> **Why MLX-only?** A Phase-0 head-to-head (see [`docs/MLX_EVALUATION.md`](docs/MLX_EVALUATION.md))
+> found the MLX path Pareto-dominant vs. the previous hand-written kernels: **decode 1.02–1.09×
+> (never slower)**, **prefill ~2.5–3.5× faster**, coherent output, and memory-stable. The hand
+> kernels were deleted and MLX promoted to the sole compute path.
+
+## Compute path
+
+`ONNX fused subgraph → MLX graph → single mlx_eval at the subgraph boundary → ORT outputs`
+
+- **MatMulNBits** → `mlx_quantized_matmul` (int4 weights repacked once, cached on the plan)
+- **GroupQueryAttention** (RoPE in-op) → `mlx_fast_scaled_dot_product_attention` + `mlx_fast_rope`
+- **RMSNormalization / SkipSimplifiedLayerNormalization** → `mlx_fast_rms_norm`
+- **GatherBlockQuantized** (symmetric int4 embedding) → gather + dequant
+- **Softmax / Add / Mul / Sub / Sigmoid / Cast** → the matching MLX elementwise ops
+
+Ops the EP does not translate are left unclaimed and run on ORT's CPU EP.
+
+## Requirements
+
+- macOS on Apple Silicon, ORT 1.27 prebuilt (`ORT_API_VERSION >= 27`)
+- **`mlx-c` (and `mlx`) — a HARD build dependency**: `brew install mlx-c`
+
+## Build
+
+```sh
+cmake -S . -B build -G "Unix Makefiles"   # FAILS if mlx-c is not installed
+cmake --build build -j8
+# => build/libonnxruntime_mlx_ep.dylib   (registers the EP under the name "MetalEP")
+```
 
 ## Layout
 
 ```
-docs/     design docs
-include/  public C entry-point headers
-src/ep/   plugin-EP ABI glue (C++/Obj-C++)
-src/kernels/  Metal shader sources (.metal)
+docs/     design docs (DESIGN, OP_ARCHITECTURE, MLX_EVALUATION)
+include/  public C entry-point headers (CreateEpFactories / ReleaseEpFactory)
+src/ep/   plugin-EP ABI glue + the ONNX->MLX translator (mlx_backend.{h,cc})
 cmake/    build helpers
-tests/    per-kernel correctness + onnx-genai-driven e2e
+tests/    MLX op-correctness (tests/ops) + e2e coherence & leak (tests/e2e)
 ```
 
 ## Testing
 
-End-to-end validation runs through onnx-genai: `ONNX_GENAI_EP=metal` registers this plugin
-library and drives the existing Qwen2.5-0.5B packages in `onnx-genai/models/`. See
-[`docs/DESIGN.md` §7](docs/DESIGN.md).
+```sh
+DYLD_LIBRARY_PATH=<ort-prebuilt/lib> ctest --test-dir build
+```
+
+- `mlx_op_tests` — each translated decoder op via MLX vs. ORT CPU reference (tolerance-gated)
+- `mlx_e2e` — full-MLX prefill+decode coherence gate ("The capital of France is Paris")
+- `mlx_leak_test` — allocator memory flat across bounded session/inference cycles
