@@ -91,5 +91,6 @@ void RegisterNormExtOps(OpRegistry& registry);
 void RegisterAttentionExtOps(OpRegistry& registry);
 void RegisterConvOps(OpRegistry& registry);
 void RegisterSsmMiscOps(OpRegistry& registry);
+void RegisterMatMulOps(OpRegistry& registry);
 
 }  // namespace ort_mps_mlx

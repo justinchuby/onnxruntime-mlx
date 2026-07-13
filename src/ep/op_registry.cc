@@ -23,6 +23,7 @@ void RegisterBuiltinOps(OpRegistry& registry) {
   RegisterAttentionExtOps(registry);
   RegisterConvOps(registry);
   RegisterSsmMiscOps(registry);
+  RegisterMatMulOps(registry);
 }
 
 }  // namespace
