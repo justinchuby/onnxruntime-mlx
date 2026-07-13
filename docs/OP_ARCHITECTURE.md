@@ -64,7 +64,7 @@ The following table is the current support contract. Do not broaden claims witho
 | **GroupQueryAttention** | `com.microsoft` | 9-input separate-QKV form; `fp32` Q/K/V/past_k/past_v/cos/sin; `int32` `seqlens_k` and `total_seq`; RoPE applied in-op | `mlx_fast_scaled_dot_product_attention` + `mlx_fast_rope` | Writes present K/V back to the same ORT ctx outputs in `[B, kv_heads, total_seq, head]` `fp32` layout. This keeps prefill→decode KV handoff layout- and position-continuous. |
 | **RMSNormalization** | `ai.onnx` | `axis=-1`; `fp32`/`fp16`/`bf16` | `mlx_fast_rms_norm` | Gamma is cached from live context data on first run. Dtype-generic. |
 | **SkipSimplifiedLayerNormalization** | `com.microsoft` | `fp32`/`fp16`/`bf16` input/skip/gamma | skip-add + `mlx_fast_rms_norm` | Implements residual add followed by RMS normalization. Dtype-generic. |
-| **GatherBlockQuantized** | `com.microsoft` | SYMMETRIC int4 embedding only; 3-input form; `zp=8` | gather + int4 dequant | The asymmetric 4-input `zero_points` form is intentionally not claimed and falls back to CPU. MLX zero-points support is a documented follow-up. |
+| **GatherBlockQuantized** | `com.microsoft` | int4 embedding, symmetric (3-input, `zp=8`) **and** asymmetric (4-input `zero_points`) | gather + int4 dequant | Symmetric: `w=(q-8)·scale`. Asymmetric: `w=(q-zp)·scale`. |
 | **Softmax** | `ai.onnx` | last-axis; `fp32`/`fp16`/`bf16` | `mlx_softmax` | Claimed only for the last-axis form. Dtype-generic. |
 | **Add** | `ai.onnx` | `fp32`/`fp16`/`bf16` | MLX elementwise add | Floating forms only (fp32 via the residual-add predicate, fp16/bf16 via the elementwise predicate). |
 | **Mul** | `ai.onnx` | `fp32`/`fp16`/`bf16` | MLX elementwise multiply | Floating forms only. |
@@ -72,22 +72,36 @@ The following table is the current support contract. Do not broaden claims witho
 | **Sigmoid** | `ai.onnx`, `com.microsoft` | `fp32`/`fp16`/`bf16` | MLX elementwise sigmoid | Standalone `SiLU`/`Swish` are not claimed. |
 | **Cast** | `ai.onnx` | float↔float among `fp32`/`fp16`/`bf16`, `int64`→`int32` | MLX cast | Other casts remain on CPU. |
 
-### 2.1 Ops no longer claimed
+### 2.1 Coverage status (2026-07-13)
 
-The old hand-kernel architecture claimed or planned additional ops. The MLX translator does **not** currently claim these; they run on ORT CPU:
+Coverage now spans the full Mobius op inventory (~70 op types, up from the 11 in the core table above). The table in §2 lists the decode hot-path core; the complete registered set, by module, is:
 
-| Former op | Current behavior | Reason |
-|---|---|---|
-| `Div` | CPU fallback | No current MLX translator entry. |
-| `SiLU` | CPU fallback | The translator claims `Sigmoid`, not standalone SiLU. |
-| `Swish` | CPU fallback | No current MLX translator entry. |
-| `Gelu` | CPU fallback | No current MLX translator entry. |
-| standalone `RotaryEmbedding` | CPU fallback | RoPE is translated only inside `GroupQueryAttention` via `mlx_fast_rope`. |
-| `Reshape` | CPU fallback | No current MLX translator entry. |
-| `Transpose` | CPU fallback | No current MLX translator entry. |
-| `Concat` | CPU fallback | No current MLX translator entry. |
+| Module | Registered ops |
+|---|---|
+| `elementwise.cc` | Add, Mul, Sub, Sigmoid, Softmax, Cast |
+| `math.cc` | Div, Relu, Tanh, Softplus, Clip, Gelu, Exp, Log, Sqrt, Reciprocal, Neg, Abs, Floor, Sign, Erf, Sin, Cos, Min, Max, Pow, CastLike, Where, Equal, Less, Greater, GreaterOrEqual, And, Or, Not |
+| `reduction.cc` | ReduceSum, ReduceMax, ReduceMean, ReduceMin, ReduceSumSquare, CumSum, TopK |
+| `shape.cc` | Gather, GatherElements, Concat, Reshape, Transpose, Unsqueeze, Squeeze, Flatten, Expand, Slice, Split, Tile, Pad, Identity, ConstantOfShape |
+| `norm.cc` / `norm_ext.cc` | RMSNormalization, SkipSimplifiedLayerNormalization, LayerNormalization, SimplifiedLayerNormalization, SkipLayerNormalization, GroupNormalization, LpNormalization, BatchNormalization |
+| `attention.cc` / `attention_ext.cc` | GroupQueryAttention, Attention (opset 23 & 24), MultiHeadAttention |
+| `conv.cc` | Conv, ConvTranspose, AveragePool, GlobalAveragePool, MaxPool, GlobalMaxPool |
+| `quant.cc` | MatMulNBits, GatherBlockQuantized (symmetric **and** asymmetric/zero_points) |
+| `ssm_misc.cc` | TensorScatter (opset 24), CausalConvWithState |
 
-This list is intentionally explicit because older design notes and branch history may still mention these ops as hand-kernel coverage.
+Every claim is **conservative**: a handler claims only the ONNX forms it can translate correctly (dtype/shape/attr/opset checked in its `ClaimPredicate`); every other form falls back to ORT CPU, which is always correct. Each op has pytest coverage in `tests/ops/` (251 passing), and the attention tests assert the node actually ran on `MLXExecutionProvider` (no vacuous CPU-fallback passes).
+
+**Deliberately left to ORT CPU (documented reasons, not gaps):**
+
+| Op / form | Reason |
+|---|---|
+| `Scan` | Nested subgraph BODY — the flat `NodeDesc` plan cannot represent control-flow subgraphs (engine-level follow-up). |
+| `LinearAttention` | Multi-rule chunked recurrence — not a clean MLX sequence. |
+| `LightningAttention` | Not registered in this ORT build. |
+| `PackedMultiHeadAttention` | Variable-length packed layout needs runtime cumulative-seqlen, unavailable at claim time. |
+| MHA with padding-mask / attention-bias / KV-cache, `Attention` softcap / `nonpad_kv_seqlen`, causal+explicit-mask mix | Beyond `mlx_fast_scaled_dot_product_attention`'s expressible modes, or require an omitted **interior** optional input. |
+| Conv 3D / SAME auto-pad / asymmetric-pad / dilated-grouped ConvTranspose, `ceil_mode` pooling, MaxPool indices | Not matched to an MLX form; conservative claims only. |
+
+**Engine limitation (follow-up):** ORT's `GetCapability` convex-clustering pass in `ep.cc` dereferences the input `OrtValueInfo` of every graph node **before** any claim runs; ORT returns a **null** `ValueInfo` for an omitted *interior* optional input, which crashes session creation graph-wide. Handlers therefore reject interior-optional-gap forms (`HasInteriorGap`). Real exporters keep optionals contiguous, so this does not affect the decoder E2E. A null-guard in the clustering pass would lift this restriction.
 
 ---
 
@@ -186,9 +200,7 @@ The backend writes present K/V to the same ORT context outputs in `[B, kv_heads,
 
 ### 3.4 Quantized embedding gather
 
-`GatherBlockQuantized` is claimed only for the symmetric int4 embedding form with three inputs and `zp=8`. The backend performs gather plus int4 dequant.
-
-The asymmetric four-input form with explicit `zero_points` is not claimed. It falls back to CPU until the MLX zero-points path is implemented and tested.
+`GatherBlockQuantized` is claimed for both the symmetric int4 embedding form (three inputs, `zp=8`, `w=(q-8)·scale`) and the asymmetric four-input form with explicit `zero_points` (`w=(q-zp)·scale`). The backend performs gather plus int4 dequant.
 
 ### 3.5 Softmax and elementwise
 
