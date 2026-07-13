@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Apple Silicon only: the MLX EP requires Metal + mlx-c (macos-14 runners are arm64).
+jobs:
+  build-test:
+    name: Build + op tests (macOS arm64)
+    runs-on: macos-14
+    env:
+      ORT_VERSION: "1.27.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mlx-c (hard dependency)
+        run: brew install mlx-c
+
+      - name: Provision ONNX Runtime ${{ env.ORT_VERSION }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz" \
+            | tar xz
+          echo "ORT_HOME=$PWD/onnxruntime-osx-arm64-${ORT_VERSION}" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python test deps
+        run: python -m pip install --upgrade "onnxruntime==${ORT_VERSION}" numpy onnx_ir pytest
+
+      - name: Configure + build the EP
+        run: |
+          cmake -S . -B build -G "Unix Makefiles" \
+            -DORT_HOME="$ORT_HOME" \
+            -DORT_MLX_BUILD_E2E=OFF
+          cmake --build build -j3
+
+      - name: Op-correctness tests (pytest, MLX vs ORT CPU)
+        run: |
+          export ONNXRUNTIME_MLX_EP_LIB="$PWD/build/libonnxruntime_mlx_ep.dylib"
+          export DYLD_LIBRARY_PATH="$ORT_HOME/lib"
+          python -m pytest tests/ops -q
+
+  python-wheel:
+    name: Python package smoke (macOS arm64)
+    runs-on: macos-14
+    env:
+      ORT_VERSION: "1.27.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mlx-c (hard dependency)
+        run: brew install mlx-c
+
+      - name: Provision ONNX Runtime ${{ env.ORT_VERSION }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz" \
+            | tar xz
+          echo "ORT_HOME=$PWD/onnxruntime-osx-arm64-${ORT_VERSION}" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build + install the wheel
+        run: |
+          python -m pip install --upgrade pip "onnxruntime==${ORT_VERSION}"
+          MACOSX_DEPLOYMENT_TARGET=14.0 python -m pip install ./python -v \
+            -C cmake.define.ORT_HOME="$ORT_HOME"
+
+      - name: Import + register smoke test
+        run: |
+          python - <<'PY'
+          import os, onnxruntime_mlx as m
+          print("version", m.version(), "ep", m.ep_name(), "lib", m.library_path())
+          assert os.path.isfile(m.library_path())
+          m.register_execution_provider_library()
+          PY
