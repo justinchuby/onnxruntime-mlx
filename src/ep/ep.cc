@@ -1038,10 +1038,26 @@ struct SubgraphPlan {
   std::unordered_map<std::string, void*> intermediate_pool;
   std::unordered_map<std::string, size_t> intermediate_bytes;
 
-  // Phase-0 MLX path (populated in Compile only when ONNX_GENAI_METAL_EP_MLX is set and MLX was
-  // compiled in). When present, RunSubgraph hands the WHOLE subgraph to MLX in one eval instead of
-  // encoding the hand kernels. nullptr => the default hand-kernel Metal path runs unchanged.
+  // Phase-1 MLX hybrid path (populated in Compile only when ONNX_GENAI_METAL_EP_MLX is set and MLX
+  // was compiled in). When present, RunSubgraph routes by the runtime forward width M (the current
+  // query sequence length): PREFILL (M >= mlx_prefill_min) runs the WHOLE subgraph through MLX in
+  // one eval (Phase-0 measured 2.5-3x TTFT); DECODE (M < mlx_prefill_min, i.e. per-token M==1) runs
+  // the hand-kernel Metal path below (at parity for batch-1 decode, and avoids MLX's per-step graph
+  // rebuild). Both paths read past K/V from the SAME ORT ctx inputs and write present K/V to the
+  // SAME ORT ctx outputs in the identical [B, kv_heads, total_seq, head] fp32 layout with RoPE
+  // applied to stored K at absolute positions [past, past+M) -- so the KV cache handoff across the
+  // prefill->decode boundary (and every decode step) is layout- and position-continuous with no
+  // conversion. nullptr => the default hand-kernel Metal path runs unchanged.
   std::unique_ptr<ort_mps_mlx::Plan, ort_mps_mlx::PlanDeleter> mlx_plan;
+
+  // Hybrid routing state (only meaningful when mlx_plan != nullptr).
+  // ctx input index whose runtime shape yields M (the embedding gather's `input_ids` indices,
+  // shape [B, M]); -1 => could not identify it, so fall back to whole-subgraph MLX (Phase-0
+  // behavior) rather than mis-route.
+  int mlx_m_source_ctx_index = -1;
+  // Route to MLX when M >= this threshold; decode (M below it) uses hand kernels. Tunable via
+  // ONNX_GENAI_METAL_EP_MLX_PREFILL_MIN (default 8).
+  int mlx_prefill_min = 8;
 
   ~SubgraphPlan() {
     if (ep == nullptr) return;
@@ -1161,13 +1177,32 @@ OrtStatus* RunSubgraph(SubgraphPlan& plan, OrtKernelContext* kernel_context) {
     Ort::KernelContext ctx(kernel_context);
     ort_mps::MetalContext* metal = ep->Metal();
 
-    // Phase-0 MLX path: hand the whole fused subgraph to MLX (one mlx_eval at the boundary).
+    // Phase-1 MLX hybrid: route by the runtime forward width M (the current query sequence length).
+    // PREFILL (M >= threshold) -> whole subgraph via MLX (one mlx_eval; 2.5-3x TTFT). DECODE
+    // (M < threshold, per-token M==1) -> fall through to the hand-kernel Metal path below. The KV
+    // cache is shared automatically: both paths read past K/V from the same ctx inputs and write
+    // present K/V to the same ctx outputs in the identical [B, kv_heads, total, head] fp32 layout.
     if (plan.mlx_plan) {
-      std::string mlx_err;
-      if (!ort_mps_mlx::RunPlan(*plan.mlx_plan, ctx, mlx_err)) {
-        return ort_api_.CreateStatus(ORT_EP_FAIL, ("MetalEP MLX subgraph failed: " + mlx_err).c_str());
+      bool use_mlx = true;  // default: whole-subgraph MLX (when M source is unknown)
+      if (plan.mlx_m_source_ctx_index >= 0) {
+        Ort::ConstValue ids = ctx.GetInput(static_cast<size_t>(plan.mlx_m_source_ctx_index));
+        std::vector<int64_t> ids_shape = ids.GetTensorTypeAndShapeInfo().GetShape();
+        // input_ids is [B, M]; M is the last dim (fall back to element count for rank<=1).
+        const int64_t m = ids_shape.empty()
+                              ? static_cast<int64_t>(
+                                    ids.GetTensorTypeAndShapeInfo().GetElementCount())
+                              : ids_shape.back();
+        use_mlx = m >= static_cast<int64_t>(plan.mlx_prefill_min);
       }
-      return nullptr;
+      if (use_mlx) {
+        std::string mlx_err;
+        if (!ort_mps_mlx::RunPlan(*plan.mlx_plan, ctx, mlx_err)) {
+          return ort_api_.CreateStatus(ORT_EP_FAIL,
+                                       ("MetalEP MLX subgraph failed: " + mlx_err).c_str());
+        }
+        return nullptr;
+      }
+      // else: decode step -> run the hand-kernel path below (shared KV cache via ctx I/O).
     }
 
     std::string err;
@@ -1490,6 +1525,15 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
   const OrtApi& ort_api_ = ep->ort_api;  // for MPS_LOG
   const OrtLogger* logger_ = ep->logger_;
   const bool mlx_enabled = ort_mps_mlx::Enabled();
+  // Hybrid prefill threshold: route the forward to MLX when M (current query seq length) >= this,
+  // else run the hand-kernel decode path. Tunable via ONNX_GENAI_METAL_EP_MLX_PREFILL_MIN.
+  int mlx_prefill_min = 8;
+  if (mlx_enabled) {
+    if (const char* env = std::getenv("ONNX_GENAI_METAL_EP_MLX_PREFILL_MIN")) {
+      const int parsed = std::atoi(env);
+      if (parsed >= 1) mlx_prefill_min = parsed;
+    }
+  }
   try {
     for (size_t i = 0; i < count; ++i) {
       Ort::ConstGraph graph{graphs[i]};
@@ -1499,6 +1543,9 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
       auto plan = std::make_unique<SubgraphPlan>();
       plan->ep = ep;
       std::vector<ort_mps_mlx::NodeDesc> mlx_nodes;  // parallel MLX plan (only used when enabled)
+      // ctx input index that carries M for hybrid routing: the embedding gather's dynamic (non-
+      // constant) `input_ids` indices input, shape [B, M]. Detected in the node loop below.
+      int m_source_ctx_index = -1;
 
       // Fused-node input/output name -> OrtKernelContext index (the runtime I/O boundary).
       std::unordered_map<std::string, size_t> ctx_input_index;
@@ -1650,6 +1697,19 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
           ort_mps_mlx::NodeDesc mnd;
           mnd.op_type = node.GetOperatorType();
           mnd.domain = node.GetDomain();
+          // Identify the M-source ctx input: the embedding gather (GatherBlockQuantized/Gather)
+          // consumes the dynamic `input_ids` indices [B, M]; among its inputs it is the only
+          // CtxInput that is NOT a hoisted constant initializer. Its per-forward last-dim = M.
+          if ((mnd.op_type == "GatherBlockQuantized" || mnd.op_type == "Gather") &&
+              m_source_ctx_index < 0) {
+            const NodePlan& gather = plan->nodes.back();
+            for (const InputRef& gin : gather.inputs) {
+              if (gin.source == Source::CtxInput && !initializers.count(gin.name)) {
+                m_source_ctx_index = static_cast<int>(gin.ctx_index);
+                break;
+              }
+            }
+          }
           // Capture the attributes the MLX translator reads (harmless defaults otherwise).
           mnd.ints["K"] = IntAttribute(node, "K", 0);
           mnd.ints["N"] = IntAttribute(node, "N", 0);
@@ -1701,8 +1761,19 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
           MPS_LOG(WARNING, "MetalEP: MLX path requested but disabled for this subgraph ("
                                << mlx_err << "); using hand-kernel path");
         } else {
-          MPS_LOG(INFO, "MetalEP: MLX path ENABLED for fused subgraph " << fused_name
-                                                                        << " (whole-subgraph one-eval)");
+          plan->mlx_prefill_min = mlx_prefill_min;
+          plan->mlx_m_source_ctx_index = m_source_ctx_index;
+          if (m_source_ctx_index >= 0) {
+            MPS_LOG(INFO, "MetalEP: MLX HYBRID enabled for fused subgraph "
+                              << fused_name << " (prefill M>=" << mlx_prefill_min
+                              << " via MLX, decode via hand kernels; M-source ctx input #"
+                              << m_source_ctx_index << ")");
+          } else {
+            MPS_LOG(WARNING, "MetalEP: MLX enabled for fused subgraph "
+                                 << fused_name
+                                 << " but could not identify the M-source (input_ids) ctx input; "
+                                    "routing the WHOLE subgraph through MLX (no decode split)");
+          }
         }
       }
 
