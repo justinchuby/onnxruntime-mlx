@@ -211,14 +211,20 @@ MetalContext::~MetalContext() {
     fprintf(stderr, "[MetalEP] total GPU command-buffer commits this session: %llu\n",
             static_cast<unsigned long long>(impl_->commit_count));
   }
+  // MRR (no ARC): every buffer/pipeline in these maps holds a +1 from Alloc /
+  // newComputePipelineState; assigning nil does NOT release under MRR, so send
+  // -release explicitly to avoid leaking GPU memory across sessions.
   for (auto& entry : impl_->buffers) {
-    entry.second = nil;
+    [entry.second release];
   }
   impl_->buffers.clear();
   for (auto& entry : impl_->pipelines) {
-    entry.second = nil;
+    [entry.second release];
   }
   impl_->pipelines.clear();
+  [impl_->library release];
+  [impl_->queue release];
+  [impl_->device release];
   impl_->library = nil;
   impl_->queue = nil;
   impl_->device = nil;
@@ -320,7 +326,9 @@ void MetalContext::Free(void* ptr) {
   std::lock_guard<std::mutex> lock(impl_->alloc_mutex);
   auto it = impl_->buffers.find(ptr);
   if (it != impl_->buffers.end()) {
-    it->second = nil;
+    // MRR: release the +1 taken by Alloc's newBufferWithLength. Assigning nil
+    // does NOT release under MRR — that was leaking every freed GPU buffer.
+    [it->second release];
     impl_->buffers.erase(it);
   }
 }
