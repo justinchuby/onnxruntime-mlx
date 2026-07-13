@@ -264,3 +264,131 @@ kernel void mps_matmulnbits_i8(device const float*   A         [[buffer(0)]],
     Y[(ulong)m * N + n] = has_bias ? (acc + bias[n]) : acc;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Prefill GEMM (M large, e.g. M >= 8) — simdgroup_matrix (MMA) tiled kernel.
+//
+// The decode kernels above are GEMVs: one output column per simdgroup, the full
+// int4 weight set re-streamed once per output ROW. For prefill (M prompt rows) that
+// is M×-weight-bandwidth-bound — the GPU's weakness (Batty measured Metal prefill
+// 1.5–2× SLOWER than CPU, gap growing with M). This kernel instead loads each weight
+// tile into threadgroup memory ONCE and reuses it across all M rows in the tile, so
+// weight bytes are read ~once per output tile instead of once per row — turning
+// prefill into the compute-bound GEMM where the GPU wins. Structure follows the Apple
+// gold standard (llama.cpp `ggml-metal.metal` `kernel_mul_mm`): stage fp16 A and
+// dequantized-fp16 B tiles into threadgroup memory, MMA-accumulate in fp32 simdgroup
+// registers, K-loop over the shared dimension.
+//
+// Computes  Y[m,n] = sum_k A[m,k] * dequant(W)[n,k]  (+ bias[n]),  Y row-major [M,N].
+//   * A : device fp32 [M,K]           (activations)
+//   * W : int4 block-quantized, column-major [N, nblocks, 16 bytes] + scales [N, nblocks]
+//   * Output tile is BM x BN; the K-loop steps one quant block (BK == block_size == 32)
+//     at a time, so each K-step maps to exactly one scale per column (clean dequant).
+//
+// Tiling:
+//   * BM=32, BN=32, BK=32. Threadgroup = 128 threads = 4 simdgroups (2x2 grid), each simdgroup
+//     owns a 16x16 output subtile = 2x2 array of 8x8 fp32 accumulators. Each staged weight tile is
+//     reused across all 32 activation rows of the tile, so a length-M prefill reads the weight set
+//     ~M/32 times instead of M times (the old GEMV). (A BM=64 row tile was measured slower here —
+//     the extra register/threadgroup pressure cut occupancy more than the halved weight traffic
+//     helped; 32x32 with 128 threads is the occupancy sweet spot on M1.)
+//   * As[BM][BK] (fp16) and Bs[BN][BK] (fp16, dequantized) staged cooperatively by the 128 threads
+//     each K-step; one threadgroup_barrier before the MMA and one after.
+//   * MMA: acc[mi][ni] += Afrag[mi] * Bfrag[ni]. Bfrag is loaded transposed so the 8x8 fragment is
+//     B^T (indices [k][n]) — giving C[m,n] = sum_k A[m,k]*B[n,k].
+//   * fp16 tiles, fp32 accumulate (simdgroup_float8x8) — the llama.cpp precision recipe.
+// ---------------------------------------------------------------------------
+kernel void mps_matmulnbits_gemm_f32(device const float*  A       [[buffer(0)]],
+                                     device const uchar*  B       [[buffer(1)]],
+                                     device const float*  scales  [[buffer(2)]],
+                                     device float*        Y       [[buffer(3)]],
+                                     device const float*  bias    [[buffer(4)]],
+                                     constant uint&       M       [[buffer(5)]],
+                                     constant uint&       N       [[buffer(6)]],
+                                     constant uint&       K       [[buffer(7)]],
+                                     constant uint&       nblocks [[buffer(8)]],
+                                     constant uint&       has_bias[[buffer(9)]],
+                                     uint3 tgid [[threadgroup_position_in_grid]],
+                                     uint  tid  [[thread_index_in_threadgroup]],
+                                     uint  sgid [[simdgroup_index_in_threadgroup]]) {
+  const uint BM = 32u, BN = 32u, BK = 32u;   // BK == block_size (one quant block per K-step)
+  const uint bytes_per_block = 16u;
+  const uint MFRAG = 2u, NFRAG = 2u;         // 8x8 accumulators per simdgroup (16 rows x 16 cols)
+
+  threadgroup half  As[32 * 32];             // BM x BK activation tile
+  threadgroup half  Bs[32 * 32];             // BN x BK dequantized weight tile
+  threadgroup float Cs[32 * 32];             // BM x BN output-store scratch
+
+  const uint m0 = tgid.y * BM;               // output tile row origin
+  const uint n0 = tgid.x * BN;               // output tile col origin
+
+  // 4 simdgroups in a 2x2 grid; each owns a 16x16 subtile (2x2 of 8x8 accumulators).
+  const uint m_sub_base = (sgid >> 1) * 16u; // 0 or 16
+  const uint n_sub_base = (sgid & 1u) * 16u; // 0 or 16
+
+  simdgroup_float8x8 acc[2][2];
+  for (uint i = 0; i < MFRAG; ++i)
+    for (uint j = 0; j < NFRAG; ++j)
+      acc[i][j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+
+  for (uint kt = 0; kt < nblocks; ++kt) {
+    const uint k0 = kt * BK;
+
+    // Stage A tile: As[i][j] = A[m0+i][k0+j] as half, zero-padded past M/K bounds.
+    for (uint idx = tid; idx < BM * BK; idx += 128u) {
+      const uint i = idx / BK, j = idx % BK;
+      const uint gm = m0 + i, gk = k0 + j;
+      As[idx] = (gm < M && gk < K) ? half(A[(ulong)gm * K + gk]) : half(0.0h);
+    }
+
+    // Stage B tile (dequantized): the K-step is exactly one quant block (block index kt),
+    // so each column has a single scale. Each thread unpacks packed bytes -> two halves.
+    for (uint idx = tid; idx < BN * bytes_per_block; idx += 128u) {
+      const uint i = idx / bytes_per_block;      // local column
+      const uint byte = idx % bytes_per_block;   // packed byte within the block
+      const uint gn = n0 + i;
+      half2 vals = half2(0.0h);
+      if (gn < N) {
+        const uchar packed = B[((ulong)gn * nblocks + kt) * bytes_per_block + byte];
+        const half hs = half(scales[(ulong)gn * nblocks + kt]);
+        vals = half2(half(float(packed & 0x0Fu) - 8.0f),   // low nibble  -> even index
+                     half(float(packed >> 4)   - 8.0f))    // high nibble -> odd index
+               * hs;
+      }
+      Bs[i * BK + byte * 2u]      = vals.x;
+      Bs[i * BK + byte * 2u + 1u] = vals.y;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // MMA over the block: BK/8 == 4 chunks of 8. Afrag non-transposed [m][k]; Bfrag
+    // transposed so it represents B^T [k][n]. acc[mi][ni] += Afrag[mi] * Bfrag[ni].
+    for (uint kk = 0; kk < BK / 8u; ++kk) {
+      simdgroup_half8x8 af[2], bf[2];
+      for (uint mi = 0; mi < MFRAG; ++mi)
+        simdgroup_load(af[mi], As + (m_sub_base + mi * 8u) * BK + kk * 8u, BK);
+      for (uint ni = 0; ni < NFRAG; ++ni)
+        simdgroup_load(bf[ni], Bs + (n_sub_base + ni * 8u) * BK + kk * 8u, BK, ulong2(0), true);
+      for (uint mi = 0; mi < MFRAG; ++mi)
+        for (uint ni = 0; ni < NFRAG; ++ni)
+          simdgroup_multiply_accumulate(acc[mi][ni], af[mi], bf[ni], acc[mi][ni]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  // Store accumulators to threadgroup scratch, then copy to Y with bounds + bias.
+  for (uint mi = 0; mi < MFRAG; ++mi)
+    for (uint ni = 0; ni < NFRAG; ++ni)
+      simdgroup_store(acc[mi][ni],
+                      Cs + (m_sub_base + mi * 8u) * BN + (n_sub_base + ni * 8u), BN);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint idx = tid; idx < BM * BN; idx += 128u) {
+    const uint i = idx / BN, j = idx % BN;
+    const uint gm = m0 + i, gn = n0 + j;
+    if (gm < M && gn < N) {
+      float v = Cs[idx];
+      if (has_bias) v += bias[gn];
+      Y[(ulong)gm * N + gn] = v;
+    }
+  }
+}

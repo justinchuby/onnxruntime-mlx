@@ -867,6 +867,11 @@ OrtStatus* MarietteKernel::ComputeIO(KernelIO& io) {
       // overhead + threadgroup-memory occupancy pressure without cutting the bottleneck (measured
       // ~82 vs ~103 tok/s decode). Default therefore stays on fp32; set ONNX_GENAI_METAL_EP_MATMUL_INT8=1
       // to select the int8 kernel (correctness-proven; useful for compute-bound / large-M regimes).
+      //
+      // Prefill (M large) is routed automatically inside MatMulNBitsF32: for M >= the prefill
+      // threshold it dispatches the simdgroup_matrix (MMA) GEMM that reuses each weight tile across
+      // the M rows (compute-bound — beats CPU TTFT at 256/512-token prompts), while decode (M=1)
+      // keeps the tuned VectorF32 GEMV. The runtime M passed here is the selection input.
       static const bool use_int8 = std::getenv("ONNX_GENAI_METAL_EP_MATMUL_INT8") != nullptr;
       const bool ok =
           use_int8

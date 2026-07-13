@@ -468,6 +468,57 @@ void TestMatMulNBitsInt8(ort_mps::MetalContext& metal) {
 
 }  // namespace
 
+// Prefill GEMM path (simdgroup_matrix MMA) vs the fp32 CPU reference. Forces Variant::GemmF32
+// at prefill-scale M (8, 32, 128) and at shapes whose M/N are NOT multiples of the 32x32 tile
+// (exercises the boundary padding in staging + the bounds-checked store). The GEMM stages A and
+// the dequantized weights as fp16 tiles (fp32 accumulate), so the error is fp16-tile-bounded; we
+// quantify the worst case against the fp32 reference and bound it with an fp16-aware atol+rtol.
+namespace {
+void TestMatMulNBitsGemm(ort_mps::MetalContext& metal) {
+  using Variant = ort_mps::MetalContext::MatMulNBitsVariant;
+  std::mt19937 rng(9001);
+  const size_t block = 32;
+  float worst_abs = 0.0f, worst_rel = 0.0f;
+  struct Shape { size_t M, N, K; };
+  // Aligned tiles, a large-K case (34 blocks), and ragged M/N (not multiples of 32).
+  for (const Shape& sh : {Shape{8, 32, 256}, Shape{32, 64, 256}, Shape{128, 32, 1088},
+                          Shape{8, 40, 64}, Shape{40, 96, 128}, Shape{100, 48, 512}}) {
+    const size_t M = sh.M, N = sh.N, K = sh.K;
+    std::vector<uint8_t> packed;
+    std::vector<float> scales, dequant;
+    BuildQuantWeights(N, K, block, rng, packed, scales, dequant);
+
+    std::uniform_real_distribution<float> adist(-1.0f, 1.0f);
+    std::vector<float> a(M * K);
+    for (auto& v : a) v = adist(rng);
+    std::vector<float> bias(N);
+    for (auto& v : bias) v = adist(rng);
+
+    std::vector<float> y(M * N, 0.0f);
+    std::string error;
+    Require(metal.MatMulNBitsF32(a.data(), packed.data(), scales.data(), bias.data(), y.data(), M,
+                                 N, K, K / block, error, Variant::GemmF32),
+            error);
+    for (size_t m = 0; m < M; ++m) {
+      for (size_t n = 0; n < N; ++n) {
+        float ref = bias[n];
+        for (size_t k = 0; k < K; ++k) ref += a[m * K + k] * dequant[n * K + k];
+        const float got = y[m * N + n];
+        const float abs_err = std::fabs(got - ref);
+        worst_abs = std::max(worst_abs, abs_err);
+        if (std::fabs(ref) >= 0.1f) worst_rel = std::max(worst_rel, abs_err / std::fabs(ref));
+        // fp16-tile GEMM: bound with combined atol + rtol (near-zero outputs use atol only).
+        CheckNear(got, ref, 1e-1f + 1e-2f * std::fabs(ref),
+                  "MatMulNBitsGemm M=" + std::to_string(M) + " N=" + std::to_string(N) +
+                      " K=" + std::to_string(K));
+      }
+    }
+  }
+  std::cout << "  MatMulNBitsGemm: worst abs-err vs fp32 = " << worst_abs
+            << ", worst rel-err (|ref|>=0.1) = " << worst_rel << "\n";
+}
+}  // namespace
+
 int main() {
   try {
     std::string error;
@@ -475,6 +526,7 @@ int main() {
     Require(metal != nullptr, error);
     TestMatMulNBits(*metal);
     TestMatMulNBitsInt8(*metal);
+    TestMatMulNBitsGemm(*metal);
     TestRmsNorm(*metal);
     TestSkipSimplifiedLayerNorm(*metal);
     TestSoftmax(*metal);

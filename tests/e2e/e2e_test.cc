@@ -160,6 +160,51 @@ std::vector<int64_t> Generate(Ort::Session& session, const Model& model,
   return generated;
 }
 
+// Measures the prefill / TTFT compute: a single forward pass over the full prompt with an empty
+// KV cache (exactly step 0 of Generate). Runs one warmup pass (discarded — excludes graph
+// allocation/first-touch warmup) then `iters` timed passes, returning the best (min) seconds.
+// Bounded (`iters` small) per the memory-safety note — no unbounded sweep.
+double MeasurePrefill(Ort::Session& session, const Model& model,
+                      const std::vector<int64_t>& prompt, int iters) {
+  Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+  const int64_t seq = static_cast<int64_t>(prompt.size());
+  const std::array<int64_t, 4> empty_shape{1, kKvHeads, 0, kHeadDim};
+
+  auto run_once = [&]() {
+    std::vector<int64_t> ids = prompt;
+    std::array<int64_t, 2> ids_shape{1, seq};
+    Ort::Value input_ids = Ort::Value::CreateTensor<int64_t>(mem, ids.data(), ids.size(),
+                                                             ids_shape.data(), ids_shape.size());
+    std::vector<int64_t> mask(seq, 1);
+    std::array<int64_t, 2> mask_shape{1, seq};
+    Ort::Value attention_mask = Ort::Value::CreateTensor<int64_t>(
+        mem, mask.data(), mask.size(), mask_shape.data(), mask_shape.size());
+
+    std::vector<std::vector<float>> empty_kv(kNumLayers * 2);
+    std::vector<Ort::Value> inputs;
+    inputs.reserve(2 + kNumLayers * 2);
+    inputs.push_back(std::move(input_ids));
+    inputs.push_back(std::move(attention_mask));
+    for (int i = 0; i < kNumLayers * 2; ++i) {
+      inputs.push_back(Ort::Value::CreateTensor<float>(mem, empty_kv[i].data(), 0,
+                                                       empty_shape.data(), empty_shape.size()));
+    }
+    return session.Run(Ort::RunOptions{nullptr}, model.input_name_ptrs.data(), inputs.data(),
+                       inputs.size(), model.output_name_ptrs.data(),
+                       model.output_name_ptrs.size());
+  };
+
+  run_once();  // warmup (discarded)
+  double best = 1e30;
+  for (int it = 0; it < iters; ++it) {
+    auto t0 = std::chrono::steady_clock::now();
+    auto outputs = run_once();
+    auto t1 = std::chrono::steady_clock::now();
+    best = std::min(best, std::chrono::duration<double>(t1 - t0).count());
+  }
+  return best;
+}
+
 Ort::Session MakeSession(Ort::Env& env, const std::string& model_path, bool use_metal,
                          const std::string& ep_lib, const std::string& registration_name) {
   Ort::SessionOptions opts;
@@ -196,19 +241,33 @@ Ort::Session MakeSession(Ort::Env& env, const std::string& model_path, bool use_
 int main(int argc, char** argv) {
   if (argc < 4) {
     std::cerr << "Usage: " << argv[0]
-              << " <model.onnx> <ep_lib.dylib> <prompt_tokens.txt> [num_new_tokens]\n";
+              << " <model.onnx> <ep_lib.dylib> <prompt_tokens.txt> [num_new_tokens] [pad_to]"
+                 " [prefill_iters]\n";
     return 2;
   }
   const std::string model_path = argv[1];
   const std::string ep_lib = argv[2];
   const std::string tokens_path = argv[3];
   const int num_new = argc > 4 ? std::atoi(argv[4]) : 16;
+  // Optional prompt padding (token-repeat) to sweep prefill/TTFT at longer contexts, and an
+  // optional prefill-timing iteration count. Both Metal and CPU see the identical padded prompt.
+  const int pad_to = argc > 5 ? std::atoi(argv[5]) : 0;
+  const int prefill_iters = argc > 6 ? std::atoi(argv[6]) : 3;
   const std::string registration_name = "MetalEP";
 
   try {
     std::vector<int64_t> prompt = ReadTokens(tokens_path);
+    if (pad_to > static_cast<int>(prompt.size())) {
+      const std::vector<int64_t> base = prompt;
+      size_t i = 0;
+      while (static_cast<int>(prompt.size()) < pad_to) {
+        prompt.push_back(base[i % base.size()]);
+        ++i;
+      }
+    }
     std::cout << "[e2e] prompt tokens (" << prompt.size() << "): ";
-    for (int64_t t : prompt) std::cout << t << " ";
+    for (size_t i = 0; i < prompt.size() && i < 32; ++i) std::cout << prompt[i] << " ";
+    if (prompt.size() > 32) std::cout << "...";
     std::cout << "\n";
 
     Ort::Env env(ORT_LOGGING_LEVEL_INFO, "mps_e2e");
@@ -226,6 +285,7 @@ int main(int argc, char** argv) {
 
     std::vector<int64_t> metal_ids, cpu_ids;
     double metal_decode_secs = 0.0, cpu_decode_secs = 0.0;
+    double metal_prefill_secs = 0.0, cpu_prefill_secs = 0.0;
 
     // Sessions must be destroyed BEFORE UnregisterExecutionProviderLibrary: a session created
     // from the plugin holds references (EP, allocator, data-transfer) into the .dylib, and
@@ -234,11 +294,13 @@ int main(int argc, char** argv) {
       // --- MetalEP run ---
       std::cout << "\n===== MetalEP session =====\n";
       Ort::Session metal_session = MakeSession(env, model_path, true, ep_lib, registration_name);
+      metal_prefill_secs = MeasurePrefill(metal_session, model, prompt, prefill_iters);
       metal_ids = Generate(metal_session, model, prompt, num_new, metal_decode_secs);
 
       // --- CPU reference run ---
       std::cout << "\n===== CPU reference session =====\n";
       Ort::Session cpu_session = MakeSession(env, model_path, false, ep_lib, registration_name);
+      cpu_prefill_secs = MeasurePrefill(cpu_session, model, prompt, prefill_iters);
       cpu_ids = Generate(cpu_session, model, prompt, num_new, cpu_decode_secs);
     }
 
@@ -251,6 +313,12 @@ int main(int argc, char** argv) {
     };
     print_ids("[e2e] MetalEP tokens: ", metal_ids);
     print_ids("[e2e] CPU     tokens: ", cpu_ids);
+
+    // Prefill / TTFT: whole-prompt forward with empty KV (best of `prefill_iters`).
+    std::cout << "[e2e] prefill/TTFT (" << prompt.size() << " tokens): MetalEP "
+              << (metal_prefill_secs * 1e3) << " ms vs CPU " << (cpu_prefill_secs * 1e3)
+              << " ms  =>  Metal/CPU = " << (metal_prefill_secs / cpu_prefill_secs) << "x  ("
+              << (metal_prefill_secs < cpu_prefill_secs ? "Metal FASTER" : "CPU faster") << ")\n";
 
     const int decode_steps = std::max(0, num_new - 1);
     if (metal_decode_secs > 0.0) {

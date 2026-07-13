@@ -128,7 +128,10 @@ class MetalContext {
   //   * Scalar    — reference byte-load kernel (`mps_matmulnbits_f32`).
   //   * VectorF32 — uint4 wide-load, fp32 math (the default decode path).
   //   * VectorF16 — uint4 wide-load, fp16 math (small extra quant error; higher ALU throughput).
-  enum class MatMulNBitsVariant { Auto, Scalar, VectorF32, VectorF16 };
+  //   * GemmF32   — simdgroup_matrix (MMA) tiled prefill GEMM: loads each weight tile into
+  //     threadgroup memory once and reuses it across the M rows of the tile (compute-bound;
+  //     the prefill path for large M). Auto selects it when M >= the prefill threshold.
+  enum class MatMulNBitsVariant { Auto, Scalar, VectorF32, VectorF16, GemmF32 };
   bool MatMulNBitsF32(const float* a, const uint8_t* b, const float* scales, const float* bias,
                       float* y, size_t m, size_t n, size_t k, size_t nblocks, std::string& error,
                       MatMulNBitsVariant variant = MatMulNBitsVariant::Auto);

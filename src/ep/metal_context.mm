@@ -275,7 +275,7 @@ std::unique_ptr<MetalContext> MetalContext::Create(std::string& error) {
         "mps_copy_bytes",       "mps_transpose_bytes",  "mps_concat_slice_bytes",
         // Mariette core-compute kernels.
         "mps_matmulnbits_f32",  "mps_matmulnbits_f32_v", "mps_matmulnbits_f16_v",
-        "mps_matmulnbits_i8",
+        "mps_matmulnbits_i8",   "mps_matmulnbits_gemm_f32",
         "mps_rmsnorm_f32",
         "mps_skip_simplified_layernorm_f32", "mps_softmax_f32",
         "mps_gqa_write_kv_f32", "mps_gqa_attention_f32",
@@ -954,10 +954,29 @@ bool MetalContext::MatMulNBitsF32(const float* a, const uint8_t* b, const float*
     // ONNX_GENAI_METAL_EP_MATMUL_FP16=1. An explicit `variant` argument overrides the env.
     static const bool force_scalar = std::getenv("ONNX_GENAI_METAL_EP_MATMUL_SCALAR") != nullptr;
     static const bool use_fp16 = std::getenv("ONNX_GENAI_METAL_EP_MATMUL_FP16") != nullptr;
+    // Prefill routing: for M >= threshold, use the simdgroup_matrix (MMA) GEMM that reuses each
+    // weight tile across the M rows (compute-bound), instead of the per-row GEMV that re-streams
+    // the full weight set M times (M×-bandwidth-bound). Decode (M=1) stays on the tuned VectorF32
+    // GEMV. Threshold overridable via ONNX_GENAI_METAL_EP_GEMM_THRESHOLD; the GEMM path is
+    // disabled (old GEMV-replicated prefill, for A/B measurement) via ONNX_GENAI_METAL_EP_NOGEMM=1.
+    static const bool no_gemm = std::getenv("ONNX_GENAI_METAL_EP_NOGEMM") != nullptr;
+    static const size_t gemm_threshold = []() -> size_t {
+      const char* e = std::getenv("ONNX_GENAI_METAL_EP_GEMM_THRESHOLD");
+      long v = e != nullptr ? std::atol(e) : 8;
+      return v > 0 ? static_cast<size_t>(v) : 8;
+    }();
     if (variant == MatMulNBitsVariant::Auto) {
-      variant = force_scalar ? MatMulNBitsVariant::Scalar
-                : use_fp16   ? MatMulNBitsVariant::VectorF16
-                             : MatMulNBitsVariant::VectorF32;
+      variant = force_scalar                       ? MatMulNBitsVariant::Scalar
+                : use_fp16                          ? MatMulNBitsVariant::VectorF16
+                : (!no_gemm && m >= gemm_threshold) ? MatMulNBitsVariant::GemmF32
+                                                    : MatMulNBitsVariant::VectorF32;
+    }
+    if (variant == MatMulNBitsVariant::GemmF32) {
+      // Threadgroup = 128 threads (4 simdgroups); one 32x32 (BM x BN) output tile per threadgroup.
+      MTLSize tgroups = MTLSizeMake((n + 31) / 32, (m + 31) / 32, 1);
+      MTLSize tgsize = MTLSizeMake(128, 1, 1);
+      return RunPass(impl, "mps_matmulnbits_gemm_f32", bufs, consts, tgroups, tgsize,
+                     /*by_threadgroups=*/true, error);
     }
     const char* pipeline = variant == MatMulNBitsVariant::Scalar     ? "mps_matmulnbits_f32"
                            : variant == MatMulNBitsVariant::VectorF16 ? "mps_matmulnbits_f16_v"
