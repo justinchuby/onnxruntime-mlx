@@ -1,7 +1,8 @@
 // Copyright (c) 2026. Licensed under the MIT License.
 //
 // Quantized op handlers: MatMulNBits (int4 block-quantized weight matmul via mlx_quantized_matmul)
-// and GatherBlockQuantized (int4 embedding gather + symmetric dequant). These are the fp32 quant
+// and GatherBlockQuantized (int4 embedding gather + dequant, both the symmetric zp=8 form and the
+// asymmetric 4-input form with an explicit packed int4 zero_points input). These are the fp32 quant
 // path used by the cpu-recipe decoder; the weight repack runs once and is cached on the Plan.
 
 #include <cstdint>
@@ -81,34 +82,21 @@ void MatMulNBitsOp(TranslationContext& ctx, const NodeDesc& n) {
   ctx.Bind(n.outputs[0], ctx.Reshape(out, oshape));
 }
 
-// GatherBlockQuantized: gather int4 rows for input_ids and dequantize (symmetric zp=8).
-void GatherBlockQuantizedOp(TranslationContext& ctx, const NodeDesc& n) {
-  const int64_t block = n.ints.count("block_size") ? n.ints.at("block_size") : 32;
-  const TensorRef& dref = n.inputs[0];  // uint8 [V, packed]
-  mlx_array idx_in = ctx.Resolve(n.inputs[1]);
-  const TensorRef& sref = n.inputs[2];  // f32 [V, nblocks]
+// Gather rows `idx` (0-axis) of `src`, returning [BS, ...] (kept for teardown).
+mlx_array GatherRows(TranslationContext& ctx, mlx_array src, mlx_array idx) {
+  mlx_array g = mlx_array_new();
+  MLX_CHECK(mlx_take_axis(&g, src, idx, 0, ctx.stream()));
+  return ctx.Keep(g);
+}
 
-  mlx_array data = ctx.Resolve(dref);    // uint8 [V, D/2]
-  mlx_array scales = ctx.Resolve(sref);  // f32 [V, nblocks]
-
-  // Flatten indices to 1D int32.
-  std::vector<int> ish = TranslationContext::ShapeOf(idx_in);
-  int BS = 1;
-  for (int d : ish) BS *= d;
-  mlx_array idx = ctx.Astype(ctx.Reshape(idx_in, {BS}), MLX_INT32);
-
-  mlx_array g = mlx_array_new();  // [BS, D/2] uint8
-  MLX_CHECK(mlx_take_axis(&g, data, idx, 0, ctx.stream()));
-  ctx.Keep(g);
-  mlx_array sg = mlx_array_new();  // [BS, nblocks]
-  MLX_CHECK(mlx_take_axis(&sg, scales, idx, 0, ctx.stream()));
-  ctx.Keep(sg);
-
-  const int packed = TranslationContext::ShapeOf(g)[1];
-  const int D = packed * 2;
-  const int nblocks = static_cast<int>(D / block);
-
-  mlx_array g32 = ctx.Astype(g, MLX_UINT32);
+// Unpack the interleaved low/high int4 nibbles of a packed uint8 tensor [BS, P] into the flattened
+// int4 values [BS, 2P] (uint32), column order low(byte0), high(byte0), low(byte1), high(byte1), ...
+// This is the nibble layout both the packed int4 weight `data` and the packed int4 `zero_points`
+// use along the quantize axis.
+mlx_array UnpackNibbles(TranslationContext& ctx, mlx_array packed_u8) {
+  const int BS = TranslationContext::ShapeOf(packed_u8)[0];
+  const int P = TranslationContext::ShapeOf(packed_u8)[1];
+  mlx_array g32 = ctx.Astype(packed_u8, MLX_UINT32);
   mlx_array low = mlx_array_new();
   MLX_CHECK(mlx_bitwise_and(&low, g32, ctx.ScalarU32(0x0F), ctx.stream()));
   ctx.Keep(low);
@@ -119,26 +107,76 @@ void GatherBlockQuantizedOp(TranslationContext& ctx, const NodeDesc& n) {
   MLX_CHECK(mlx_bitwise_and(&high, hi_sh, ctx.ScalarU32(0x0F), ctx.stream()));
   ctx.Keep(high);
 
-  // Interleave low/high -> [BS, packed, 2] -> [BS, D].
   mlx_vector_array pair = mlx_vector_array_new();
   mlx_vector_array_append_value(pair, low);
   mlx_vector_array_append_value(pair, high);
-  mlx_array stacked = mlx_array_new();
+  mlx_array stacked = mlx_array_new();  // [BS, P, 2]
   MLX_CHECK(mlx_stack_axis(&stacked, pair, 2, ctx.stream()));
   ctx.Keep(stacked);
   mlx_vector_array_free(pair);
-  mlx_array q = ctx.Reshape(stacked, {BS, D});
+  return ctx.Reshape(stacked, {BS, P * 2});
+}
+
+// Broadcast a per-block float tensor [BS, nblocks] up to per-element [BS, nblocks*block]: element j
+// of a row picks its block value from block j/block. Used for both the scale and (asymmetric) the
+// zero-point, so each dequantized element applies its block's parameters.
+mlx_array BroadcastBlocks(TranslationContext& ctx, mlx_array blocks, int BS, int nblocks, int block) {
+  mlx_array r = ctx.Reshape(blocks, {BS, nblocks, 1});
+  int bshape[3] = {BS, nblocks, block};
+  mlx_array b = mlx_array_new();
+  MLX_CHECK(mlx_broadcast_to(&b, r, bshape, 3, ctx.stream()));
+  ctx.Keep(b);
+  return ctx.Reshape(b, {BS, nblocks * block});
+}
+
+// GatherBlockQuantized: gather int4 rows for input_ids and dequantize. Two claimed forms share this
+// handler (single registry entry per (domain, op)): the 3-input SYMMETRIC form (implicit zp=8) and
+// the 4-input ASYMMETRIC form with an explicit packed int4 `zero_points` input. Dequant is
+// w = (q - zp) * scale, with zp = 8 (symmetric) or the per-block zero point (asymmetric).
+void GatherBlockQuantizedOp(TranslationContext& ctx, const NodeDesc& n) {
+  const int64_t block = n.ints.count("block_size") ? n.ints.at("block_size") : 32;
+  mlx_array idx_in = ctx.Resolve(n.inputs[1]);
+  mlx_array data = ctx.Resolve(n.inputs[0]);    // uint8 [V, D/2]
+  mlx_array scales = ctx.Resolve(n.inputs[2]);  // f32 [V, nblocks]
+
+  // Flatten indices to 1D int32.
+  std::vector<int> ish = TranslationContext::ShapeOf(idx_in);
+  int BS = 1;
+  for (int d : ish) BS *= d;
+  mlx_array idx = ctx.Astype(ctx.Reshape(idx_in, {BS}), MLX_INT32);
+
+  mlx_array g = GatherRows(ctx, data, idx);     // [BS, D/2] uint8
+  mlx_array sg = GatherRows(ctx, scales, idx);  // [BS, nblocks]
+
+  const int packed = TranslationContext::ShapeOf(g)[1];
+  const int D = packed * 2;
+  const int nblocks = static_cast<int>(D / block);
+
+  mlx_array q = UnpackNibbles(ctx, g);  // [BS, D] uint32
   mlx_array qf = ctx.Astype(q, MLX_FLOAT32);
 
-  // Dequant: (q - 8) * scale, scale broadcast per 32-wide block.
-  mlx_array eight = ctx.Keep(mlx_array_new_float32(8.0f));
-  mlx_array centered = ctx.SubA(qf, eight);
-  mlx_array sc_blocks = ctx.Reshape(sg, {BS, nblocks, 1});
-  int bshape[3] = {BS, nblocks, static_cast<int>(block)};
-  mlx_array sc_b = mlx_array_new();
-  MLX_CHECK(mlx_broadcast_to(&sc_b, sc_blocks, bshape, 3, ctx.stream()));
-  ctx.Keep(sc_b);
-  mlx_array sc_full = ctx.Reshape(sc_b, {BS, D});
+  // zero point per element: constant 8 (symmetric) or the per-block int4 zero point (asymmetric).
+  mlx_array centered;
+  if (n.inputs.size() == 4) {
+    mlx_array zp_data = ctx.Resolve(n.inputs[3]);       // uint8 [V, nblocks/2] packed int4
+    mlx_array zpg = GatherRows(ctx, zp_data, idx);      // [BS, nblocks/2]
+    mlx_array zp_un = UnpackNibbles(ctx, zpg);          // [BS, 2*(nblocks/2)]
+    // Keep exactly nblocks zero points (an odd nblocks leaves a trailing padding nibble).
+    if (TranslationContext::ShapeOf(zp_un)[1] != nblocks) {
+      mlx_array sl = ctx.Slice(zp_un, {0, 0}, {BS, nblocks});
+      mlx_array c = mlx_array_new();
+      MLX_CHECK(mlx_contiguous(&c, sl, /*allow_col_major=*/false, ctx.stream()));
+      zp_un = ctx.Keep(c);
+    }
+    mlx_array zpf = ctx.Astype(zp_un, MLX_FLOAT32);
+    mlx_array zp_full = BroadcastBlocks(ctx, zpf, BS, nblocks, static_cast<int>(block));
+    centered = ctx.SubA(qf, zp_full);
+  } else {
+    mlx_array eight = ctx.Keep(mlx_array_new_float32(8.0f));
+    centered = ctx.SubA(qf, eight);
+  }
+
+  mlx_array sc_full = BroadcastBlocks(ctx, sg, BS, nblocks, static_cast<int>(block));
   mlx_array w = ctx.Mul(centered, sc_full);
 
   // Restore [.., D] output shape from the index tensor's shape.
@@ -175,15 +213,18 @@ bool MatMulNBitsClaim(Ort::ConstNode node) {
   return IntAttribute(node, "bits", 4) == 4 && IntAttribute(node, "block_size", 32) == 32;
 }
 
-// GatherBlockQuantized (com.microsoft): SYMMETRIC int4 embedding, 3-input form (zp=8). The
-// asymmetric 4-input zero_points form is left to ORT's CPU EP.
+// GatherBlockQuantized (com.microsoft): int4 block-quantized embedding gather + dequant. Two forms
+// share this predicate (one registry entry per op): the SYMMETRIC 3-input form (implicit zp=8) and
+// the ASYMMETRIC 4-input form with an explicit packed int4 `zero_points` input (uint8, same nibble
+// layout as `data`). Both require uint8 data, int32/int64 indices, float scales matching the output
+// dtype, bits=4, gather_axis=0, quantize_axis=1, and block_size>=16.
 bool GatherBlockQuantizedClaim(Ort::ConstNode node) {
   const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
   const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
   if (outputs.empty()) return false;
   ONNXTensorElementDataType output_type;
   if (!TensorInfo(outputs[0], output_type)) return false;
-  if (inputs.size() != 3) return false;
+  if (inputs.size() != 3 && inputs.size() != 4) return false;
   ONNXTensorElementDataType data_type, indices_type, scales_type;
   if (!TensorInfo(inputs[0], data_type) || !TensorInfo(inputs[1], indices_type) ||
       !TensorInfo(inputs[2], scales_type) || data_type != ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8 ||
@@ -191,6 +232,14 @@ bool GatherBlockQuantizedClaim(Ort::ConstNode node) {
        indices_type != ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64) ||
       scales_type != output_type || !IsFloatType(scales_type)) {
     return false;
+  }
+  // Asymmetric form: the zero_points input must be packed int4 in uint8 (the layout this handler
+  // unpacks). A float or otherwise-typed zero_points is left to ORT CPU.
+  if (inputs.size() == 4) {
+    ONNXTensorElementDataType zp_type;
+    if (!TensorInfo(inputs[3], zp_type) || zp_type != ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8) {
+      return false;
+    }
   }
   return IntAttribute(node, "bits", 4) == 4 && IntAttribute(node, "gather_axis", 0) == 0 &&
          IntAttribute(node, "quantize_axis", 1) == 1 && IntAttribute(node, "block_size", 128) >= 16;
