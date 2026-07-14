@@ -186,6 +186,28 @@ pub fn mlx_dtype_from_onnx(t: ort::ONNXTensorElementDataType) -> mlxsys::mlx_dty
 /// A translation/runtime error (mirrors the C++ `MlxError`, caught in `RunPlan`).
 pub type MlxError = String;
 
+/// Human-readable MLX dtype name for trace Args (e.g. `"float32"`, `"bfloat16"`).
+pub fn dtype_name(dt: mlxsys::mlx_dtype) -> &'static str {
+    #[allow(non_upper_case_globals)]
+    match dt {
+        mlxsys::mlx_dtype__MLX_BOOL => "bool",
+        mlxsys::mlx_dtype__MLX_UINT8 => "uint8",
+        mlxsys::mlx_dtype__MLX_UINT16 => "uint16",
+        mlxsys::mlx_dtype__MLX_UINT32 => "uint32",
+        mlxsys::mlx_dtype__MLX_UINT64 => "uint64",
+        mlxsys::mlx_dtype__MLX_INT8 => "int8",
+        mlxsys::mlx_dtype__MLX_INT16 => "int16",
+        mlxsys::mlx_dtype__MLX_INT32 => "int32",
+        mlxsys::mlx_dtype__MLX_INT64 => "int64",
+        mlxsys::mlx_dtype__MLX_FLOAT16 => "float16",
+        mlxsys::mlx_dtype__MLX_FLOAT32 => "float32",
+        mlxsys::mlx_dtype__MLX_FLOAT64 => "float64",
+        mlxsys::mlx_dtype__MLX_BFLOAT16 => "bfloat16",
+        mlxsys::mlx_dtype__MLX_COMPLEX64 => "complex64",
+        _ => "unknown",
+    }
+}
+
 /// Raw host bytes for a constant (initializer / constant-ctx-input) tensor, surfaced at translate
 /// time so shape/axes/indices operands (Reshape shape, Slice starts/ends/axes/steps, Pad pads, …)
 /// can be read as plain host integers. Faithful port of the C++ `HostBytes` / `RawHost`.
@@ -296,6 +318,71 @@ impl<'a> TranslationContext<'a> {
     /// Bind a node output name to a produced MLX array (visible to downstream nodes and CopyOut).
     pub fn bind(&mut self, o: &OutRef, a: mlxsys::mlx_array) {
         self.env.insert(o.name.clone(), a);
+    }
+
+    /// Emit the per-op trace detail for the node just translated (only when tracing is on).
+    ///
+    /// Reads each output's shape/dtype/size from the (lazy) bound arrays — shape and dtype
+    /// are graph metadata available WITHOUT eval, so the normal (fine-off) path stays fully
+    /// fused. When [`fine_enabled`](crate::trace::MlxTracer::fine_enabled) is set, additionally
+    /// forces an `mlx_array_eval` of this node's outputs to time it individually — a
+    /// GPU-inclusive per-op bar that BREAKS fusion (debug-only, slower).
+    pub fn trace_node(&mut self, op_type: &str, node: &NodeDesc, start: Option<std::time::Instant>) {
+        if !self.trace_enabled {
+            return;
+        }
+        let Some(start) = start else {
+            return;
+        };
+        let tr = crate::trace::tracer();
+
+        // Output metadata + a vector of the node's output handles (for the fine-mode eval).
+        let mut out_v = VectorArray::new();
+        let mut out_shapes: Vec<String> = Vec::new();
+        let mut dtype = "";
+        let mut elements: u64 = 0;
+        let mut bytes: u64 = 0;
+        let mut n_out = 0usize;
+        for o in &node.outputs {
+            if o.name.is_empty() {
+                continue;
+            }
+            if let Some(&raw) = self.env.get(&o.name) {
+                // Borrow the handle for metadata; do NOT free it (owned by arena/cache).
+                let arr = std::mem::ManuallyDrop::new(Array::from_raw(raw));
+                let sh = arr.shape();
+                let cnt: u64 = sh.iter().map(|&d| d.max(0) as u64).product();
+                out_shapes.push(format!("{sh:?}"));
+                dtype = dtype_name(arr.dtype());
+                elements += cnt;
+                bytes += cnt * arr.itemsize() as u64;
+                out_v.append(raw);
+                n_out += 1;
+            }
+        }
+        // Input shapes, best-effort from whatever is already materialized in the env.
+        let mut in_shapes: Vec<String> = Vec::new();
+        for inp in &node.inputs {
+            if inp.name.is_empty() {
+                continue;
+            }
+            if let Some(&raw) = self.env.get(&inp.name) {
+                let arr = std::mem::ManuallyDrop::new(Array::from_raw(raw));
+                in_shapes.push(format!("{:?}", arr.shape()));
+            }
+        }
+        let out_s = out_shapes.join(";");
+        let in_s = in_shapes.join(";");
+
+        if tr.fine_enabled() && n_out > 0 {
+            // Force materialization of THIS op's outputs → GPU-inclusive time. BREAKS FUSION.
+            let t0 = std::time::Instant::now();
+            let _ = mlx::eval(&out_v);
+            let dur = t0.elapsed();
+            tr.record_gpu_op(op_type, t0, dur, &out_s, &in_s, dtype, elements, bytes);
+        } else {
+            tr.record_op_meta(op_type, start, start.elapsed(), &out_s, &in_s, dtype, elements, bytes);
+        }
     }
 
     /// Resolve a node input to a raw MLX array handle (intermediate env / wrapped ctx input /
@@ -799,6 +886,9 @@ impl<'a> TranslationContext<'a> {
         let tr = crate::trace::tracer();
         tr.sample_gpu_counters();
         {
+            // Wrap the FIRST eval in a Metal GPU capture when requested (one-shot; the
+            // guard stops the capture on drop). `None`/near-zero cost otherwise.
+            let _cap = tr.begin_gpu_capture();
             let _eval = tr.eval_region();
             mlx::eval(&outs)?;
         }

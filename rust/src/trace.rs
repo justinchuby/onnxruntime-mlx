@@ -9,34 +9,51 @@
 //! its own `MTLCommandBuffer`s *inside* `mlx_eval`, and it fuses a whole subgraph
 //! into ONE lazy graph → ONE eval. So the design's per-op `MTLCommandBuffer`
 //! `gpuStartTime` (§4) and per-kernel `MTLCounterSampleBuffer` counters (§6) are
-//! simply **not reachable** through `mlx-c`. What *is* reachable, and what this
-//! module delivers:
+//! simply **not reachable** through `mlx-c` on the default fast path. What *is*
+//! reachable, and what this module delivers:
 //!
 //!   * **Perfetto spans** (via `onnx-runtime-tracer`): one span per fused subgraph
 //!     (`mlx.subgraph`, cat `ep`), a nested span around the **synchronous**
 //!     `mlx_eval` (`mlx.eval`, cat `gpu`) whose CPU wall time is the *GPU-inclusive*
-//!     time of the whole fused subgraph (that is the granularity MLX gives us), plus
-//!     a lightweight span per node at graph-build time (`<op_type>`, cat `op`).
+//!     time of the whole fused subgraph (that is the granularity MLX gives us on the
+//!     fused path), a lightweight span per node at graph-build time (`<op_type>`,
+//!     cat `op`), and a rich per-op detail span (shapes / dtype / elements / bytes).
+//!   * **Seeing INSIDE the fused eval** — two opt-in modes break the single opaque
+//!     `mlx.eval` blob into per-op detail (both keep the default path untouched):
+//!       - **Fine per-op GPU timing** (`ONNX_GENAI_MLX_TRACE_FINE=1`): eval each
+//!         node's outputs individually → a `gpu.op` span per op with GPU-inclusive
+//!         time. BREAKS fusion (debug-only, slower). See [`MlxTracer::fine_enabled`].
+//!       - **Xcode GPU capture** (`ONNX_GENAI_MLX_GPU_CAPTURE=<path.gputrace>`): wrap
+//!         the first eval in `mlx_metal_start_capture`/`stop_capture` for a
+//!         `.gputrace` bundle with full per-kernel timing. See
+//!         [`MlxTracer::begin_gpu_capture`].
 //!   * **os_signpost** intervals around the same subgraph / eval regions, so an
 //!     Instruments *Metal System Trace* correlates. Zero cost when Instruments is
 //!     not attached.
 //!   * **GPU usage counters** (Chrome `"C"` phase, their own Perfetto tracks):
-//!     `mlx.gpu_mem_bytes` (`MTLDevice.currentAllocatedSize`) and `mlx.gpu_mem_pct`
-//!     (allocated / `recommendedMaxWorkingSetSize`). GPU-utilisation % via IOReport
-//!     is a documented TODO (see `sample_gpu_counters`).
+//!     `mlx.gpu_mem_bytes` (`MTLDevice.currentAllocatedSize`), `mlx.gpu_mem_pct`
+//!     (allocated / `recommendedMaxWorkingSetSize`), and `mlx.gpu_util_pct` — GPU
+//!     active-residency % via the private **IOReport** framework (the `GPUPH`
+//!     "GPU Performance States" channel, resolved by `dlopen`/`dlsym`; see
+//!     [`ioreport`]). Degrades to no counter if IOReport is unavailable.
+//!   * **Slowest-ops summary** at teardown ([`MlxTracer::log_slowest_ops`]): a
+//!     compact top-10 (op_type → total µs, %, calls) to stderr + trace metadata.
 //!
 //! Everything is gated on an atomic enable flag inside `TraceContext`: with tracing
 //! OFF (env unset) every entry point is a single relaxed atomic load + early return,
-//! so a production run pays essentially nothing (the design's "0% when off" rule).
+//! so a production run pays essentially nothing (the design's "0% when off" rule) and
+//! the single fused `mlx_eval` is left exactly as-is.
 //!
-//! All `unsafe` FFI (Metal/objc for the memory counter, os_signpost for the
-//! intervals) is confined to this module; the op/engine code stays clean.
+//! All `unsafe` FFI (Metal/objc for the memory counter, the mlx-c Metal capture, the
+//! IOReport GPU-util sampler, os_signpost for the intervals) is confined to this
+//! module; the op/engine code stays clean.
 
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use onnx_runtime_tracer::{Args, MemoryCollector, SpanGuard, TraceContext};
 use std::sync::Arc;
@@ -63,6 +80,21 @@ pub enum PathMark {
 pub const TRACE_ENV: &str = "ONNX_GENAI_MLX_TRACE";
 /// Set to `1` to force os_signpost intervals on even when JSON tracing is off.
 pub const SIGNPOST_ENV: &str = "ONNX_GENAI_MLX_SIGNPOST";
+/// Set to `1` to enable **fine-grained per-op GPU timing** (implies JSON tracing on).
+///
+/// In this mode every node's output array(s) are `mlx_array_eval`'d individually right
+/// after its handler binds them, so each op is materialized on its own and its
+/// GPU-inclusive wall time is recorded as a distinct `gpu.op` span. This BREAKS MLX's
+/// subgraph fusion (materializing per node defeats the lazy graph), so it is
+/// **slower** and strictly a debug tool — the normal path (fine off) keeps the single
+/// fused `mlx_eval`. See [`MlxTracer::fine_enabled`].
+pub const FINE_ENV: &str = "ONNX_GENAI_MLX_TRACE_FINE";
+/// Set to a `<path>.gputrace` (or `1` for a default path) to wrap the **first** boundary
+/// eval in a Metal GPU capture (`mlx_metal_start_capture` … `stop_capture`). The
+/// resulting `.gputrace` bundle opens in Xcode / Instruments for full per-kernel GPU
+/// timing, occupancy and memory-bandwidth — the detail `mlx-c` cannot surface itself.
+/// Only the first eval is captured (a whole-decode capture would be enormous).
+pub const GPU_CAPTURE_ENV: &str = "ONNX_GENAI_MLX_GPU_CAPTURE";
 
 /// Process-wide tracer singleton. All subgraphs/sessions share one timeline and one
 /// output file, stamped with the real `pid` so the events merge into onnx-genai's
@@ -98,6 +130,18 @@ pub struct MlxTracer {
     signpost_log: usize,
     /// Cached default `MTLDevice` as a `usize` (0 = unavailable).
     device: usize,
+    /// Fine-grained per-op GPU timing mode (`ONNX_GENAI_MLX_TRACE_FINE`). Breaks fusion.
+    fine: bool,
+    /// Resolved `.gputrace` capture path (`None` = capture disabled).
+    capture_path: Option<PathBuf>,
+    /// Guards the one-shot Metal capture so only the FIRST eval is captured.
+    capture_done: AtomicBool,
+    /// Cumulative per-op-type time for the end-of-run "slowest ops" summary:
+    /// `op_type -> (total_us, call_count)`. Populated with GPU-inclusive times in fine
+    /// mode, otherwise with build/handler wall times.
+    op_times: Mutex<HashMap<String, (u64, u64)>>,
+    /// IOReport GPU-utilisation sampler (`None` when unavailable). See [`ioreport`].
+    gpu_util: Mutex<Option<ioreport::GpuUtil>>,
 }
 
 // The stored pointers are only ever used through the confined FFI helpers below and
@@ -108,7 +152,10 @@ unsafe impl Sync for MlxTracer {}
 impl MlxTracer {
     fn new() -> Self {
         let path = std::env::var(TRACE_ENV).ok().filter(|s| !s.is_empty());
-        let trace_on = path.is_some();
+        let fine = std::env::var(FINE_ENV).map(|v| v == "1").unwrap_or(false);
+        // Fine mode implies JSON tracing on even if TRACE_ENV is unset (the spans still
+        // accumulate in memory; export is a no-op without a path).
+        let trace_on = path.is_some() || fine;
 
         let (ctx, mem) = if trace_on {
             let (ctx, mem) = TraceContext::in_memory();
@@ -117,6 +164,19 @@ impl MlxTracer {
         } else {
             (TraceContext::noop(), None)
         };
+
+        // GPU capture (`ONNX_GENAI_MLX_GPU_CAPTURE`) is independent of JSON tracing: it
+        // writes a `.gputrace` bundle, not JSON. `1` → a default path in the cwd.
+        let capture_path = std::env::var(GPU_CAPTURE_ENV)
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                if s == "1" {
+                    PathBuf::from("mlx_capture.gputrace")
+                } else {
+                    PathBuf::from(s)
+                }
+            });
 
         let signpost_on = trace_on
             || std::env::var(SIGNPOST_ENV)
@@ -133,6 +193,9 @@ impl MlxTracer {
         // tracing is enabled.
         let device = if trace_on { gpu::default_device() } else { 0 };
 
+        // Best-effort IOReport GPU-utilisation sampler (private framework, no sudo).
+        let gpu_util = if trace_on { ioreport::GpuUtil::new() } else { None };
+
         MlxTracer {
             ctx,
             mem,
@@ -141,6 +204,11 @@ impl MlxTracer {
             composed_counts: Mutex::new(HashMap::new()),
             signpost_log,
             device,
+            fine,
+            capture_path,
+            capture_done: AtomicBool::new(false),
+            op_times: Mutex::new(HashMap::new()),
+            gpu_util: Mutex::new(gpu_util),
         }
     }
 
@@ -298,18 +366,214 @@ impl MlxTracer {
         });
     }
 
+    /// Whether **fine-grained per-op GPU timing** mode is on (`ONNX_GENAI_MLX_TRACE_FINE`).
+    /// When true the engine eval's each node's outputs individually to time them — this
+    /// BREAKS fusion and is a debug-only mode. Implies [`is_enabled`](Self::is_enabled).
+    #[inline]
+    pub fn fine_enabled(&self) -> bool {
+        self.fine
+    }
+
+    /// Emit a rich per-op span (cat `op`) for a node whose outputs are already bound.
+    /// Carries input/output shapes, dtype, element count and byte size so every op span
+    /// has resource context even without fine mode. Also feeds the slowest-ops summary
+    /// with the build/handler wall time. No-op when tracing is disabled.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_op_meta(
+        &self,
+        op_type: &str,
+        start: Instant,
+        dur: Duration,
+        out_shapes: &str,
+        in_shapes: &str,
+        dtype: &str,
+        elements: u64,
+        bytes: u64,
+    ) {
+        if !self.is_enabled() {
+            return;
+        }
+        self.ctx.complete(
+            op_type.to_string(),
+            "op",
+            start,
+            dur,
+            Some(
+                Args::new()
+                    .with("op_type", op_type.to_string())
+                    .with("output_shapes", out_shapes.to_string())
+                    .with("input_shapes", in_shapes.to_string())
+                    .with("dtype", dtype.to_string())
+                    .with("elements", elements)
+                    .with("bytes", bytes),
+            ),
+        );
+        self.record_op_time(op_type, dur.as_micros() as u64);
+    }
+
+    /// Emit a per-op **GPU** span (cat `gpu.op`) for fine mode — its wall time is the
+    /// GPU-INCLUSIVE time of just this op's forced eval (fusion broken). Carries the same
+    /// resource Args and feeds the slowest-ops summary with GPU time. No-op when disabled.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_gpu_op(
+        &self,
+        op_type: &str,
+        start: Instant,
+        dur: Duration,
+        out_shapes: &str,
+        in_shapes: &str,
+        dtype: &str,
+        elements: u64,
+        bytes: u64,
+    ) {
+        if !self.is_enabled() {
+            return;
+        }
+        self.ctx.complete(
+            op_type.to_string(),
+            "gpu.op",
+            start,
+            dur,
+            Some(
+                Args::new()
+                    .device("gpu")
+                    .with("op_type", op_type.to_string())
+                    .with("output_shapes", out_shapes.to_string())
+                    .with("input_shapes", in_shapes.to_string())
+                    .with("dtype", dtype.to_string())
+                    .with("elements", elements)
+                    .with("bytes", bytes),
+            ),
+        );
+        self.record_op_time(op_type, dur.as_micros() as u64);
+    }
+
+    /// Accumulate one op-type timing sample for the end-of-run slowest-ops summary.
+    fn record_op_time(&self, op_type: &str, us: u64) {
+        let mut m = match self.op_times.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let e = m.entry(op_type.to_string()).or_insert((0, 0));
+        e.0 += us;
+        e.1 += 1;
+    }
+
+    /// Log a compact **top-10 slowest ops** summary (op_type → total us, %, call count)
+    /// to stderr AND as a `mlx.slowest_ops` trace-metadata instant, so an agent can see
+    /// e.g. "MatMul = 62% of GPU time" without parsing the whole JSON. In fine mode the
+    /// times are GPU-inclusive; otherwise they are build/handler wall times (noted).
+    /// No-op when tracing is disabled or no ops were recorded.
+    pub fn log_slowest_ops(&self) {
+        if !self.is_enabled() {
+            return;
+        }
+        let snapshot: Vec<(String, u64, u64)> = {
+            let m = match self.op_times.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            m.iter().map(|(k, v)| (k.clone(), v.0, v.1)).collect()
+        };
+        if snapshot.is_empty() {
+            return;
+        }
+        let total: u64 = snapshot.iter().map(|(_, us, _)| *us).sum();
+        let mut ranked = snapshot;
+        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked.truncate(10);
+
+        let kind = if self.fine {
+            "GPU-inclusive per-op"
+        } else {
+            "build-time (fusion intact; per-op GPU time needs ONNX_GENAI_MLX_TRACE_FINE=1)"
+        };
+        let denom = total.max(1) as f64;
+
+        let mut lines = String::new();
+        lines.push_str(&format!(
+            "[rust-mlx-ep] slowest ops ({kind}), total {total} us across {} op-type(s):\n",
+            ranked.len()
+        ));
+        let mut args = Args::new().with("timing_kind", kind).with("total_us", total);
+        for (i, (op, us, calls)) in ranked.iter().enumerate() {
+            let pct = (*us as f64 / denom) * 100.0;
+            lines.push_str(&format!(
+                "  {:>2}. {:<20} {:>10} us  {:>5.1}%  ({} call(s))\n",
+                i + 1,
+                op,
+                us,
+                pct,
+                calls
+            ));
+            args = args.with(
+                format!("{:02}_{op}", i + 1),
+                format!("{us}us {pct:.1}% x{calls}"),
+            );
+        }
+        eprint!("{lines}");
+        self.ctx.instant("mlx.slowest_ops", "summary", Some(args));
+    }
+
+    /// Begin the one-shot Metal GPU capture around the FIRST eval, returning a guard that
+    /// stops the capture (and logs the written path) on drop. Returns `None` when capture
+    /// is disabled, already taken, or Metal is unavailable. Independent of JSON tracing.
+    #[must_use]
+    pub fn begin_gpu_capture(&self) -> Option<CaptureGuard> {
+        let path = self.capture_path.as_ref()?;
+        // Take the one-shot slot; only the first eval wins.
+        if self
+            .capture_done
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return None;
+        }
+        if !metal_capture::is_available() {
+            eprintln!(
+                "[rust-mlx-ep] GPU capture requested but Metal is unavailable (mlx_metal_is_available=false); skipping"
+            );
+            return None;
+        }
+        // The Metal capture layer must be inserted BEFORE the process creates its
+        // MTLDevice, which only happens when `MTL_CAPTURE_ENABLED=1` is exported in the
+        // environment. Without it `mlx_metal_start_capture` hits MLX's fatal error
+        // handler (which aborts the process), so we refuse up-front with a clear message
+        // rather than crash the run.
+        let capture_layer_on = std::env::var("MTL_CAPTURE_ENABLED")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        if !capture_layer_on {
+            eprintln!(
+                "[rust-mlx-ep] GPU capture requires MTL_CAPTURE_ENABLED=1 to be exported before the \
+                 process starts (the Metal capture layer must be inserted at device creation); \
+                 skipping capture. Re-run with: MTL_CAPTURE_ENABLED=1 ONNX_GENAI_MLX_GPU_CAPTURE={} ...",
+                path.to_string_lossy()
+            );
+            return None;
+        }
+        let path_str = path.to_string_lossy().to_string();
+        if metal_capture::start(&path_str) {
+            eprintln!("[rust-mlx-ep] Metal GPU capture STARTED → {path_str} (first eval only)");
+            Some(CaptureGuard { path: path_str })
+        } else {
+            eprintln!(
+                "[rust-mlx-ep] GPU capture start FAILED for {path_str} \
+                 (capture requires MTL_CAPTURE_ENABLED=1 in the environment and a path ending in .gputrace)"
+            );
+            None
+        }
+    }
+
+
     /// Sample GPU usage counters (cheap; only when tracing is enabled).
     ///
     /// Emits `mlx.gpu_mem_bytes` (`MTLDevice.currentAllocatedSize`) and, when the
-    /// device reports a working-set budget, `mlx.gpu_mem_pct`.
-    ///
-    /// TODO(gpu-util): GPU *utilisation %* / active-residency and power/freq come
-    /// from the private **IOReport** framework (the source `macmon`/`asitop`/Activity
-    /// Monitor read — `IOReportCreateSubscription` / `IOReportCreateSamples` +
-    /// delta, iterated with a block callback). That block-based iteration is heavy to
-    /// land cleanly via raw FFI, so it is deferred; GPU memory (a genuine "gpu usage"
-    /// signal) ships now. See <https://github.com/vladkens/macmon> for the IOReport
-    /// approach when this is picked up.
+    /// device reports a working-set budget, `mlx.gpu_mem_pct`. When the IOReport GPU
+    /// sampler initialised, also emits `mlx.gpu_util_pct` (GPU active-residency %) and,
+    /// when available, `mlx.gpu_freq_mhz` — the utilisation signal `macmon`/`asitop`/
+    /// Activity Monitor read from the private IOReport framework (no sudo). If IOReport
+    /// was unavailable the util counters are simply skipped (see [`ioreport`]).
     pub fn sample_gpu_counters(&self) {
         if !self.is_enabled() || self.device == 0 {
             return;
@@ -336,6 +600,34 @@ impl MlxTracer {
                 value: (allocated / recommended) * 100.0,
                 ts,
             });
+        }
+        drop(c);
+
+        // GPU utilisation % (and freq) via IOReport — a real delta between this sample
+        // and the previous one. First call primes the baseline and yields nothing.
+        if let Ok(mut util) = self.gpu_util.lock() {
+            if let Some(sampler) = util.as_mut() {
+                if let Some(reading) = sampler.sample() {
+                    let mut c = match self.counters.lock() {
+                        Ok(g) => g,
+                        Err(p) => p.into_inner(),
+                    };
+                    c.push(CounterSample {
+                        track: "mlx.gpu_util_pct".to_string(),
+                        key: "pct".to_string(),
+                        value: reading.active_pct,
+                        ts,
+                    });
+                    if let Some(mhz) = reading.freq_mhz {
+                        c.push(CounterSample {
+                            track: "mlx.gpu_freq_mhz".to_string(),
+                            key: "mhz".to_string(),
+                            value: mhz,
+                            ts,
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -413,6 +705,24 @@ impl Drop for Region {
             iv.end();
         }
         // `_span` records on its own Drop.
+    }
+}
+
+/// RAII guard for the one-shot Metal GPU capture: stops the capture (writing the
+/// `.gputrace` bundle) and logs the path when dropped. Created by
+/// [`MlxTracer::begin_gpu_capture`].
+#[must_use = "the GPU capture only covers the region this guard is alive for"]
+pub struct CaptureGuard {
+    path: String,
+}
+
+impl Drop for CaptureGuard {
+    fn drop(&mut self) {
+        metal_capture::stop();
+        eprintln!(
+            "[rust-mlx-ep] Metal GPU capture STOPPED → wrote {} (open in Xcode: `open {}`)",
+            self.path, self.path
+        );
     }
 }
 
@@ -554,6 +864,419 @@ mod signpost {
                 buf.len() as u32,
             );
             Some(Interval { log, id, name: name_ptr })
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Confined FFI: Metal GPU capture via mlx-c (the Xcode GPU-debugger capture).
+//
+// mlx-c exposes exactly three entry points for this; MLX drives the underlying
+// MTLCaptureManager itself, so wrapping the FIRST eval in start/stop produces a
+// `.gputrace` bundle with full per-kernel GPU timing / occupancy / bandwidth — the
+// detail mlx-c will not surface programmatically.
+// ---------------------------------------------------------------------------
+
+mod metal_capture {
+    use crate::sys::mlx;
+    use std::ffi::CString;
+
+    /// `mlx_metal_is_available()` — false on machines without a Metal GPU.
+    pub fn is_available() -> bool {
+        let mut res = false;
+        // Returns non-zero on error; treat any error as "unavailable".
+        let rc = unsafe { mlx::mlx_metal_is_available(&mut res as *mut bool) };
+        rc == 0 && res
+    }
+
+    /// Start a capture writing to `path` (must end in `.gputrace`). Returns whether it started.
+    pub fn start(path: &str) -> bool {
+        let Ok(c) = CString::new(path) else {
+            return false;
+        };
+        let rc = unsafe { mlx::mlx_metal_start_capture(c.as_ptr()) };
+        rc == 0
+    }
+
+    /// Stop the in-flight capture (flushes the `.gputrace` bundle to disk).
+    pub fn stop() {
+        unsafe {
+            mlx::mlx_metal_stop_capture();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Confined FFI: GPU utilisation % via the private IOReport framework.
+//
+// This is the signal `macmon`/`asitop`/Activity Monitor read (no sudo). We resolve
+// the IOReport + CoreFoundation symbols with `dlopen`/`dlsym` at runtime so there is
+// NO link-time dependency on a private framework — if IOReport is missing or its ABI
+// differs, the sampler simply reports itself unavailable and no util counter is
+// emitted (graceful degradation; never a crash on the traced-off fast path).
+//
+// GPU active-residency comes from the "GPU Stats" group, "GPU Performance States"
+// channel: a state-residency channel whose per-state residencies we delta between two
+// samples. active% = 100 * (residency in non-idle states) / (residency in all states).
+// ---------------------------------------------------------------------------
+
+mod ioreport {
+    use std::os::raw::{c_char, c_int, c_longlong, c_void};
+
+    type CFTypeRef = *const c_void;
+    type CFDictionaryRef = *const c_void;
+    type CFMutableDictionaryRef = *mut c_void;
+    type CFStringRef = *const c_void;
+    type IOReportSubscriptionRef = *const c_void;
+    // An IOReport "sample" channel handle passed to the iterate block.
+    type IOReportSampleRef = *const c_void;
+
+    const RTLD_NOW: c_int = 2;
+    // kCFStringEncodingUTF8
+    const CF_UTF8: u32 = 0x0800_0100;
+    // IOReportIterate block return code to continue iterating.
+    const K_IO_REPORT_ITER_OK: c_int = 0;
+
+    extern "C" {
+        fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    }
+
+    // CoreFoundation functions we need, resolved via dlsym (CF is always present, but
+    // resolving dynamically keeps this module self-contained / link-free).
+    type CFStringCreateWithCStringFn =
+        unsafe extern "C" fn(CFTypeRef, *const c_char, u32) -> CFStringRef;
+    type CFStringGetCStringFn =
+        unsafe extern "C" fn(CFStringRef, *mut c_char, c_longlong, u32) -> bool;
+    type CFReleaseFn = unsafe extern "C" fn(CFTypeRef);
+
+    // IOReport private functions.
+    type IOReportCopyChannelsInGroupFn = unsafe extern "C" fn(
+        CFStringRef,
+        CFStringRef,
+        u64,
+        u64,
+        u64,
+    ) -> CFMutableDictionaryRef;
+    type IOReportCreateSubscriptionFn = unsafe extern "C" fn(
+        *mut c_void,
+        CFMutableDictionaryRef,
+        *mut CFMutableDictionaryRef,
+        u64,
+        CFTypeRef,
+    ) -> IOReportSubscriptionRef;
+    type IOReportCreateSamplesFn = unsafe extern "C" fn(
+        IOReportSubscriptionRef,
+        CFMutableDictionaryRef,
+        CFTypeRef,
+    ) -> CFDictionaryRef;
+    type IOReportCreateSamplesDeltaFn =
+        unsafe extern "C" fn(CFDictionaryRef, CFDictionaryRef, CFTypeRef) -> CFDictionaryRef;
+    // IOReportIterate takes an Objective-C block; we pass a no-capture global block.
+    type IOReportIterateFn = unsafe extern "C" fn(CFDictionaryRef, *const c_void);
+    type IOReportChannelGetGroupFn = unsafe extern "C" fn(IOReportSampleRef) -> CFStringRef;
+    type IOReportChannelGetChannelNameFn =
+        unsafe extern "C" fn(IOReportSampleRef) -> CFStringRef;
+    type IOReportStateGetCountFn = unsafe extern "C" fn(IOReportSampleRef) -> c_int;
+    type IOReportStateGetNameForIndexFn =
+        unsafe extern "C" fn(IOReportSampleRef, c_int) -> CFStringRef;
+    type IOReportStateGetResidencyFn =
+        unsafe extern "C" fn(IOReportSampleRef, c_int) -> c_longlong;
+
+    /// One GPU-utilisation reading (active-residency %; freq is best-effort/None here).
+    pub struct Reading {
+        pub active_pct: f64,
+        pub freq_mhz: Option<f64>,
+    }
+
+    /// The resolved IOReport symbol table + a live subscription and the previous sample.
+    pub struct GpuUtil {
+        sub: IOReportSubscriptionRef,
+        channels: CFMutableDictionaryRef,
+        prev: CFDictionaryRef,
+        cf_release: CFReleaseFn,
+        create_samples: IOReportCreateSamplesFn,
+        create_delta: IOReportCreateSamplesDeltaFn,
+        iterate: IOReportIterateFn,
+    }
+
+    // The subscription/channel handles live for the process; only touched under the
+    // tracer's mutex, so sharing across threads is sound.
+    unsafe impl Send for GpuUtil {}
+
+    // Thread-local accumulator the no-capture iterate block writes into. IOReportIterate
+    // is called synchronously on the calling thread, so a thread-local is safe.
+    thread_local! {
+        static ACC: std::cell::Cell<(i64, i64)> = const { std::cell::Cell::new((0, 0)) };
+    }
+
+    // --- Block ABI (a no-capture global block; invoke is a plain fn pointer) ---
+    #[repr(C)]
+    struct BlockDescriptor {
+        reserved: u64,
+        size: u64,
+    }
+    #[repr(C)]
+    struct Block {
+        isa: *const c_void,
+        flags: c_int,
+        reserved: c_int,
+        invoke: extern "C" fn(*mut Block, IOReportSampleRef) -> c_int,
+        descriptor: *const BlockDescriptor,
+    }
+    unsafe impl Sync for Block {}
+
+    extern "C" {
+        // The global-block "isa" the Objective-C runtime uses for stateless blocks.
+        static _NSConcreteGlobalBlock: [*const c_void; 32];
+    }
+
+    static BLOCK_DESCRIPTOR: BlockDescriptor = BlockDescriptor {
+        reserved: 0,
+        size: std::mem::size_of::<Block>() as u64,
+    };
+
+    // BLOCK_IS_GLOBAL (1<<28) — a stateless, statically-allocated block.
+    const BLOCK_IS_GLOBAL: c_int = 1 << 28;
+
+    // Symbol handles resolved once; only the residency accessors are needed inside the block.
+    struct StateAccessors {
+        get_group: IOReportChannelGetGroupFn,
+        get_channel: IOReportChannelGetChannelNameFn,
+        state_count: IOReportStateGetCountFn,
+        state_name: IOReportStateGetNameForIndexFn,
+        state_resid: IOReportStateGetResidencyFn,
+        get_cstring: CFStringGetCStringFn,
+        cf_release: CFReleaseFn,
+    }
+    static mut ACCESSORS: Option<StateAccessors> = None;
+
+    fn cfstr_to_string(get_cstring: CFStringGetCStringFn, s: CFStringRef) -> String {
+        if s.is_null() {
+            return String::new();
+        }
+        let mut buf = [0i8; 128];
+        let ok = unsafe { get_cstring(s, buf.as_mut_ptr(), buf.len() as c_longlong, CF_UTF8) };
+        if !ok {
+            return String::new();
+        }
+        let cstr = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) };
+        cstr.to_string_lossy().into_owned()
+    }
+
+    // The iterate callback: for the "GPU Stats" / "GPU Performance States" channel,
+    // accumulate (idle_residency, total_residency) deltas into the thread-local.
+    extern "C" fn iterate_block(_blk: *mut Block, ch: IOReportSampleRef) -> c_int {
+        let acc = unsafe {
+            let ptr = std::ptr::addr_of!(ACCESSORS);
+            match &*ptr {
+                Some(a) => a,
+                None => return K_IO_REPORT_ITER_OK,
+            }
+        };
+        let group = cfstr_to_string(acc.get_cstring, unsafe { (acc.get_group)(ch) });
+        let channel = cfstr_to_string(acc.get_cstring, unsafe { (acc.get_channel)(ch) });
+        let n = unsafe { (acc.state_count)(ch) };
+        // The canonical GPU active-residency channel is "GPUPH" (group "GPU Stats",
+        // subgroup "GPU Performance States"): a 16-state P-state residency channel whose
+        // state[0] is "OFF"/idle and P1..Pn are active clock levels. This is the exact
+        // channel `macmon`/`powermetrics` read for GPU utilisation.
+        if group != "GPU Stats" || channel != "GPUPH" || n <= 0 {
+            return K_IO_REPORT_ITER_OK;
+        }
+        let (mut idle, mut total) = (0i64, 0i64);
+        for i in 0..n {
+            let name_ref = unsafe { (acc.state_name)(ch, i) };
+            let name = cfstr_to_string(acc.get_cstring, name_ref);
+            unsafe { (acc.cf_release)(name_ref) };
+            let resid = unsafe { (acc.state_resid)(ch, i) };
+            total += resid;
+            // Idle / off states are named "IDLE" / "OFF" / "DOWN" on Apple silicon.
+            let up = name.to_ascii_uppercase();
+            if up.contains("IDLE") || up.contains("OFF") || up.contains("DOWN") {
+                idle += resid;
+            }
+        }
+        ACC.with(|c| {
+            let (pi, pt) = c.get();
+            c.set((pi + idle, pt + total));
+        });
+        K_IO_REPORT_ITER_OK
+    }
+
+    static ITER_BLOCK: Block = Block {
+        isa: unsafe { _NSConcreteGlobalBlock.as_ptr() as *const c_void },
+        flags: BLOCK_IS_GLOBAL,
+        reserved: 0,
+        invoke: iterate_block,
+        descriptor: &BLOCK_DESCRIPTOR,
+    };
+
+    unsafe fn sym<T>(handle: *mut c_void, name: &[u8]) -> Option<T> {
+        let p = dlsym(handle, name.as_ptr() as *const c_char);
+        if p.is_null() {
+            None
+        } else {
+            Some(std::mem::transmute_copy::<*mut c_void, T>(&p))
+        }
+    }
+
+    impl GpuUtil {
+        /// Resolve IOReport + CF, subscribe to the "GPU Stats" group, and prime the
+        /// baseline sample. Returns `None` (util disabled) on any failure.
+        pub fn new() -> Option<GpuUtil> {
+            unsafe {
+                let cf = dlopen(
+                    b"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation\0"
+                        .as_ptr() as *const c_char,
+                    RTLD_NOW,
+                );
+                // IOReport's symbols live in /usr/lib/libIOReport.dylib (the framework
+                // bundle path is not dlopen-able — it is cache-only under a different
+                // install name). Fall back to the framework path just in case.
+                let mut ior = dlopen(
+                    b"/usr/lib/libIOReport.dylib\0".as_ptr() as *const c_char,
+                    RTLD_NOW,
+                );
+                if ior.is_null() {
+                    ior = dlopen(
+                        b"/System/Library/PrivateFrameworks/IOReport.framework/IOReport\0"
+                            .as_ptr() as *const c_char,
+                        RTLD_NOW,
+                    );
+                }
+                if cf.is_null() || ior.is_null() {
+                    return None;
+                }
+
+                let cfstr_create: CFStringCreateWithCStringFn =
+                    sym(cf, b"CFStringCreateWithCString\0")?;
+                let cf_get_cstring: CFStringGetCStringFn = sym(cf, b"CFStringGetCString\0")?;
+                let cf_release: CFReleaseFn = sym(cf, b"CFRelease\0")?;
+
+                let copy_channels: IOReportCopyChannelsInGroupFn =
+                    sym(ior, b"IOReportCopyChannelsInGroup\0")?;
+                let create_sub: IOReportCreateSubscriptionFn =
+                    sym(ior, b"IOReportCreateSubscription\0")?;
+                let create_samples: IOReportCreateSamplesFn =
+                    sym(ior, b"IOReportCreateSamples\0")?;
+                let create_delta: IOReportCreateSamplesDeltaFn =
+                    sym(ior, b"IOReportCreateSamplesDelta\0")?;
+                let iterate: IOReportIterateFn = sym(ior, b"IOReportIterate\0")?;
+                let get_group: IOReportChannelGetGroupFn =
+                    sym(ior, b"IOReportChannelGetGroup\0")?;
+                let get_channel: IOReportChannelGetChannelNameFn =
+                    sym(ior, b"IOReportChannelGetChannelName\0")?;
+                let state_count: IOReportStateGetCountFn =
+                    sym(ior, b"IOReportStateGetCount\0")?;
+                let state_name: IOReportStateGetNameForIndexFn =
+                    sym(ior, b"IOReportStateGetNameForIndex\0")?;
+                let state_resid: IOReportStateGetResidencyFn =
+                    sym(ior, b"IOReportStateGetResidency\0")?;
+
+                let group = cfstr_create(
+                    std::ptr::null(),
+                    b"GPU Stats\0".as_ptr() as *const c_char,
+                    CF_UTF8,
+                );
+                if group.is_null() {
+                    return None;
+                }
+                let channels = copy_channels(group, std::ptr::null(), 0, 0, 0);
+                cf_release(group);
+                if channels.is_null() {
+                    return None;
+                }
+
+                let mut subbed: CFMutableDictionaryRef = std::ptr::null_mut();
+                let sub = create_sub(
+                    std::ptr::null_mut(),
+                    channels,
+                    &mut subbed as *mut CFMutableDictionaryRef,
+                    0,
+                    std::ptr::null(),
+                );
+                if sub.is_null() {
+                    cf_release(channels);
+                    return None;
+                }
+
+                // Publish the residency accessors for the iterate block, then prime.
+                let ptr = std::ptr::addr_of_mut!(ACCESSORS);
+                *ptr = Some(StateAccessors {
+                    get_group,
+                    get_channel,
+                    state_count,
+                    state_name,
+                    state_resid,
+                    get_cstring: cf_get_cstring,
+                    cf_release,
+                });
+
+                let prev = create_samples(sub, channels, std::ptr::null());
+                if prev.is_null() {
+                    cf_release(channels);
+                    return None;
+                }
+
+                Some(GpuUtil {
+                    sub,
+                    channels,
+                    prev,
+                    cf_release,
+                    create_samples,
+                    create_delta,
+                    iterate,
+                })
+            }
+        }
+
+        /// Take a fresh sample, delta it against the previous, and iterate the delta to
+        /// compute GPU active-residency %. Returns `None` if the delta had no GPU state
+        /// residency (e.g. no work happened between samples).
+        pub fn sample(&mut self) -> Option<Reading> {
+            unsafe {
+                let cur = (self.create_samples)(self.sub, self.channels, std::ptr::null());
+                if cur.is_null() {
+                    return None;
+                }
+                let delta = (self.create_delta)(self.prev, cur, std::ptr::null());
+                (self.cf_release)(self.prev);
+                self.prev = cur;
+                if delta.is_null() {
+                    return None;
+                }
+
+                ACC.with(|c| c.set((0, 0)));
+                (self.iterate)(delta, &ITER_BLOCK as *const Block as *const c_void);
+                (self.cf_release)(delta);
+
+                let (idle, total) = ACC.with(|c| c.get());
+                if total <= 0 {
+                    return None;
+                }
+                let active = (total - idle).max(0) as f64;
+                Some(Reading {
+                    active_pct: (active / total as f64) * 100.0,
+                    freq_mhz: None,
+                })
+            }
+        }
+    }
+
+    impl Drop for GpuUtil {
+        fn drop(&mut self) {
+            unsafe {
+                if !self.prev.is_null() {
+                    (self.cf_release)(self.prev);
+                }
+                if !self.channels.is_null() {
+                    (self.cf_release)(self.channels as CFTypeRef);
+                }
+                if !self.sub.is_null() {
+                    (self.cf_release)(self.sub);
+                }
+            }
         }
     }
 }

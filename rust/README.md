@@ -72,18 +72,60 @@ ONNX_GENAI_MLX_TRACE=/tmp/mlx_trace.json DYLD_LIBRARY_PATH=$ORT_LIB \
 
 - **Spans:** `mlx.subgraph` (cat `ep`, whole Compute) → nested `mlx.eval`
   (cat `gpu`, the synchronous eval = GPU-inclusive time); one `<op_type>`
-  (cat `op`) span per node at graph-build time.
+  (cat `op`) span per node at graph-build time, plus (when tracing is on) a rich
+  per-op detail span carrying input/output shapes, dtype, element count and byte
+  size so every op has resource context even without fine mode.
 - **GPU counters** (Chrome `"C"` phase, own Perfetto tracks): `mlx.gpu_mem_bytes`
-  (`MTLDevice.currentAllocatedSize`) and `mlx.gpu_mem_pct` (÷
-  `recommendedMaxWorkingSetSize`). GPU-utilisation % via the private **IOReport**
-  framework is a documented TODO (block-based sampling is heavy to land cleanly).
+  (`MTLDevice.currentAllocatedSize`), `mlx.gpu_mem_pct` (÷
+  `recommendedMaxWorkingSetSize`), and `mlx.gpu_util_pct` — GPU active-residency %
+  read from the private **IOReport** framework (the `GPUPH` "GPU Performance States"
+  channel, the same signal `macmon`/`powermetrics` use; no sudo). IOReport is
+  resolved by `dlopen`/`dlsym` at runtime, so a missing/ABI-changed framework just
+  disables the util counter — never a crash.
 - **os_signpost** intervals around the same subgraph/eval regions for an
   Instruments *Metal System Trace* (`ONNX_GENAI_MLX_SIGNPOST=1` forces them on).
 - Events are stamped with the real `pid` (`std::process::id()`) so they merge into
   onnx-genai's Perfetto timeline. Written on EP teardown; the collector
   accumulates across sessions, so each teardown rewrites the full cumulative trace.
 - **Cost when off** (env unset): a single relaxed atomic load + early return per
-  entry point — no signpost log, no device handle, no allocation.
+  entry point — no signpost log, no device handle, no IOReport sampler, no
+  allocation, and the single fused `mlx_eval` is left untouched.
+
+### Seeing *inside* the fused `mlx_eval`
+
+By default a whole fused subgraph evaluates as ONE opaque `mlx.eval` blob (MLX hides
+its per-kernel Metal command buffers). Two opt-in modes break that open:
+
+- **Fine-grained per-op GPU timing** — `ONNX_GENAI_MLX_TRACE_FINE=1` (implies tracing
+  on). After each node's handler binds its outputs, they are `mlx_array_eval`'d
+  individually and timed, emitting a `gpu.op` span per op with the op's
+  GPU-inclusive wall time + shape/dtype/bytes Args. The single blob becomes per-op
+  bars showing which op dominates. **This BREAKS fusion** (materialising per node
+  defeats MLX's lazy graph) so it is slower and strictly a debug tool — the normal
+  path keeps the single fused eval.
+
+  ```sh
+  ONNX_GENAI_MLX_TRACE=/tmp/fine.json ONNX_GENAI_MLX_TRACE_FINE=1 ... python ...
+  ```
+
+- **Xcode/Instruments GPU capture** — `ONNX_GENAI_MLX_GPU_CAPTURE=<path.gputrace>`
+  (or `=1` for a default path) wraps the **first** eval only in
+  `mlx_metal_start_capture` … `stop_capture`, producing a `.gputrace` bundle with
+  full per-kernel GPU timing / occupancy / memory-bandwidth. Requires
+  `MTL_CAPTURE_ENABLED=1` exported before the process starts (the capture layer is
+  inserted at device creation); without it the mode logs a clear message and skips
+  rather than aborting.
+
+  ```sh
+  MTL_CAPTURE_ENABLED=1 ONNX_GENAI_MLX_GPU_CAPTURE=/tmp/cap.gputrace ... python ...
+  open /tmp/cap.gputrace   # in Xcode
+  ```
+
+- **Slowest-ops summary** — whenever tracing is on, EP teardown logs a compact
+  top-10 (op_type → total µs, %, call count) to stderr **and** as an
+  `mlx.slowest_ops` trace-metadata event, so an agent sees e.g. "Add = 80% of GPU
+  time" without parsing the JSON. Times are GPU-inclusive in fine mode, otherwise
+  build-time (noted in the summary).
 
 ## Full-port plan (what this unlocks)
 

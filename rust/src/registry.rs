@@ -114,6 +114,8 @@ pub fn translate(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxEr
     if r.is_ok() {
         let mark = ctx.take_path_mark();
         tr.record_op_path(&n.op_type, start, mark);
+        // Per-op detail span (rich Args always; fine mode also times a per-op eval).
+        ctx.trace_node(&n.op_type, n, start);
     }
     r
 }

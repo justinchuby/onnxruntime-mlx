@@ -65,7 +65,11 @@ impl MlxEp {
 // trace; the last one leaves the complete file on disk (no-op when tracing is off).
 impl Drop for MlxEp {
     fn drop(&mut self) {
-        crate::trace::tracer().export();
+        let tr = crate::trace::tracer();
+        // Compact agent-friendly "slowest ops" summary (stderr + trace metadata) before
+        // the JSON is written, so the ranking is embedded in the exported trace too.
+        tr.log_slowest_ops();
+        tr.export();
     }
 }
 
