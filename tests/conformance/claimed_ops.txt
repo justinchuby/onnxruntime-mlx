@@ -1,0 +1,92 @@
+# ONNX-standard ops the MLX EP claims — the conformance subset driven by
+# tests/conformance/test_conformance.py against cbourjau/onnx-tests.
+#
+# One op per line; blank lines and '#' comments ignored. Override at runtime
+# with the OPS env var (space-separated). Extend this list as the Rust EP's
+# op coverage grows (com.microsoft contrib ops like GroupQueryAttention /
+# MatMulNBits are NOT here — onnx-tests only covers the ai.onnx standard).
+
+# math / elementwise
+Abs
+Add
+Sub
+Mul
+Div
+Pow
+Neg
+Exp
+Log
+Sqrt
+Erf
+Reciprocal
+Sign
+Floor
+Ceil
+Round
+Min
+Max
+Mean
+Sum
+Clip
+
+# activations
+Relu
+Gelu
+Sigmoid
+Tanh
+LeakyRelu
+Elu
+Selu
+Softplus
+HardSigmoid
+HardSwish
+Mish
+PRelu
+
+# logical / comparison / selection
+Equal
+Less
+Greater
+GreaterOrEqual
+LessOrEqual
+Where
+Not
+And
+Or
+Xor
+
+# reductions
+ReduceSum
+ReduceMean
+ReduceMax
+ReduceMin
+ReduceProd
+ReduceL1
+ReduceL2
+ReduceSumSquare
+ReduceLogSum
+ReduceLogSumExp
+
+# softmax family
+Softmax
+LogSoftmax
+
+# shape / data movement
+Concat
+Reshape
+Transpose
+Slice
+Split
+Pad
+Gather
+Squeeze
+Unsqueeze
+Flatten
+Expand
+Tile
+Cast
+Identity
+
+# linear algebra / conv
+MatMul
+Conv

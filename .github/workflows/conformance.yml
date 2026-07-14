@@ -63,7 +63,7 @@ jobs:
           # The EP needs ORT_API_VERSION 27; the pixi env ships an older ort.
           (cd ../onnx-tests && pixi run python -m pip install "onnxruntime==${ORT_VERSION}")
 
-      - name: Run bounded conformance subset
+      - name: Run bounded conformance subset (pytest-driven)
         # Never fail the workflow on EP crashes/failures — this is a fuzzing
         # report, captured as an artifact for triage.
         continue-on-error: true
@@ -75,18 +75,25 @@ jobs:
           SEED: ${{ github.event.inputs.seed }}
           OPS: ${{ github.event.inputs.ops }}
         run: |
-          cd tests/conformance
-          ./run_conformance.sh || true
-          echo "### onnx-tests conformance (MLX EP)" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat results.csv >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          set -uo pipefail
+          # The outer pytest driver only needs pytest + stdlib (each op is fuzzed
+          # in its own `pixi run` subprocess, so onnxruntime/onnx-tests live there).
+          python3 -m pip install --quiet --user pytest
+          python3 -m pytest tests/conformance/test_conformance.py -v \
+            --junitxml=tests/conformance/conformance-junit.xml \
+            | tee tests/conformance/conformance.out || true
+          {
+            echo "### onnx-tests conformance (MLX EP)"
+            echo '```'
+            tail -n 40 tests/conformance/conformance.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
           name: conformance-results
           path: |
-            tests/conformance/results.csv
-            tests/conformance/logs/
+            tests/conformance/conformance-junit.xml
+            tests/conformance/conformance.out
           if-no-files-found: warn
