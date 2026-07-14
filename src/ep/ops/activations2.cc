@@ -275,17 +275,17 @@ bool IsInfClaim(Ort::ConstNode node) {
 
 void RegisterActivations2Ops(OpRegistry& registry) {
   registry.Register({"", "Celu", 12, kAnyOpset, &CeluOp, &CeluClaim});
-  registry.Register({"", "Selu", 22, kAnyOpset, &SeluOp, &SeluClaim});
-  registry.Register({"", "Softsign", 22, kAnyOpset, &SoftsignOp, &FloatUnaryClaim});
+  registry.Register({"", "Selu", 6, kAnyOpset, &SeluOp, &SeluClaim});
+  registry.Register({"", "Softsign", 1, kAnyOpset, &SoftsignOp, &FloatUnaryClaim});
   registry.Register({"", "Shrink", 9, kAnyOpset, &ShrinkOp, &ShrinkClaim});
   registry.Register(
       {"", "ThresholdedRelu", 22, kAnyOpset, &ThresholdedReluOp, &ThresholdedReluClaim});
-  registry.Register({"", "HardSigmoid", 22, kAnyOpset, &HardSigmoidOp, &HardSigmoidClaim});
-  registry.Register({"", "HardSwish", 22, kAnyOpset, &HardSwishOp, &FloatUnaryClaim});
-  registry.Register({"", "Mish", 22, kAnyOpset, &MishOp, &FloatUnaryClaim});
+  registry.Register({"", "HardSigmoid", 6, kAnyOpset, &HardSigmoidOp, &HardSigmoidClaim});
+  registry.Register({"", "HardSwish", 14, kAnyOpset, &HardSwishOp, &FloatUnaryClaim});
+  registry.Register({"", "Mish", 18, kAnyOpset, &MishOp, &FloatUnaryClaim});
   registry.Register({"", "LeakyRelu", 16, kAnyOpset, &LeakyReluOp, &LeakyReluClaim});
   registry.Register({"", "PRelu", 16, kAnyOpset, &PReluOp, &PReluClaim});
-  registry.Register({"", "IsInf", 20, kAnyOpset, &IsInfOp, &IsInfClaim});
+  registry.Register({"", "IsInf", 10, kAnyOpset, &IsInfOp, &IsInfClaim});
   registry.Register({"", "IsNaN", 13, kAnyOpset, &IsNaNOp, &PredicateClaim});
 }
 

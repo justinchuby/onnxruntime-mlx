@@ -50,15 +50,15 @@ bool FloatUnaryClaim(Ort::ConstNode node) {
 void RegisterTrigOps(OpRegistry& registry) {
   // The inverse/hyperbolic/trig schemas add bf16 at version 22. Do not register their older,
   // dtype-narrow schemas; Ceil already has the full MLX float set at schema version 13.
-  registry.Register({"", "Acos", 22, kAnyOpset, &AcosOp, &FloatUnaryClaim});
-  registry.Register({"", "Acosh", 22, kAnyOpset, &AcoshOp, &FloatUnaryClaim});
-  registry.Register({"", "Asin", 22, kAnyOpset, &AsinOp, &FloatUnaryClaim});
-  registry.Register({"", "Asinh", 22, kAnyOpset, &AsinhOp, &FloatUnaryClaim});
-  registry.Register({"", "Atan", 22, kAnyOpset, &AtanOp, &FloatUnaryClaim});
-  registry.Register({"", "Atanh", 22, kAnyOpset, &AtanhOp, &FloatUnaryClaim});
-  registry.Register({"", "Cosh", 22, kAnyOpset, &CoshOp, &FloatUnaryClaim});
-  registry.Register({"", "Sinh", 22, kAnyOpset, &SinhOp, &FloatUnaryClaim});
-  registry.Register({"", "Tan", 22, kAnyOpset, &TanOp, &FloatUnaryClaim});
+  registry.Register({"", "Acos", 7, kAnyOpset, &AcosOp, &FloatUnaryClaim});
+  registry.Register({"", "Acosh", 9, kAnyOpset, &AcoshOp, &FloatUnaryClaim});
+  registry.Register({"", "Asin", 7, kAnyOpset, &AsinOp, &FloatUnaryClaim});
+  registry.Register({"", "Asinh", 9, kAnyOpset, &AsinhOp, &FloatUnaryClaim});
+  registry.Register({"", "Atan", 7, kAnyOpset, &AtanOp, &FloatUnaryClaim});
+  registry.Register({"", "Atanh", 9, kAnyOpset, &AtanhOp, &FloatUnaryClaim});
+  registry.Register({"", "Cosh", 9, kAnyOpset, &CoshOp, &FloatUnaryClaim});
+  registry.Register({"", "Sinh", 9, kAnyOpset, &SinhOp, &FloatUnaryClaim});
+  registry.Register({"", "Tan", 7, kAnyOpset, &TanOp, &FloatUnaryClaim});
   registry.Register({"", "Ceil", 13, kAnyOpset, &CeilOp, &FloatUnaryClaim});
   // The installed mlx-c does not expose a linalg determinant operation, so Det stays on ORT CPU.
 }
