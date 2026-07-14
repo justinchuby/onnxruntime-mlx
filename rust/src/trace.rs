@@ -33,11 +33,30 @@
 //! intervals) is confined to this module; the op/engine code stays clean.
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use onnx_runtime_tracer::{Args, MemoryCollector, SpanGuard, TraceContext};
 use std::sync::Arc;
+
+/// Which execution path a node's handler took, declared via
+/// [`TranslationContext::mark_fast`](crate::engine::TranslationContext::mark_fast) /
+/// [`mark_composed`](crate::engine::TranslationContext::mark_composed).
+///
+/// * [`PathMark::Fast`] — the node used a fused MLX kernel (the intended fast path).
+/// * [`PathMark::Composed`] — the node *has* a fused kernel available but instead fell
+///   back to a slower composed / generic implementation. These stand out in the trace.
+///
+/// Ops with no fast/slow distinction (ordinary elementwise/shape ops) leave no mark and
+/// are treated as neutral.
+pub enum PathMark {
+    /// Fused MLX kernel used (green/normal). Carries the kernel name.
+    Fast(&'static str),
+    /// Composed/fallback path taken despite a fused kernel existing (SLOW). Carries the reason.
+    Composed(String),
+}
 
 /// Set to a filesystem path to enable tracing; the Chrome/Perfetto JSON trace is
 /// written there on EP teardown. Unset → tracing disabled (near-zero cost).
@@ -61,8 +80,8 @@ thread_local! {
 
 /// One sampled counter point (rendered as a Chrome `"C"` phase event at export).
 struct CounterSample {
-    track: &'static str,
-    key: &'static str,
+    track: String,
+    key: String,
     value: f64,
     ts: u64,
 }
@@ -73,6 +92,8 @@ pub struct MlxTracer {
     mem: Option<Arc<MemoryCollector>>,
     path: Option<PathBuf>,
     counters: Mutex<Vec<CounterSample>>,
+    /// Cumulative composed-path hit count per op-type (drives `mlx.composed_path_count`).
+    composed_counts: Mutex<HashMap<String, u64>>,
     /// `os_log_t` for signposts as a `usize` (0 = disabled) so the struct is `Send + Sync`.
     signpost_log: usize,
     /// Cached default `MTLDevice` as a `usize` (0 = unavailable).
@@ -117,6 +138,7 @@ impl MlxTracer {
             mem,
             path: path.map(PathBuf::from),
             counters: Mutex::new(Vec::new()),
+            composed_counts: Mutex::new(HashMap::new()),
             signpost_log,
             device,
         }
@@ -174,6 +196,108 @@ impl MlxTracer {
         )
     }
 
+    /// Start a wall-clock timer for one node's handler, or `None` when tracing is off
+    /// (the hot-path gate — no clock read when disabled).
+    #[inline]
+    pub fn op_timer_start(&self) -> Option<Instant> {
+        if self.is_enabled() {
+            Some(Instant::now())
+        } else {
+            None
+        }
+    }
+
+    /// Surface the fast-vs-composed path a node's handler declared (see [`PathMark`]).
+    ///
+    /// * `Fast(kernel)` → a `<Op> [fast]` span in cat `op.fast` with `optimized=true`
+    ///   + `kernel=<...>`.
+    /// * `Composed(reason)` → a `<Op> [composed]` span in the distinct cat `op.composed`
+    ///   (Perfetto colours it differently) with `optimized=false` + `reason=<...>`, PLUS a
+    ///   visible instant marker `⚠ composed-path: <Op> (<reason>)` on the timeline, PLUS a
+    ///   bump of the per-op-type `mlx.composed_path_count` counter track.
+    /// * `None` → neutral op, nothing emitted.
+    ///
+    /// No-op when tracing is disabled.
+    pub fn record_op_path(&self, op_type: &str, start: Option<Instant>, mark: Option<PathMark>) {
+        if !self.is_enabled() {
+            return;
+        }
+        let Some(mark) = mark else {
+            return;
+        };
+        match mark {
+            PathMark::Fast(kernel) => {
+                if let Some(start) = start {
+                    self.ctx.complete(
+                        format!("{op_type} [fast]"),
+                        "op.fast",
+                        start,
+                        start.elapsed(),
+                        Some(
+                            Args::new()
+                                .with("op_type", op_type.to_string())
+                                .with("optimized", true)
+                                .with("kernel", kernel),
+                        ),
+                    );
+                }
+            }
+            PathMark::Composed(reason) => {
+                if let Some(start) = start {
+                    self.ctx.complete(
+                        format!("{op_type} [composed]"),
+                        "op.composed",
+                        start,
+                        start.elapsed(),
+                        Some(
+                            Args::new()
+                                .with("op_type", op_type.to_string())
+                                .with("optimized", false)
+                                .with("reason", reason.clone()),
+                        ),
+                    );
+                }
+                // A standalone mark on the timeline so a composed path is impossible to miss.
+                self.ctx.instant(
+                    format!("⚠ composed-path: {op_type} ({reason})"),
+                    "op.composed",
+                    Some(
+                        Args::new()
+                            .with("op_type", op_type.to_string())
+                            .with("optimized", false)
+                            .with("reason", reason),
+                    ),
+                );
+                self.bump_composed_counter(op_type);
+            }
+        }
+    }
+
+    /// Increment and emit the cumulative composed-path counter for `op_type` as a point on
+    /// the `mlx.composed_path_count` Perfetto counter track (one series per op-type).
+    fn bump_composed_counter(&self, op_type: &str) {
+        let ts = self.ctx.clock().now_micros();
+        let value = {
+            let mut counts = match self.composed_counts.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let n = counts.entry(op_type.to_string()).or_insert(0);
+            *n += 1;
+            *n as f64
+        };
+        let mut c = match self.counters.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        c.push(CounterSample {
+            track: "mlx.composed_path_count".to_string(),
+            key: op_type.to_string(),
+            value,
+            ts,
+        });
+    }
+
     /// Sample GPU usage counters (cheap; only when tracing is enabled).
     ///
     /// Emits `mlx.gpu_mem_bytes` (`MTLDevice.currentAllocatedSize`) and, when the
@@ -200,15 +324,15 @@ impl MlxTracer {
             Err(p) => p.into_inner(),
         };
         c.push(CounterSample {
-            track: "mlx.gpu_mem_bytes",
-            key: "bytes",
+            track: "mlx.gpu_mem_bytes".to_string(),
+            key: "bytes".to_string(),
             value: allocated,
             ts,
         });
         if recommended > 0.0 {
             c.push(CounterSample {
-                track: "mlx.gpu_mem_pct",
-                key: "pct",
+                track: "mlx.gpu_mem_pct".to_string(),
+                key: "pct".to_string(),
                 value: (allocated / recommended) * 100.0,
                 ts,
             });

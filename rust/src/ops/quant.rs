@@ -297,6 +297,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
 
     let supported = block == 32 || block == 64 || block == 128;
     let y = if supported {
+        ctx.mark_fast("mlx_quantized_matmul");
         // Fast path: repacked uint32 weight + per-block scales/biases through mlx_quantized_matmul.
         let w = matmulnbits_repack(ctx, n, big_n, k, block)?;
         let scales = ctx.resolve(&n.inputs[2])?;
@@ -317,6 +318,9 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             mlx::mlx_quantized_matmul(res, a2, w, scales2d, biases, true, gs, bb, mode, s)
         })?
     } else {
+        ctx.mark_composed(format!(
+            "block_size {block} unsupported by mlx_quantized_matmul → dequant + dense matmul"
+        ));
         // Fallback (block_size mlx_quantized_matmul cannot handle, e.g. 16): dequantize in-graph.
         let wpacked = ctx.resolve(&n.inputs[1])?; // uint8 [N, nblocks, block/2]
         let wflat = ctx.reshape(wpacked, &[big_n as i32, (k / 2) as i32])?;

@@ -80,6 +80,7 @@ fn sdpa(
     mask: mlx::mlx_array,
 ) -> Result<mlx::mlx_array, MlxError> {
     let mode = mask_mode.as_ptr() as *const c_char;
+    ctx.mark_fast("mlx_fast_scaled_dot_product_attention");
     ctx.emit(|res, s| unsafe {
         mlx::mlx_fast_scaled_dot_product_attention(res, q, k, v, scale, mode, mask, empty_array(), s)
     })
@@ -473,6 +474,8 @@ fn rotary_embedding_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     let half = ctx.shape_of(cos4)[3];
 
     let out4 = rope_apply(ctx, x4, cos4, sin4, half, interleaved)?;
+    // Composed rope (slice/mul/sub/add/concat) — mlx_fast_rope is NOT used here.
+    ctx.mark_composed("RotaryEmbedding composed (slice/mul/sub/add) — mlx_fast_rope not used");
 
     if rank == 4 {
         ctx.bind(&n.outputs[0], out4); // already [B,N,S,hd]

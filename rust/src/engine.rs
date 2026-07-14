@@ -207,6 +207,12 @@ pub struct TranslationContext<'a> {
     env: HashMap<String, mlxsys::mlx_array>,
     /// All arrays produced this run; freed together on drop (RAII, no per-site frees).
     arena: Vec<Array>,
+    /// Path a handler declared for the CURRENT node (fast vs composed); the dispatcher
+    /// resets this before each handler and reads it after (see `registry::translate`).
+    path_mark: Option<crate::trace::PathMark>,
+    /// Cached tracing-enabled gate so `mark_fast`/`mark_composed` are a cheap no-op (and
+    /// never allocate a reason string) when tracing is off.
+    trace_enabled: bool,
 }
 
 impl<'a> TranslationContext<'a> {
@@ -223,7 +229,41 @@ impl<'a> TranslationContext<'a> {
             stream,
             env: HashMap::new(),
             arena: Vec::new(),
+            path_mark: None,
+            trace_enabled: crate::trace::tracer().is_enabled(),
         }
+    }
+
+    /// Declare that the current node took its **fused MLX kernel** fast path (green/normal).
+    /// `kernel` is the MLX kernel name (e.g. `"mlx_fast_sdpa"`). Cheap no-op when tracing is off.
+    #[inline]
+    pub fn mark_fast(&mut self, kernel: &'static str) {
+        if self.trace_enabled {
+            self.path_mark = Some(crate::trace::PathMark::Fast(kernel));
+        }
+    }
+
+    /// Declare that the current node fell back to a slower **composed/generic** path even though
+    /// a fused MLX kernel exists — this is flagged prominently in the trace. `reason` explains why
+    /// (e.g. `"block_size 16 → dequant+dense matmul"`). Cheap no-op (no string alloc) when tracing
+    /// is off.
+    #[inline]
+    pub fn mark_composed(&mut self, reason: impl Into<String>) {
+        if self.trace_enabled {
+            self.path_mark = Some(crate::trace::PathMark::Composed(reason.into()));
+        }
+    }
+
+    /// Clear the per-node path slot before dispatching a handler.
+    #[inline]
+    pub fn reset_path_mark(&mut self) {
+        self.path_mark = None;
+    }
+
+    /// Take the path a handler declared for the node just dispatched (see `mark_fast`/`mark_composed`).
+    #[inline]
+    pub fn take_path_mark(&mut self) -> Option<crate::trace::PathMark> {
+        self.path_mark.take()
     }
 
     #[inline]

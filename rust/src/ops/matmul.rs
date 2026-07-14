@@ -23,6 +23,7 @@ fn matmul_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
     let a = ctx.resolve(&n.inputs[0])?;
     let b = ctx.resolve(&n.inputs[1])?;
     let y = ctx.binary(mlx::mlx_matmul, a, b)?;
+    ctx.mark_fast("mlx_matmul");
     if ctx.size_of(y) == 0 {
         let shp = ctx.shape_of(y);
         let dt = ctx.dtype_of(y);
@@ -66,6 +67,7 @@ fn gemm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         }
         y = ctx.binary(mlx::mlx_add, y, c)?;
     }
+    ctx.mark_fast("mlx_matmul");
     ctx.bind(&n.outputs[0], y);
     Ok(())
 }

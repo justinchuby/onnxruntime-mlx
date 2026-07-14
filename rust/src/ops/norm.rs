@@ -95,6 +95,7 @@ fn rms_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErro
     let g = ctx.resolve(&n.inputs[1])?;
     let eps = epsilon(n, 1e-6);
     let r = ctx.emit(|res, s| unsafe { mlx::mlx_fast_rms_norm(res, x, g, eps, s) })?;
+    ctx.mark_fast("mlx_fast_rms_norm");
     ctx.bind(&n.outputs[0], r);
     Ok(())
 }
@@ -105,6 +106,7 @@ fn simplified_layer_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     let scale = ctx.resolve(&n.inputs[1])?;
     let eps = epsilon(n, 1e-5);
     let r = ctx.emit(|res, s| unsafe { mlx::mlx_fast_rms_norm(res, x, scale, eps, s) })?;
+    ctx.mark_fast("mlx_fast_rms_norm");
     ctx.bind(&n.outputs[0], r);
     Ok(())
 }
@@ -121,6 +123,7 @@ fn layer_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxEr
     };
     let eps = epsilon(n, 1e-5);
     let r = ctx.emit(|res, s| unsafe { mlx::mlx_fast_layer_norm(res, x, scale, bias, eps, s) })?;
+    ctx.mark_fast("mlx_fast_layer_norm");
     ctx.bind(&n.outputs[0], r);
     Ok(())
 }
@@ -143,6 +146,7 @@ fn skip_layer_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
     }
     let eps = epsilon(n, 1e-5);
     let r = ctx.emit(|res, s| unsafe { mlx::mlx_fast_layer_norm(res, residual, gamma, beta, eps, s) })?;
+    ctx.mark_fast("mlx_fast_layer_norm");
     ctx.bind(&n.outputs[0], r);
     if n.outputs.len() >= 4 && !n.outputs[3].name.is_empty() {
         ctx.bind(&n.outputs[3], residual);
@@ -159,6 +163,7 @@ fn skip_rms_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), Ml
     let eps = epsilon(n, 1e-6);
     let residual = add(ctx, input, skip)?;
     let norm = ctx.emit(|res, s| unsafe { mlx::mlx_fast_rms_norm(res, residual, gamma, eps, s) })?;
+    ctx.mark_fast("mlx_fast_rms_norm");
     ctx.bind(&n.outputs[0], norm);
     if n.outputs.len() >= 2 {
         let last = n.outputs.len() - 1;
@@ -203,6 +208,7 @@ fn group_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxEr
     let bb = channel_broadcast(ctx, bias, rank, c)?;
     let scaled = mul(ctx, normed, sb)?;
     let out = add(ctx, scaled, bb)?;
+    ctx.mark_composed("GroupNormalization composed (mean/var/rsqrt) — no fused last-axis norm kernel");
     ctx.bind(&n.outputs[0], out);
     Ok(())
 }
@@ -227,6 +233,7 @@ fn lp_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError
         sqrt(ctx, s)?
     };
     let out = divide(ctx, x, norm)?;
+    ctx.mark_composed("LpNormalization composed (abs/sum/sqrt/divide) — no fused norm kernel");
     ctx.bind(&n.outputs[0], out);
     Ok(())
 }
@@ -254,6 +261,7 @@ fn batch_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxEr
     let shiftb = channel_broadcast(ctx, shift, rank, c)?;
     let scaled = mul(ctx, x, ab)?;
     let out = add(ctx, scaled, shiftb)?;
+    ctx.mark_composed("BatchNormalization composed (rsqrt/affine) — no fused batch-norm kernel");
     ctx.bind(&n.outputs[0], out);
     Ok(())
 }

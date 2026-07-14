@@ -103,7 +103,18 @@ pub fn translate(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxEr
                 n.op_type
             )
         })?;
-    handler(ctx, n)
+    // Bracket the handler so it can declare (via ctx.mark_fast/mark_composed) which path it took;
+    // the tracer then surfaces composed (fallback) paths prominently. Near-zero cost when tracing
+    // is off: `op_timer_start`/`record_op_path` early-return on the atomic enable flag.
+    let tr = crate::trace::tracer();
+    let start = tr.op_timer_start();
+    ctx.reset_path_mark();
+    let r = handler(ctx, n);
+    if r.is_ok() {
+        let mark = ctx.take_path_mark();
+        tr.record_op_path(&n.op_type, start, mark);
+    }
+    r
 }
 
 /// Claim-time node predicate consulted from GetCapability. True iff the registry has a matching
