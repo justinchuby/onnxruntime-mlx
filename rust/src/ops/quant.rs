@@ -189,6 +189,17 @@ fn broadcast_blocks(
 
 // ---- MatMulNBits --------------------------------------------------------------------------------
 
+/// The float dtype to run an in-graph dequant + dense matmul in: the activation's own float dtype
+/// when it is fp16/bf16 (halving weight bytes + speeding the matmul), otherwise fp32.
+fn compute_float_dtype(act_dt: mlx::mlx_dtype) -> mlx::mlx_dtype {
+    if act_dt == mlx::mlx_dtype__MLX_FLOAT16 || act_dt == mlx::mlx_dtype__MLX_BFLOAT16 {
+        act_dt
+    } else {
+        mlx::mlx_dtype__MLX_FLOAT32
+    }
+}
+
+
 /// Repack our uint8 [N, nblocks, block/2] int4 weight to MLX affine uint32 words [N, K/8] (8 nibbles
 /// per word, low→high along K). Cached (constant) or kept (dynamic).
 fn matmulnbits_repack(
@@ -294,6 +305,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
         m *= ashape[i];
     }
     let a2 = ctx.reshape(a, &[m, k as i32])?;
+    let act_dt = ctx.dtype_of(a2);
 
     let supported = block == 32 || block == 64 || block == 128;
     let y = if supported {
@@ -318,28 +330,36 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             mlx::mlx_quantized_matmul(res, a2, w, scales2d, biases, true, gs, bb, mode, s)
         })?
     } else {
-        ctx.mark_composed(format!(
-            "block_size {block} unsupported by mlx_quantized_matmul → dequant + dense matmul"
-        ));
         // Fallback (block_size mlx_quantized_matmul cannot handle, e.g. 16): dequantize in-graph.
+        // Dequant + dense matmul run in the activation's float dtype (fp16/bf16 halves the weight
+        // bytes + speeds the matmul; fp32 activations keep fp32 — no change).
+        let comp_dt = compute_float_dtype(act_dt);
+        ctx.mark_composed(format!(
+            "block_size {block} unsupported by mlx_quantized_matmul → dequant + dense matmul ({})",
+            crate::engine::dtype_name(comp_dt)
+        ));
         let wpacked = ctx.resolve(&n.inputs[1])?; // uint8 [N, nblocks, block/2]
         let wflat = ctx.reshape(wpacked, &[big_n as i32, (k / 2) as i32])?;
         let q = unpack_nibbles(ctx, wflat)?; // uint32 [N, K]
-        let qf = ctx.astype(q, mlx::mlx_dtype__MLX_FLOAT32)?;
+        let qf = ctx.astype(q, comp_dt)?;
         let centered = if has_zp {
             let zpf = matmulnbits_zp_f32(ctx, n, big_n as i32, nblocks)?;
+            let zpf = ctx.astype(zpf, comp_dt)?;
             let zp_full = broadcast_blocks(ctx, zpf, big_n as i32, nblocks, block as i32)?;
             sub(ctx, qf, zp_full)?
         } else {
-            let eight = f32(ctx, 8.0);
+            let eight_f = f32(ctx, 8.0);
+            let eight = ctx.astype(eight_f, comp_dt)?;
             sub(ctx, qf, eight)?
         };
         let scales = ctx.resolve(&n.inputs[2])?;
         let scales2d = ctx.reshape(scales, &[big_n as i32, nblocks])?;
+        let scales2d = ctx.astype(scales2d, comp_dt)?;
         let sc_full = broadcast_blocks(ctx, scales2d, big_n as i32, nblocks, block as i32)?;
-        let wdeq = mul(ctx, centered, sc_full)?; // [N, K] fp32
+        let wdeq = mul(ctx, centered, sc_full)?; // [N, K] comp_dt
         let wt = ctx.transpose(wdeq, &[1, 0])?; // [K, N]
-        ctx.binary(mlx::mlx_matmul, a2, wt)?
+        let a2c = ctx.astype(a2, comp_dt)?;
+        ctx.binary(mlx::mlx_matmul, a2c, wt)?
     };
 
     // Restore leading dims with N as the last dim.
