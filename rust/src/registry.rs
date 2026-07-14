@@ -78,6 +78,9 @@ fn register_builtin_ops(registry: &mut OpRegistry) {
     // norm+attention
     crate::ops::norm::register_norm(registry);
     crate::ops::attention::register_attention(registry);
+    // conv+vision
+    crate::ops::conv::register_conv(registry);
+    crate::ops::vision::register_vision(registry);
 }
 
 /// Run-time dispatch: find the handler for a node and translate it.
@@ -536,6 +539,57 @@ impl NodeView {
                 return if count == 0 { Some(Vec::new()) } else { None };
             }
             Some(std::slice::from_raw_parts(data as *const i64, count).to_vec())
+        }
+    }
+
+    /// True iff input `i` is a tensor(int32|int64) constant initializer (a shape/size parameter the
+    /// vision handlers read at translate time). Port of the C++ `IsConstIntTensor`.
+    pub fn is_const_int_tensor(&self, i: usize) -> bool {
+        matches!(self.input_info(i), Some(info) if is_int_index(info.dtype))
+            && self.is_constant_initializer(i)
+    }
+
+    /// Read the int32/int64 values of a constant-initializer input `i` AT CLAIM TIME, widened to
+    /// int64. Returns None when the input is not a readable int32/int64 constant initializer. Port of
+    /// the C++ `ReadConstIntAtClaim`.
+    pub fn read_const_ints_any(&self, i: usize) -> Option<Vec<i64>> {
+        let dtype = self.input_info(i)?.dtype;
+        if !self.is_const_int_tensor(i) {
+            return None;
+        }
+        let ins = self.inputs_raw();
+        let vi = *ins.get(i)?;
+        unsafe {
+            let api = self.api();
+            let mut value: *const ort::OrtValue = std::ptr::null();
+            let st = (api.ValueInfo_GetInitializerValue.unwrap())(vi, &mut value);
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            if value.is_null() {
+                return None;
+            }
+            let mut info: *mut ort::OrtTensorTypeAndShapeInfo = std::ptr::null_mut();
+            (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+            let mut count: usize = 0;
+            (api.GetTensorShapeElementCount.unwrap())(info, &mut count);
+            (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+            let mut data: *const std::os::raw::c_void = std::ptr::null();
+            (api.GetTensorData.unwrap())(value, &mut data);
+            if data.is_null() {
+                return if count == 0 { Some(Vec::new()) } else { None };
+            }
+            if dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 {
+                Some(std::slice::from_raw_parts(data as *const i64, count).to_vec())
+            } else {
+                Some(
+                    std::slice::from_raw_parts(data as *const i32, count)
+                        .iter()
+                        .map(|&v| v as i64)
+                        .collect(),
+                )
+            }
         }
     }
 
