@@ -10,7 +10,7 @@
 //! clean zeros arrays rather than rejected to CPU.
 
 use crate::engine::{mlx_dtype_from_onnx, MlxError, NodeDesc, Src, TranslationContext};
-use crate::mlx::VectorArray;
+use crate::mlx::{Array, VectorArray};
 use crate::registry::{
     is_int_index, is_mlx_float, is_mlx_numeric, is_movable, is_range_type, NodeView, OpRegistration,
     OpRegistry, K_ANY_OPSET,
@@ -64,6 +64,37 @@ fn where_op(
     y: mlx::mlx_array,
 ) -> Result<mlx::mlx_array, MlxError> {
     ctx.emit(|res, s| unsafe { mlx::mlx_where(res, cond, x, y, s) })
+}
+
+fn resize_src_coord(
+    mode: &str,
+    output_index: i64,
+    scale: f64,
+    input_len: i64,
+    output_len: i64,
+) -> f64 {
+    match mode {
+        "align_corners" => {
+            if output_len == 1 {
+                0.0
+            } else {
+                output_index as f64 * (input_len - 1) as f64 / (output_len - 1) as f64
+            }
+        }
+        "asymmetric" => output_index as f64 / scale,
+        "pytorch_half_pixel" if output_len == 1 => 0.0,
+        _ => (output_index as f64 + 0.5) / scale - 0.5,
+    }
+}
+
+fn resize_nearest_index(mode: &str, source: f64, input_len: i64) -> i32 {
+    let index = match mode {
+        "floor" => source.floor(),
+        "ceil" => source.ceil(),
+        "round_prefer_ceil" => (source + 0.5).floor(),
+        _ => (source - 0.5).ceil(),
+    } as i64;
+    clamp_i64(index, 0, input_len - 1) as i32
 }
 
 /// Normalize + wrap negative gather indices into [0, dim) as int32 (the take/gather index dtype).
@@ -512,6 +543,136 @@ fn where_handler(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxEr
     Ok(())
 }
 
+fn resize_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let mut data = ctx.resolve(&n.inputs[0])?;
+    let input_shape = ctx.shape_of(data);
+    let rank = input_shape.len();
+    let output_dtype = mlx_dtype_from_onnx(n.outputs[0].otype);
+    let mode = n
+        .strings
+        .get("mode")
+        .map(String::as_str)
+        .unwrap_or("nearest");
+    let coordinate_mode = n
+        .strings
+        .get("coordinate_transformation_mode")
+        .map(String::as_str)
+        .unwrap_or("half_pixel");
+    let nearest_mode = n
+        .strings
+        .get("nearest_mode")
+        .map(String::as_str)
+        .unwrap_or("round_prefer_floor");
+
+    let (output_lengths, scales): (Vec<i32>, Vec<f64>) = if present(n, 3) {
+        let sizes = read_ints(ctx, n, 3)?;
+        (
+            sizes.iter().map(|&size| size as i32).collect(),
+            sizes
+                .iter()
+                .enumerate()
+                .map(|(i, &size)| size as f64 / input_shape[i] as f64)
+                .collect(),
+        )
+    } else {
+        let scales_host = ctx.raw_host(&n.inputs[2])?;
+        if scales_host.data.is_null() || scales_host.count != rank {
+            return Err("MLX Resize requires constant float32 scales".to_string());
+        }
+        let scales = unsafe {
+            std::slice::from_raw_parts(scales_host.data as *const f32, scales_host.count)
+        };
+        (
+            scales
+                .iter()
+                .enumerate()
+                .map(|(i, &scale)| (scale as f64 * input_shape[i] as f64).floor() as i32)
+                .collect(),
+            scales.iter().map(|&scale| scale as f64).collect(),
+        )
+    };
+
+    let restore_dtype = ctx.dtype_of(data);
+    let use_f32 = mode == "linear" || restore_dtype == mlx::mlx_dtype__MLX_BFLOAT16;
+    if use_f32 {
+        data = ctx.astype(data, mlx::mlx_dtype__MLX_FLOAT32)?;
+    }
+    for axis in 0..rank {
+        let input_len = input_shape[axis] as i64;
+        let output_len = output_lengths[axis] as i64;
+        if input_len == output_len {
+            continue;
+        }
+        if mode == "nearest" {
+            let indices: Vec<i32> = (0..output_len)
+                .map(|i| {
+                    resize_nearest_index(
+                        nearest_mode,
+                        resize_src_coord(coordinate_mode, i, scales[axis], input_len, output_len),
+                        input_len,
+                    )
+                })
+                .collect();
+            let index = ctx.keep(Array::from_data(
+                indices.as_ptr() as *const std::os::raw::c_void,
+                &[output_len as i32],
+                mlx::mlx_dtype__MLX_INT32,
+            ));
+            data =
+                ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, data, index, axis as i32, s) })?;
+            continue;
+        }
+
+        let mut lower = Vec::with_capacity(output_len as usize);
+        let mut upper = Vec::with_capacity(output_len as usize);
+        let mut lower_weight = Vec::with_capacity(output_len as usize);
+        let mut upper_weight = Vec::with_capacity(output_len as usize);
+        for i in 0..output_len {
+            let source = resize_src_coord(coordinate_mode, i, scales[axis], input_len, output_len);
+            let floor = source.floor();
+            lower.push(clamp_i64(floor as i64, 0, input_len - 1) as i32);
+            upper.push(clamp_i64(floor as i64 + 1, 0, input_len - 1) as i32);
+            upper_weight.push((source - floor) as f32);
+            lower_weight.push((1.0 - (source - floor)) as f32);
+        }
+        let lower_index = ctx.keep(Array::from_data(
+            lower.as_ptr() as *const std::os::raw::c_void,
+            &[output_len as i32],
+            mlx::mlx_dtype__MLX_INT32,
+        ));
+        let upper_index = ctx.keep(Array::from_data(
+            upper.as_ptr() as *const std::os::raw::c_void,
+            &[output_len as i32],
+            mlx::mlx_dtype__MLX_INT32,
+        ));
+        let mut weight_shape = vec![1i32; rank];
+        weight_shape[axis] = output_len as i32;
+        let lw = ctx.keep(Array::from_data(
+            lower_weight.as_ptr() as *const std::os::raw::c_void,
+            &weight_shape,
+            mlx::mlx_dtype__MLX_FLOAT32,
+        ));
+        let uw = ctx.keep(Array::from_data(
+            upper_weight.as_ptr() as *const std::os::raw::c_void,
+            &weight_shape,
+            mlx::mlx_dtype__MLX_FLOAT32,
+        ));
+        let lo = ctx
+            .emit(|res, s| unsafe { mlx::mlx_take_axis(res, data, lower_index, axis as i32, s) })?;
+        let hi = ctx
+            .emit(|res, s| unsafe { mlx::mlx_take_axis(res, data, upper_index, axis as i32, s) })?;
+        let lo = ctx.mul(lo, lw)?;
+        let hi = ctx.mul(hi, uw)?;
+        data = ctx.add(lo, hi)?;
+    }
+    if use_f32 {
+        data = ctx.astype(data, output_dtype)?;
+    }
+    let data = ctx.contiguous(data)?;
+    ctx.bind(&n.outputs[0], data);
+    Ok(())
+}
+
 // ---- claim predicates --------------------------------------------------------------------------
 
 fn movable_io(node: &NodeView) -> Option<(ort::ONNXTensorElementDataType, ort::ONNXTensorElementDataType)> {
@@ -857,6 +1018,89 @@ fn constant_of_shape_claim(node: &NodeView) -> bool {
     out == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
 }
 
+fn resize_claim(node: &NodeView) -> bool {
+    if node.num_inputs() < 3 || node.num_inputs() > 4 || node.num_outputs() != 1 {
+        return false;
+    }
+    let (input, output) = match (node.input_info(0), node.output_info(0)) {
+        (Some(input), Some(output)) => (input, output),
+        _ => return false,
+    };
+    if !is_mlx_float(input.dtype)
+        || output.dtype != input.dtype
+        || input.shape.is_empty()
+        || input.shape.len() > 4
+        || input.shape.len() != output.shape.len()
+        || input
+            .shape
+            .iter()
+            .chain(output.shape.iter())
+            .any(|&d| d < 1)
+    {
+        return false;
+    }
+    let mode = node.string_attr("mode", "nearest");
+    if mode != "nearest" && mode != "linear" {
+        return false;
+    }
+    let coordinate_mode = node.string_attr("coordinate_transformation_mode", "half_pixel");
+    if !matches!(
+        coordinate_mode.as_str(),
+        "half_pixel" | "asymmetric" | "align_corners" | "pytorch_half_pixel"
+    ) {
+        return false;
+    }
+    if mode == "nearest"
+        && !matches!(
+            node.string_attr("nearest_mode", "round_prefer_floor")
+                .as_str(),
+            "round_prefer_floor" | "round_prefer_ceil" | "floor" | "ceil"
+        )
+    {
+        return false;
+    }
+    if node.int_attr("exclude_outside", 0) != 0
+        || node.int_attr("antialias", 0) != 0
+        || node.has_attr("axes")
+        || node.string_attr("keep_aspect_ratio_policy", "stretch") != "stretch"
+        || node.input_present(1)
+    {
+        return false;
+    }
+    let has_scales = node.input_present(2);
+    let has_sizes = node.input_present(3);
+    if has_scales == has_sizes {
+        return false;
+    }
+    let computed = if has_sizes {
+        match node.read_const_int64(3) {
+            Some(sizes) if sizes.len() == input.shape.len() => sizes,
+            _ => return false,
+        }
+    } else {
+        match node.read_const_f32(2) {
+            Some(scales)
+                if scales.len() == input.shape.len() && scales.iter().all(|&s| s > 0.0) =>
+            {
+                scales
+                    .iter()
+                    .zip(input.shape.iter())
+                    .map(|(&scale, &size)| (scale as f64 * size as f64).floor() as i64)
+                    .collect()
+            }
+            _ => return false,
+        }
+    };
+    if computed
+        .iter()
+        .zip(output.shape.iter())
+        .any(|(&a, &b)| a < 1 || a != b)
+    {
+        return false;
+    }
+    input.shape.len() < 3 || (computed[0] == input.shape[0] && computed[1] == input.shape[1])
+}
+
 fn where_claim(node: &NodeView) -> bool {
     if node.num_inputs() != 3 || node.num_outputs() != 1 {
         return false;
@@ -920,4 +1164,5 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Size", size_op, size_claim);
     reg(registry, "ConstantOfShape", constant_of_shape_op, constant_of_shape_claim);
     reg(registry, "Where", where_handler, where_claim);
+    reg(registry, "Resize", resize_op, resize_claim);
 }

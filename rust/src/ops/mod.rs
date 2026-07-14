@@ -17,3 +17,4 @@ pub mod recurrent;
 pub mod signal;
 pub mod ssm;
 pub mod vision;
+pub mod stragglers;

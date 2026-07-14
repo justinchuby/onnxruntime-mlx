@@ -89,6 +89,7 @@ fn register_builtin_ops(registry: &mut OpRegistry) {
     crate::ops::conv::register_conv(registry);
     crate::ops::vision::register_vision(registry);
     crate::ops::quant::register(registry); // quant
+    crate::ops::stragglers::register(registry); // stragglers
 }
 
 /// Run-time dispatch: find the handler for a node and translate it.
@@ -711,6 +712,40 @@ impl NodeView {
                 return if count == 0 { Some(Vec::new()) } else { None };
             }
             Some(std::slice::from_raw_parts(data as *const i64, count).to_vec())
+        }
+    }
+
+pub fn read_const_f32(&self, i: usize) -> Option<Vec<f32>> {
+        if !matches!(self.input_info(i), Some(info)
+            if info.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
+            || !self.is_constant_initializer(i)
+        {
+            return None;
+        }
+        let ins = self.inputs_raw();
+        let vi = *ins.get(i)?;
+        unsafe {
+            let api = self.api();
+            let mut value: *const ort::OrtValue = std::ptr::null();
+            let st = (api.ValueInfo_GetInitializerValue.unwrap())(vi, &mut value);
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            if value.is_null() {
+                return None;
+            }
+            let mut info: *mut ort::OrtTensorTypeAndShapeInfo = std::ptr::null_mut();
+            (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+            let mut count: usize = 0;
+            (api.GetTensorShapeElementCount.unwrap())(info, &mut count);
+            (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+            let mut data: *const std::os::raw::c_void = std::ptr::null();
+            (api.GetTensorData.unwrap())(value, &mut data);
+            if data.is_null() {
+                return if count == 0 { Some(Vec::new()) } else { None };
+            }
+            Some(std::slice::from_raw_parts(data as *const f32, count).to_vec())
         }
     }
 
