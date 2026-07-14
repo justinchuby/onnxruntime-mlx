@@ -76,3 +76,4 @@ dist/
 venv/
 env/
 .python-version
+scratch/

@@ -567,7 +567,19 @@ unsafe fn build_plan(
             nodes.push(nd);
         }
 
-        Ok(Plan::new(nodes))
+        // Compiled-decode fast path (mlx_compile) is allowed unless a control-flow node is present
+        // (its graph structure depends on runtime data) or the kill-switch env is set. Detected
+        // recursively over the captured body subgraphs.
+        fn any_control_flow(nodes: &[NodeDesc]) -> bool {
+            nodes.iter().any(|n| {
+                !n.subgraphs.is_empty()
+                    || n.subgraphs.iter().any(|sg| any_control_flow(&sg.nodes))
+            })
+        }
+        let has_control_flow = any_control_flow(&nodes);
+        let mut plan = Plan::new(nodes);
+        plan.compiled.enabled = crate::compiled::compile_enabled(has_control_flow);
+        Ok(plan)
     }
 }
 
@@ -1201,6 +1213,29 @@ unsafe extern "C" fn compute(
         tr.note_thread("mlx.ep.compute");
         let _region = tr.subgraph_region(node_count);
         tr.sample_gpu_counters();
+
+        // Compiled-decode fast path: handle single-token (S==1) decode via the once-compiled
+        // shapeless closure; prefill (S>1) and ineligible plans fall through to the eager translator.
+        let plan_ptr: *mut Plan = &mut info.plan;
+        if info.plan.compiled.enabled
+            && crate::compiled::detect_seq_len(info.ort_api, kctx, &info.plan) == Some(1)
+        {
+            match crate::compiled::try_compiled_decode(plan_ptr, info.ort_api, kctx, info.stream) {
+                Ok(true) => {
+                    eprintln!(
+                        "[rust-mlx-ep] Compute: subgraph run via mlx-c COMPILED decode ({node_count} node(s))"
+                    );
+                    return ptr::null_mut();
+                }
+                Ok(false) => { /* not eligible — fall back to eager below */ }
+                Err(msg) => {
+                    let c = CString::new(format!("MLX compiled decode failed: {msg}"))
+                        .unwrap_or_else(|_| CString::new("MLX compiled decode failed").unwrap());
+                    return (api.CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, c.as_ptr());
+                }
+            }
+        }
+
         let mut tctx = TranslationContext::new(&mut info.plan, info.ort_api, kctx, info.stream);
         match tctx.execute() {
             Ok(()) => {

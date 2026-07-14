@@ -266,6 +266,29 @@ fn cos_sin_row(ctx: &mut TranslationContext, cache: mlx::mlx_array, past: i32, s
     slice(ctx, cache, &[past, 0], &[past + seq, half])
 }
 
+/// Compiled-decode RoPE: rotate-half via a `[hd,hd]` matmul (no Slice) with FULL-width cos/sin rows
+/// (`[1,1,S,hd]`, each half duplicated) fed as closure inputs. `out = x*cos + (x @ M)*sin`, matching
+/// standard non-interleaved RoPE. Eligibility guarantees `rot == hd == 2*half`, so there is no
+/// pass-through tail. Everything is cast to `x`'s dtype so the result dtype matches the eager path.
+fn gqa_rope_matmul(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    cos_full: mlx::mlx_array,
+    sin_full: mlx::mlx_array,
+    hd: i32,
+    half: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let dt = ctx.dtype_of(x);
+    let m = ctx.rotate_half_matrix(hd, half);
+    let m = ctx.astype(m, dt)?;
+    let cos_c = ctx.astype(cos_full, dt)?;
+    let sin_c = ctx.astype(sin_full, dt)?;
+    let xrot = ctx.matmul(x, m)?; // rotate_half(x)
+    let xc = mul(ctx, x, cos_c)?;
+    let xs = mul(ctx, xrot, sin_c)?;
+    add(ctx, xc, xs)
+}
+
 fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let num_heads = attr_int(n, "num_heads", 0) as i32;
     let kv_heads = attr_int(n, "kv_num_heads", 0) as i32;
@@ -293,7 +316,23 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
         let cos = ctx.resolve(&n.inputs[7])?; // [max_seq, rot/2]
         let sin = ctx.resolve(&n.inputs[8])?;
         let half = ctx.shape_of(cos)[1]; // rot/2
-        if is_fp32(ctx, cos) {
+        if ctx.rope_dynamic() {
+            // Compiled-decode trace: the position offset is DATA (the cos/sin rows arrive as
+            // pre-sliced closure inputs), and rotate-half is a [hd,hd] matmul so the shapeless graph
+            // carries no Slice. Eligibility (checked before compiling) guarantees rot == head_dim.
+            // The matmul rotate-half matrix is non-interleaved only; an interleaved model errors here
+            // so the trace fails and the plan falls back to the eager path (never miscomputed).
+            if interleaved {
+                return Err(
+                    "MLX: compiled-decode RoPE does not support rotary_interleaved (falls back to eager)"
+                        .to_string(),
+                );
+            }
+            let cos_full = ctx.rope_row_full(&n.inputs[7].name, s, half)?; // [1,1,S,2*half]
+            let sin_full = ctx.rope_row_full(&n.inputs[8].name, s, half)?;
+            qh = gqa_rope_matmul(ctx, qh, cos_full, sin_full, head, half)?;
+            kh = gqa_rope_matmul(ctx, kh, cos_full, sin_full, head, half)?;
+        } else if is_fp32(ctx, cos) {
             // Fused RoPE: positions run [past, past+S); the standard [max_seq, half] caches encode a
             // base/scale formula, so recover the period and let mlx_fast_rope apply it.
             let rot = 2 * half;

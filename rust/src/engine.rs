@@ -132,11 +132,96 @@ impl NodeDesc {
     }
 }
 
+/// A per-token dynamic subgraph input (non-constant `CtxInput`) fed as a compiled-closure argument.
+#[derive(Clone)]
+pub struct DynInput {
+    pub name: String,
+    pub ctx_index: usize,
+}
+
+/// A distinct RoPE cos/sin cache whose per-step row is pre-sliced OUTSIDE the compiled graph and fed
+/// as a synthetic closure input (so the compiled graph never slices a cache at a runtime position —
+/// which shapeless `mlx_compile` cannot shape-infer). `key` is the placeholder env key.
+#[derive(Clone)]
+pub struct SynthRope {
+    pub key: String,
+    pub cache_name: String,
+}
+
+/// Placeholder env key for the pre-sliced cos/sin row of the cache named `cache_name`.
+pub fn rope_row_key(cache_name: &str) -> String {
+    format!("__rope_row__{cache_name}")
+}
+
+/// Opaque payload handed to the `mlx_closure` trace thunk. Holds the raw pointers the thunk needs to
+/// (re)build a `TranslationContext` over the plan for the ONE-TIME shapeless trace: the plan itself
+/// (nodes + constant cache), the live ORT api/kernel-context (for constant host reads during the
+/// trace), and the mlx stream. `kctx` is refreshed before every apply (only read during the trace).
+///
+/// It lives in a stable `Box` on the plan (`CompiledDecode::payload`) so its address — captured by
+/// the base closure at build time — stays valid for the plan's lifetime.
+pub struct TracePayload {
+    pub plan: *mut Plan,
+    pub ort_api: *const ort::OrtApi,
+    pub kctx: *mut ort::OrtKernelContext,
+    pub stream: mlxsys::mlx_stream,
+}
+
+/// Compiled-decode fast-path state (mirrors the C++ `Plan` compiled-decode members). For decode
+/// (query seq-len S==1) the graph STRUCTURE is invariant across steps: only input DATA and the KV
+/// length grow. We trace the subgraph into an `mlx_closure` over its dynamic inputs ONCE, compile it
+/// shapeless (so growing KV needs no recompile), and on each decode step just apply the compiled
+/// closure to the new inputs — fusing the ~393 per-token kernels into far fewer launches.
+pub struct CompiledDecode {
+    /// Env `ONNX_GENAI_MLX_NO_COMPILE` unset AND no control-flow node → the fast path is allowed.
+    pub enabled: bool,
+    /// Have we tried to build the compiled closure yet? (one-shot; failure => eager forever).
+    pub attempted: bool,
+    /// Is `closure` usable?
+    pub valid: bool,
+    /// The compiled decode closure.
+    pub closure: Option<crate::mlx::Closure>,
+    /// Ordered dynamic ctx inputs = closure inputs `[0..n)`.
+    pub dyn_inputs: Vec<DynInput>,
+    /// Pre-sliced RoPE cos/sin row inputs, appended AFTER `dyn_inputs`.
+    pub synth_ropes: Vec<SynthRope>,
+    /// External boundary outputs, in closure append order.
+    pub ext_outputs: Vec<OutRef>,
+    /// Ctx input to read the RoPE start (past KV length) from, and its sequence axis.
+    pub rope_past_ctx_index: i32,
+    pub rope_past_axis: i32,
+    /// Transient MLX handles created during the one-time trace; the compiled graph references them
+    /// after the thunk returns, so they must outlive the trace (freed once with the plan).
+    pub trace_transient: Vec<Array>,
+    /// Stable payload for the trace thunk (self-referential to the enclosing plan).
+    pub payload: Option<Box<TracePayload>>,
+}
+
+impl CompiledDecode {
+    fn new() -> Self {
+        CompiledDecode {
+            enabled: false,
+            attempted: false,
+            valid: false,
+            closure: None,
+            dyn_inputs: Vec::new(),
+            synth_ropes: Vec::new(),
+            ext_outputs: Vec::new(),
+            rope_past_ctx_index: -1,
+            rope_past_axis: 2,
+            trace_transient: Vec::new(),
+            payload: None,
+        }
+    }
+}
+
 /// Persistent per-subgraph MLX state: the topo-ordered nodes plus the persistent cache of
 /// wrapped/repacked constant arrays (keyed by name, reused across runs — freed with the plan).
 pub struct Plan {
     pub nodes: Vec<NodeDesc>,
     pub cache: HashMap<String, Array>,
+    /// Compiled-decode fast-path state (see [`CompiledDecode`]).
+    pub compiled: CompiledDecode,
 }
 
 impl Plan {
@@ -144,6 +229,7 @@ impl Plan {
         Plan {
             nodes,
             cache: HashMap::new(),
+            compiled: CompiledDecode::new(),
         }
     }
 }
@@ -235,6 +321,10 @@ pub struct TranslationContext<'a> {
     /// Cached tracing-enabled gate so `mark_fast`/`mark_composed` are a cheap no-op (and
     /// never allocate a reason string) when tracing is off.
     trace_enabled: bool,
+    /// True while translating INSIDE the compiled-decode closure trace. In this mode RoPE uses the
+    /// pre-sliced cos/sin ROW placeholders (fed as extra closure inputs) + a matmul rotate-half, so
+    /// the graph carries no dynamic Slice (which shapeless `mlx_compile` cannot shape-infer).
+    rope_dynamic: bool,
 }
 
 impl<'a> TranslationContext<'a> {
@@ -253,6 +343,7 @@ impl<'a> TranslationContext<'a> {
             arena: Vec::new(),
             path_mark: None,
             trace_enabled: crate::trace::tracer().is_enabled(),
+            rope_dynamic: false,
         }
     }
 
@@ -834,6 +925,117 @@ impl<'a> TranslationContext<'a> {
         Ok(outs)
     }
 
+    // ---- compiled decode support ---------------------------------------------------------------
+
+    /// True while translating inside the compiled-decode closure trace (see [`Self::rope_dynamic`]).
+    #[inline]
+    pub fn rope_dynamic(&self) -> bool {
+        self.rope_dynamic
+    }
+
+    /// Construct a translation context in the compiled-decode TRACE mode (`rope_dynamic = true`).
+    /// Used only by [`crate::compiled`] while building the closure body.
+    pub(crate) fn new_trace(
+        plan: &'a mut Plan,
+        ort_api: *const ort::OrtApi,
+        kctx: *mut ort::OrtKernelContext,
+        stream: mlxsys::mlx_stream,
+    ) -> Self {
+        let mut tc = TranslationContext::new(plan, ort_api, kctx, stream);
+        tc.rope_dynamic = true;
+        tc
+    }
+
+    /// Seed an env binding (the compiled-closure placeholders: dynamic ctx inputs + pre-sliced RoPE
+    /// rows). `raw` is a borrowed handle owned by the trace arena.
+    pub(crate) fn seed(&mut self, name: String, raw: mlxsys::mlx_array) {
+        self.env.insert(name, raw);
+    }
+
+    /// The raw handle bound to `name` in the env, if any (compiled-closure output collection).
+    pub(crate) fn env_get(&self, name: &str) -> Option<mlxsys::mlx_array> {
+        self.env.get(name).copied()
+    }
+
+    /// Take ownership of this run's transient arena (handing it to the plan so the compiled graph's
+    /// handles outlive the trace). Leaves the context arena empty.
+    pub(crate) fn take_arena(&mut self) -> Vec<Array> {
+        std::mem::take(&mut self.arena)
+    }
+
+    /// Translate every node into MLX ops (no eval) and return the cast external boundary outputs as
+    /// a fresh vector — the body of the compiled-decode closure trace. Unlike [`Self::execute`] this
+    /// does NOT eval or copy out; the compiled closure defers evaluation to the single per-step eval.
+    pub(crate) fn run_trace(
+        &mut self,
+        ext_outputs: &[OutRef],
+    ) -> Result<VectorArray, MlxError> {
+        let nodes = std::mem::take(&mut self.plan.nodes);
+        let mut result = Ok(());
+        for node in &nodes {
+            if let Err(e) = crate::registry::translate(self, node) {
+                result = Err(e);
+                break;
+            }
+        }
+        self.plan.nodes = nodes;
+        result?;
+        // Cast each boundary output to its ORT output dtype so the per-step copy-out is a straight
+        // typed memcpy (mirrors `finish_boundary`), and append in the fixed closure output order.
+        let mut res = VectorArray::new();
+        for o in ext_outputs {
+            let a = self
+                .env_get(&o.name)
+                .ok_or_else(|| format!("MLX: compiled trace missing output {}", o.name))?;
+            let casted = self.astype(a, mlx_dtype_from_onnx(o.otype))?;
+            res.append(casted);
+        }
+        Ok(res)
+    }
+
+    /// The pre-sliced full-width cos/sin RoPE row placeholder for `cache_name`, reshaped to
+    /// `[1,1,S,2*half]` for broadcast over `[B,H,S,2*half]`. Compiled-decode trace only.
+    pub fn rope_row_full(
+        &mut self,
+        cache_name: &str,
+        seq: i32,
+        half: i32,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
+        let key = rope_row_key(cache_name);
+        let row = self
+            .env
+            .get(&key)
+            .copied()
+            .ok_or_else(|| format!("MLX: missing RoPE row placeholder for {cache_name}"))?;
+        self.reshape(row, &[1, 1, seq, 2 * half])
+    }
+
+    /// Constant `[hd,hd]` matrix `M` such that `x @ M == rotate_half(x)` for non-interleaved RoPE,
+    /// i.e. `rotate_half([x1,x2]) = [-x2, x1]` with `half = hd/2`. Built once (fp32) and cached on the
+    /// plan. Lets the compiled decode graph do rotate-half with a matmul instead of a Slice (which
+    /// shapeless `mlx_compile` cannot shape-infer). The caller casts it to the operand dtype.
+    pub fn rotate_half_matrix(&mut self, hd: i32, half: i32) -> mlxsys::mlx_array {
+        let key = format!("__rope_rotate_half_{hd}");
+        if let Some(a) = self.plan.cache.get(&key) {
+            return a.as_raw();
+        }
+        let n = (hd as usize) * (hd as usize);
+        let mut m = vec![0.0f32; n];
+        for i in 0..(half as usize) {
+            let hd_u = hd as usize;
+            let half_u = half as usize;
+            m[(i + half_u) * hd_u + i] = -1.0; // col i (<half) picks -x[i+half]
+            m[i * hd_u + (i + half_u)] = 1.0; // col i+half picks  x[i]
+        }
+        let shp = [hd, hd];
+        let arr = Array::from_data(
+            m.as_ptr() as *const c_void,
+            &shp,
+            mlxsys::mlx_dtype__MLX_FLOAT32,
+        );
+        self.cache_put(key, arr)
+    }
+
     /// Translate every node, cast+collect boundary outputs, one `mlx_eval`, copy each output back
     /// across the ORT boundary. Faithful port of `ExecuteEager`.
     pub fn execute(&mut self) -> Result<(), MlxError> {
@@ -896,30 +1098,72 @@ impl<'a> TranslationContext<'a> {
 
     /// Create the ORT output tensor with the MLX result shape and memcpy on unified memory.
     fn copy_out(&self, o: &OutRef, a: mlxsys::mlx_array) -> Result<(), MlxError> {
-        let arr = std::mem::ManuallyDrop::new(Array::from_raw(a)); // borrow, do not free
-        let shape = arr.shape();
-        let count: usize = shape.iter().map(|&d| d as usize).product::<usize>().max(0);
-        let itemsize = arr.itemsize();
-        unsafe {
-            let api = &*self.ort_api;
-            let mut out: *mut ort::OrtValue = std::ptr::null_mut();
-            let st = (api.KernelContext_GetOutput.unwrap())(
-                self.kctx,
-                o.ctx_index,
-                shape.as_ptr(),
-                shape.len(),
-                &mut out,
-            );
-            if !st.is_null() || out.is_null() {
-                return Err(format!("MLX: KernelContext_GetOutput({}) failed", o.ctx_index));
-            }
-            let mut dst: *mut c_void = std::ptr::null_mut();
-            (api.GetTensorMutableData.unwrap())(out, &mut dst);
-            let src = arr.data_bytes();
-            if !src.is_null() && !dst.is_null() {
-                std::ptr::copy_nonoverlapping(src, dst as *mut u8, count * itemsize);
-            }
-        }
-        Ok(())
+        copy_out_raw(self.ort_api, self.kctx, o, a)
     }
+}
+
+/// Read a ctx input's `(data ptr, shape, dtype)` directly from the kernel context (no
+/// `TranslationContext` needed — used by the compiled-decode path).
+pub(crate) fn read_ctx_input_raw(
+    ort_api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+    index: usize,
+) -> Result<(*const c_void, Vec<i64>, ort::ONNXTensorElementDataType), MlxError> {
+    unsafe {
+        let api = &*ort_api;
+        let mut val: *const ort::OrtValue = std::ptr::null();
+        let st = (api.KernelContext_GetInput.unwrap())(kctx, index, &mut val);
+        if !st.is_null() || val.is_null() {
+            return Err(format!("MLX: KernelContext_GetInput({index}) failed"));
+        }
+        let mut info: *mut ort::OrtTensorTypeAndShapeInfo = std::ptr::null_mut();
+        (api.GetTensorTypeAndShape.unwrap())(val, &mut info);
+        let mut nd: usize = 0;
+        (api.GetDimensionsCount.unwrap())(info, &mut nd);
+        let mut dims = vec![0i64; nd];
+        if nd > 0 {
+            (api.GetDimensions.unwrap())(info, dims.as_mut_ptr(), nd);
+        }
+        let mut etype: ort::ONNXTensorElementDataType = 0;
+        (api.GetTensorElementType.unwrap())(info, &mut etype);
+        (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+        let mut data: *const c_void = std::ptr::null();
+        (api.GetTensorData.unwrap())(val, &mut data);
+        Ok((data, dims, etype))
+    }
+}
+
+/// Create the ORT output tensor with the MLX result shape and memcpy on unified memory (no
+/// `TranslationContext` needed — used by the compiled-decode path).
+pub(crate) fn copy_out_raw(
+    ort_api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+    o: &OutRef,
+    a: mlxsys::mlx_array,
+) -> Result<(), MlxError> {
+    let arr = std::mem::ManuallyDrop::new(Array::from_raw(a)); // borrow, do not free
+    let shape = arr.shape();
+    let count: usize = shape.iter().map(|&d| d as usize).product::<usize>().max(0);
+    let itemsize = arr.itemsize();
+    unsafe {
+        let api = &*ort_api;
+        let mut out: *mut ort::OrtValue = std::ptr::null_mut();
+        let st = (api.KernelContext_GetOutput.unwrap())(
+            kctx,
+            o.ctx_index,
+            shape.as_ptr(),
+            shape.len(),
+            &mut out,
+        );
+        if !st.is_null() || out.is_null() {
+            return Err(format!("MLX: KernelContext_GetOutput({}) failed", o.ctx_index));
+        }
+        let mut dst: *mut c_void = std::ptr::null_mut();
+        (api.GetTensorMutableData.unwrap())(out, &mut dst);
+        let src = arr.data_bytes();
+        if !src.is_null() && !dst.is_null() {
+            std::ptr::copy_nonoverlapping(src, dst as *mut u8, count * itemsize);
+        }
+    }
+    Ok(())
 }

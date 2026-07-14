@@ -162,6 +162,15 @@ impl VectorArray {
         self.raw
     }
 
+    /// Consume the wrapper WITHOUT freeing, returning the raw handle (ownership transferred to the
+    /// caller — e.g. handing a trace result to mlx via the closure's `out` param).
+    #[inline]
+    pub fn into_raw(self) -> mlx::mlx_vector_array {
+        let raw = self.raw;
+        std::mem::forget(self);
+        raw
+    }
+
     #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut mlx::mlx_vector_array {
         &mut self.raw
@@ -187,4 +196,64 @@ pub fn eval(outputs: &VectorArray) -> Result<(), String> {
         return Err("mlx_eval failed".to_string());
     }
     Ok(())
+}
+
+/// Owning wrapper over an `mlx_closure` (a captured/compiled callable), freed once on drop.
+///
+/// Two flavours are used by the compiled-decode fast path:
+///   * [`Closure::new_func_payload`] wraps a Rust `extern "C"` trace thunk plus an opaque payload
+///     pointer — the *base* (un-compiled) closure whose body traces the whole decode subgraph.
+///   * [`Closure::compile`] runs `mlx_compile` (shapeless) on a base closure and returns the
+///     *compiled* closure that fuses the traced graph into far fewer kernel launches.
+/// [`Closure::apply`] runs the closure over an input vector, returning the output arrays.
+pub struct Closure {
+    raw: mlx::mlx_closure,
+}
+
+impl Closure {
+    /// Wrap a trace thunk + opaque payload as a base closure. The payload pointer must stay valid
+    /// (and point at a stable allocation) for as long as this closure — and any closure compiled
+    /// from it — may be applied. No destructor is registered (`dtor = None`); the payload is owned
+    /// elsewhere (the plan).
+    pub fn new_func_payload(
+        fun: unsafe extern "C" fn(
+            *mut mlx::mlx_vector_array,
+            mlx::mlx_vector_array,
+            *mut std::os::raw::c_void,
+        ) -> std::os::raw::c_int,
+        payload: *mut std::os::raw::c_void,
+    ) -> Self {
+        let raw = unsafe { mlx::mlx_closure_new_func_payload(Some(fun), payload, None) };
+        Closure { raw }
+    }
+
+    /// Compile `base` shapeless (so a growing KV length never triggers a recompile) into a fused
+    /// closure. Returns `Err` if `mlx_compile` fails (caller falls back to the eager path).
+    pub fn compile(base: &Closure, shapeless: bool) -> Result<Closure, String> {
+        let mut res = unsafe { mlx::mlx_closure_new() };
+        let rc = unsafe { mlx::mlx_compile(&mut res, base.raw, shapeless) };
+        if rc != 0 {
+            unsafe { mlx::mlx_closure_free(res) };
+            return Err("mlx_compile failed".to_string());
+        }
+        Ok(Closure { raw: res })
+    }
+
+    /// Apply the closure to `input`, returning the produced output arrays (owning). `Err` on any
+    /// MLX failure inside the (traced or replayed) body.
+    pub fn apply(&self, input: &VectorArray) -> Result<VectorArray, String> {
+        let mut res = unsafe { mlx::mlx_vector_array_new() };
+        let rc = unsafe { mlx::mlx_closure_apply(&mut res, self.raw, input.as_raw()) };
+        if rc != 0 {
+            unsafe { mlx::mlx_vector_array_free(res) };
+            return Err("mlx_closure_apply failed".to_string());
+        }
+        Ok(VectorArray::from_raw(res))
+    }
+}
+
+impl Drop for Closure {
+    fn drop(&mut self) {
+        unsafe { mlx::mlx_closure_free(self.raw) };
+    }
 }
