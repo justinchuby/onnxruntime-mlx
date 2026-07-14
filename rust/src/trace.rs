@@ -454,9 +454,15 @@ impl MlxTracer {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        let e = m.entry(op_type.to_string()).or_insert((0, 0));
-        e.0 += us;
-        e.1 += 1;
+        // Hot path: the op-type key almost always already exists (few distinct ops), so
+        // update in place and avoid the per-call `to_string()` allocation that
+        // `entry(op_type.to_string())` would incur. Allocate only on first sight.
+        if let Some(e) = m.get_mut(op_type) {
+            e.0 += us;
+            e.1 += 1;
+        } else {
+            m.insert(op_type.to_string(), (us, 1));
+        }
     }
 
     /// Log a compact **top-10 slowest ops** summary (op_type → total us, %, call count)
