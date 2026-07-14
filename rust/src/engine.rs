@@ -336,13 +336,11 @@ impl<'a> TranslationContext<'a> {
         };
         let tr = crate::trace::tracer();
 
-        // Output metadata + a vector of the node's output handles (for the fine-mode eval).
-        let mut out_v = VectorArray::new();
+        // Output metadata (shapes / dtype / elements / bytes) — from whatever is materialized.
         let mut out_shapes: Vec<String> = Vec::new();
         let mut dtype = "";
         let mut elements: u64 = 0;
         let mut bytes: u64 = 0;
-        let mut n_out = 0usize;
         for o in &node.outputs {
             if o.name.is_empty() {
                 continue;
@@ -356,8 +354,6 @@ impl<'a> TranslationContext<'a> {
                 dtype = dtype_name(arr.dtype());
                 elements += cnt;
                 bytes += cnt * arr.itemsize() as u64;
-                out_v.append(raw);
-                n_out += 1;
             }
         }
         // Input shapes, best-effort from whatever is already materialized in the env.
@@ -374,15 +370,9 @@ impl<'a> TranslationContext<'a> {
         let out_s = out_shapes.join(";");
         let in_s = in_shapes.join(";");
 
-        if tr.fine_enabled() && n_out > 0 {
-            // Force materialization of THIS op's outputs → GPU-inclusive time. BREAKS FUSION.
-            let t0 = std::time::Instant::now();
-            let _ = mlx::eval(&out_v);
-            let dur = t0.elapsed();
-            tr.record_gpu_op(op_type, t0, dur, &out_s, &in_s, dtype, elements, bytes);
-        } else {
-            tr.record_op_meta(op_type, start, start.elapsed(), &out_s, &in_s, dtype, elements, bytes);
-        }
+        // A build-time span with resource metadata. The fused subgraph runs as a single
+        // `mlx.eval` (see finish_boundary); per-kernel GPU detail is the Xcode GPU capture.
+        tr.record_op_meta(op_type, start, start.elapsed(), &out_s, &in_s, dtype, elements, bytes);
     }
 
     /// Resolve a node input to a raw MLX array handle (intermediate env / wrapped ctx input /

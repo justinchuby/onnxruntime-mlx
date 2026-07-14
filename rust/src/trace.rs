@@ -18,15 +18,13 @@
 //!     time of the whole fused subgraph (that is the granularity MLX gives us on the
 //!     fused path), a lightweight span per node at graph-build time (`<op_type>`,
 //!     cat `op`), and a rich per-op detail span (shapes / dtype / elements / bytes).
-//!   * **Seeing INSIDE the fused eval** — two opt-in modes break the single opaque
-//!     `mlx.eval` blob into per-op detail (both keep the default path untouched):
-//!       - **Fine per-op GPU timing** (`ONNX_GENAI_MLX_TRACE_FINE=1`): eval each
-//!         node's outputs individually → a `gpu.op` span per op with GPU-inclusive
-//!         time. BREAKS fusion (debug-only, slower). See [`MlxTracer::fine_enabled`].
-//!       - **Xcode GPU capture** (`ONNX_GENAI_MLX_GPU_CAPTURE=<path.gputrace>`): wrap
-//!         the first eval in `mlx_metal_start_capture`/`stop_capture` for a
-//!         `.gputrace` bundle with full per-kernel timing. See
-//!         [`MlxTracer::begin_gpu_capture`].
+//!   * **Seeing INSIDE the fused eval — Xcode GPU capture**
+//!     (`ONNX_GENAI_MLX_GPU_CAPTURE=<path.gputrace>`, `ONNX_GENAI_MLX_GPU_CAPTURE_EVAL=<n>`):
+//!     capture the Nth boundary eval (default 0) with `mlx_metal_start_capture`/
+//!     `stop_capture` → a `.gputrace` bundle with full per-kernel timing / occupancy /
+//!     bandwidth. This is the faithful detailed view: it captures the REAL fused
+//!     execution without perturbing it. For decode set EVAL to a steady-state token
+//!     (eval 0 is prefill/warmup). See [`MlxTracer::begin_gpu_capture`].
 //!   * **os_signpost** intervals around the same subgraph / eval regions, so an
 //!     Instruments *Metal System Trace* correlates. Zero cost when Instruments is
 //!     not attached.
@@ -80,21 +78,16 @@ pub enum PathMark {
 pub const TRACE_ENV: &str = "ONNX_GENAI_MLX_TRACE";
 /// Set to `1` to force os_signpost intervals on even when JSON tracing is off.
 pub const SIGNPOST_ENV: &str = "ONNX_GENAI_MLX_SIGNPOST";
-/// Set to `1` to enable **fine-grained per-op GPU timing** (implies JSON tracing on).
-///
-/// In this mode every node's output array(s) are `mlx_array_eval`'d individually right
-/// after its handler binds them, so each op is materialized on its own and its
-/// GPU-inclusive wall time is recorded as a distinct `gpu.op` span. This BREAKS MLX's
-/// subgraph fusion (materializing per node defeats the lazy graph), so it is
-/// **slower** and strictly a debug tool — the normal path (fine off) keeps the single
-/// fused `mlx_eval`. See [`MlxTracer::fine_enabled`].
-pub const FINE_ENV: &str = "ONNX_GENAI_MLX_TRACE_FINE";
-/// Set to a `<path>.gputrace` (or `1` for a default path) to wrap the **first** boundary
-/// eval in a Metal GPU capture (`mlx_metal_start_capture` … `stop_capture`). The
-/// resulting `.gputrace` bundle opens in Xcode / Instruments for full per-kernel GPU
-/// timing, occupancy and memory-bandwidth — the detail `mlx-c` cannot surface itself.
-/// Only the first eval is captured (a whole-decode capture would be enormous).
+/// Set to a `<path>.gputrace` (or `1` for a default path) to wrap a boundary eval in a
+/// Metal GPU capture (`mlx_metal_start_capture` … `stop_capture`). The resulting
+/// `.gputrace` bundle opens in Xcode / Instruments for full per-kernel GPU timing,
+/// occupancy and memory-bandwidth of the REAL fused eval — the faithful detailed view
+/// (`mlx-c` surfaces no per-kernel timing itself, and fine mode perturbs execution).
+/// Requires `MTL_CAPTURE_ENABLED=1` in the environment before process start.
 pub const GPU_CAPTURE_ENV: &str = "ONNX_GENAI_MLX_GPU_CAPTURE";
+/// Which eval (0-based) to GPU-capture (default 0). For decode, eval 0 is the
+/// prefill/warmup; set e.g. `5` to capture a representative steady-state decode step.
+pub const GPU_CAPTURE_EVAL_ENV: &str = "ONNX_GENAI_MLX_GPU_CAPTURE_EVAL";
 
 /// Process-wide tracer singleton. All subgraphs/sessions share one timeline and one
 /// output file, stamped with the real `pid` so the events merge into onnx-genai's
@@ -130,15 +123,17 @@ pub struct MlxTracer {
     signpost_log: usize,
     /// Cached default `MTLDevice` as a `usize` (0 = unavailable).
     device: usize,
-    /// Fine-grained per-op GPU timing mode (`ONNX_GENAI_MLX_TRACE_FINE`). Breaks fusion.
-    fine: bool,
     /// Resolved `.gputrace` capture path (`None` = capture disabled).
     capture_path: Option<PathBuf>,
-    /// Guards the one-shot Metal capture so only the FIRST eval is captured.
+    /// Which eval (0-based) to capture — `ONNX_GENAI_MLX_GPU_CAPTURE_EVAL` (default 0).
+    /// Set to e.g. 5 to capture a steady-state DECODE token instead of eval 0 (prefill/warmup).
+    capture_eval_target: u64,
+    /// Running eval counter; the capture fires when it reaches `capture_eval_target`.
+    eval_seq: std::sync::atomic::AtomicU64,
+    /// Guards the one-shot Metal capture so only the target eval is captured.
     capture_done: AtomicBool,
     /// Cumulative per-op-type time for the end-of-run "slowest ops" summary:
-    /// `op_type -> (total_us, call_count)`. Populated with GPU-inclusive times in fine
-    /// mode, otherwise with build/handler wall times.
+    /// `op_type -> (total_us, call_count)`, from the per-node build/handler wall times.
     op_times: Mutex<HashMap<String, (u64, u64)>>,
     /// IOReport GPU-utilisation sampler (`None` when unavailable). See [`ioreport`].
     gpu_util: Mutex<Option<ioreport::GpuUtil>>,
@@ -152,10 +147,7 @@ unsafe impl Sync for MlxTracer {}
 impl MlxTracer {
     fn new() -> Self {
         let path = std::env::var(TRACE_ENV).ok().filter(|s| !s.is_empty());
-        let fine = std::env::var(FINE_ENV).map(|v| v == "1").unwrap_or(false);
-        // Fine mode implies JSON tracing on even if TRACE_ENV is unset (the spans still
-        // accumulate in memory; export is a no-op without a path).
-        let trace_on = path.is_some() || fine;
+        let trace_on = path.is_some();
 
         let (ctx, mem) = if trace_on {
             let (ctx, mem) = TraceContext::in_memory();
@@ -177,6 +169,12 @@ impl MlxTracer {
                     PathBuf::from(s)
                 }
             });
+        // Which eval to capture (0-based). Default 0 = the first eval (prefill/warmup);
+        // set to a later index to capture a representative steady-state decode step.
+        let capture_eval_target = std::env::var(GPU_CAPTURE_EVAL_ENV)
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0);
 
         let signpost_on = trace_on
             || std::env::var(SIGNPOST_ENV)
@@ -204,8 +202,9 @@ impl MlxTracer {
             composed_counts: Mutex::new(HashMap::new()),
             signpost_log,
             device,
-            fine,
             capture_path,
+            capture_eval_target,
+            eval_seq: std::sync::atomic::AtomicU64::new(0),
             capture_done: AtomicBool::new(false),
             op_times: Mutex::new(HashMap::new()),
             gpu_util: Mutex::new(gpu_util),
@@ -366,13 +365,6 @@ impl MlxTracer {
         });
     }
 
-    /// Whether **fine-grained per-op GPU timing** mode is on (`ONNX_GENAI_MLX_TRACE_FINE`).
-    /// When true the engine eval's each node's outputs individually to time them — this
-    /// BREAKS fusion and is a debug-only mode. Implies [`is_enabled`](Self::is_enabled).
-    #[inline]
-    pub fn fine_enabled(&self) -> bool {
-        self.fine
-    }
 
     /// Emit a rich per-op span (cat `op`) for a node whose outputs are already bound.
     /// Carries input/output shapes, dtype, element count and byte size so every op span
@@ -400,43 +392,6 @@ impl MlxTracer {
             dur,
             Some(
                 Args::new()
-                    .with("op_type", op_type.to_string())
-                    .with("output_shapes", out_shapes.to_string())
-                    .with("input_shapes", in_shapes.to_string())
-                    .with("dtype", dtype.to_string())
-                    .with("elements", elements)
-                    .with("bytes", bytes),
-            ),
-        );
-        self.record_op_time(op_type, dur.as_micros() as u64);
-    }
-
-    /// Emit a per-op **GPU** span (cat `gpu.op`) for fine mode — its wall time is the
-    /// GPU-INCLUSIVE time of just this op's forced eval (fusion broken). Carries the same
-    /// resource Args and feeds the slowest-ops summary with GPU time. No-op when disabled.
-    #[allow(clippy::too_many_arguments)]
-    pub fn record_gpu_op(
-        &self,
-        op_type: &str,
-        start: Instant,
-        dur: Duration,
-        out_shapes: &str,
-        in_shapes: &str,
-        dtype: &str,
-        elements: u64,
-        bytes: u64,
-    ) {
-        if !self.is_enabled() {
-            return;
-        }
-        self.ctx.complete(
-            op_type.to_string(),
-            "gpu.op",
-            start,
-            dur,
-            Some(
-                Args::new()
-                    .device("gpu")
                     .with("op_type", op_type.to_string())
                     .with("output_shapes", out_shapes.to_string())
                     .with("input_shapes", in_shapes.to_string())
@@ -489,11 +444,7 @@ impl MlxTracer {
         ranked.sort_by(|a, b| b.1.cmp(&a.1));
         ranked.truncate(10);
 
-        let kind = if self.fine {
-            "GPU-inclusive per-op"
-        } else {
-            "build-time (fusion intact; per-op GPU time needs ONNX_GENAI_MLX_TRACE_FINE=1)"
-        };
+        let kind = "build-time (fusion intact; per-kernel GPU detail: ONNX_GENAI_MLX_GPU_CAPTURE)";
         let denom = total.max(1) as f64;
 
         let mut lines = String::new();
@@ -527,7 +478,14 @@ impl MlxTracer {
     #[must_use]
     pub fn begin_gpu_capture(&self) -> Option<CaptureGuard> {
         let path = self.capture_path.as_ref()?;
-        // Take the one-shot slot; only the first eval wins.
+        // Which eval are we on (0-based)? Capture only the target eval — this lets a caller
+        // grab a representative STEADY-STATE decode step (e.g. EVAL=5) instead of eval 0,
+        // which for decode is the prefill/warmup and not representative of the hot path.
+        let seq = self.eval_seq.fetch_add(1, Ordering::SeqCst);
+        if seq != self.capture_eval_target {
+            return None;
+        }
+        // Defensive one-shot guard (seq matches the target exactly once).
         if self
             .capture_done
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -560,7 +518,10 @@ impl MlxTracer {
         }
         let path_str = path.to_string_lossy().to_string();
         if metal_capture::start(&path_str) {
-            eprintln!("[rust-mlx-ep] Metal GPU capture STARTED → {path_str} (first eval only)");
+            eprintln!(
+                "[rust-mlx-ep] Metal GPU capture STARTED → {path_str} (eval #{})",
+                self.capture_eval_target
+            );
             Some(CaptureGuard { path: path_str })
         } else {
             eprintln!(
