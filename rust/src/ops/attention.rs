@@ -289,6 +289,65 @@ fn gqa_rope_matmul(
     add(ctx, xc, xs)
 }
 
+/// Compiled-decode shared-buffer KV update + masked SDPA. `valid_past` is DATA (recovered from the
+/// in-graph `total_sequence_length` = input[6], minus S), so the new K/V are written in place with a
+/// dynamic slice-update at that offset and attention runs over the whole `cap` buffer under a
+/// static-shape additive mask (buffer tail beyond `valid_past+S` masked to -inf; causal within the
+/// valid prefix). Every op is statically shaped, so the shapeless compiled closure can carry it.
+/// Returns `(present_k, present_v, attn)` with present at the full `[B,kv,cap,hd]` capacity.
+#[allow(clippy::too_many_arguments)]
+fn gqa_shared_compiled(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    past_k: mlx::mlx_array,
+    past_v: mlx::mlx_array,
+    kh: mlx::mlx_array,
+    vh: mlx::mlx_array,
+    qh: mlx::mlx_array,
+    s: i32,
+    cap: i32,
+    scale: f32,
+) -> Result<(mlx::mlx_array, mlx::mlx_array, mlx::mlx_array), MlxError> {
+    let i32t = mlx::mlx_dtype__MLX_INT32;
+    // valid_past is fed as a live [1] int32 closure input (appended after the synth RoPE rows) so it
+    // advances every decode step. Resolving the in-graph total_sequence_length here instead would let
+    // shapeless compile freeze it at trace time (baking Shape(attention_mask) as a constant), which
+    // pins the write offset + mask and corrupts generation. Fall back defensively if unavailable.
+    let vp = match ctx.shared_valid_past() {
+        Some(a) => a,
+        None => {
+            let ts = ctx.resolve(&n.inputs[6])?;
+            let ts = ctx.astype(ts, i32t)?;
+            let ts = ctx.reshape(ts, &[1])?;
+            let s_scalar = ctx.scalar_i32(s);
+            let s_scalar = ctx.reshape(s_scalar, &[1])?;
+            ctx.sub(ts, s_scalar)?
+        }
+    }; // [1] valid_past
+
+    // In-place write of the S new rows at axis-2 offset valid_past; present keeps the full capacity.
+    let present_k = ctx.slice_update_dynamic(past_k, kh, vp, &[2])?;
+    let present_v = ctx.slice_update_dynamic(past_v, vh, vp, &[2])?;
+
+    // Additive causal mask [1,1,S,cap]: key j attends query i iff j <= valid_past + i.
+    let key_pos = ctx.arange(0.0, cap as f64, 1.0, i32t)?; // [cap]
+    let key_pos = ctx.reshape(key_pos, &[1, cap])?; // [1,cap]
+    let q_off = ctx.arange(0.0, s as f64, 1.0, i32t)?; // [S]
+    let q_pos = ctx.add(vp, q_off)?; // [S] (valid_past + i, broadcast [1]+[S])
+    let q_pos = ctx.reshape(q_pos, &[s, 1])?; // [S,1]
+    let allow = ctx.less_equal(key_pos, q_pos)?; // [S,cap] bool
+    let dt = ctx.dtype_of(qh);
+    let zero = ctx.scalar_f32(0.0);
+    let zero = ctx.astype(zero, dt)?;
+    let neg = ctx.scalar_f32(f32::NEG_INFINITY);
+    let neg = ctx.astype(neg, dt)?;
+    let mask = ctx.where_(allow, zero, neg)?; // [S,cap]
+    let mask = ctx.reshape(mask, &[1, 1, s, cap])?;
+
+    let attn = sdpa(ctx, qh, present_k, present_v, scale, b"array\0", mask)?;
+    Ok((present_k, present_v, attn))
+}
+
 fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let num_heads = attr_int(n, "num_heads", 0) as i32;
     let kv_heads = attr_int(n, "kv_num_heads", 0) as i32;
@@ -313,10 +372,12 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     // shared buffer to write in place. `total_sequence_length` (input[6], int32 scalar) counts the
     // valid keys after this step (= valid_past + S), so `valid_past = total_sequence_length[0] - S`.
     // Shared-buffer mode is exactly `cap > valid_past` (past_k is a max-length buffer). The compiled
-    // decode trace cannot eval mid-graph, so it always runs the growing form (and `build_compiled_
-    // closure` disables the compiled path for shared-buffer sessions), keeping `valid_past == cap`.
+    // decode trace cannot eval mid-graph, so it takes the mode from the once-detected plan flag
+    // (`ctx.shared_kv()`) and drives the in-place write with a DATA offset instead (see below).
     let (shared_buffer, valid_past) = if ctx.rope_dynamic() {
-        (false, cap)
+        // valid_past (int) is unused on the compiled path: RoPE uses the pre-sliced synth rows and
+        // the KV write/mask use a data offset derived from total_sequence_length.
+        (ctx.shared_kv(), cap)
     } else {
         let ts = ctx.resolve(&n.inputs[6])?;
         let total = ctx.read_scalar_i64(ts)? as i32;
@@ -378,13 +439,19 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
         }
     }
 
-    // Append the new K/V to the cache. Two contracts:
-    //   * Shared-buffer (fixed capacity): write the S new rows in place at [valid_past, valid_past+S)
-    //     of the [B,kv,cap,hd] buffer via slice_update, output present at the FULL cap shape (matches
-    //     ORT's pre-bound shared output), and attend over the valid prefix [0, valid_past+S) so causal
+    // Append the new K/V to the cache. Three contracts:
+    //   * Shared-buffer, EAGER: write the S new rows in place at [valid_past, valid_past+S) of the
+    //     [B,kv,cap,hd] buffer via slice_update, emit present at the FULL cap shape (matches ORT's
+    //     pre-bound shared output), and attend over the valid prefix [0, valid_past+S) so causal
     //     alignment places the S queries at their true positions [valid_past, valid_past+S).
+    //   * Shared-buffer, COMPILED: same, but valid_past is DATA (total_sequence_length - S), so the
+    //     write is a slice_update_dynamic at that offset and attention uses a static-shape additive
+    //     mask over the whole cap buffer (the tail beyond valid_past+S masked to -inf). Keeping every
+    //     op statically shaped lets the shapeless compiled closure express it.
     //   * Growing: concat past+new along the sequence axis (unchanged legacy behavior).
-    let (present_k, present_v, attn_k, attn_v) = if shared_buffer {
+    let (present_k, present_v, attn) = if shared_buffer && ctx.rope_dynamic() {
+        gqa_shared_compiled(ctx, n, past_k, past_v, kh, vh, qh, s, cap, scale)?
+    } else if shared_buffer {
         let start = [0, 0, valid_past, 0];
         let stop = [b, kv_heads, valid_past + s, head];
         let pk = ctx.slice_update(past_k, kh, &start, &stop)?;
@@ -392,14 +459,15 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
         let vp1 = valid_past + s;
         let ak = slice(ctx, pk, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
         let av = slice(ctx, pv, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
-        (pk, pv, ak, av)
+        let attn = sdpa(ctx, qh, ak, av, scale, b"causal\0", empty_array())?;
+        (pk, pv, attn)
     } else {
         let pk = concat2(ctx, past_k, kh, 2)?;
         let pv = concat2(ctx, past_v, vh, 2)?;
-        (pk, pv, pk, pv)
+        let attn = sdpa(ctx, qh, pk, pv, scale, b"causal\0", empty_array())?;
+        (pk, pv, attn)
     };
 
-    let attn = sdpa(ctx, qh, attn_k, attn_v, scale, b"causal\0", empty_array())?;
     // [B,H,S,hd] -> [B,S,H*hd].
     let t = ctx.transpose(attn, &[0, 2, 1, 3])?;
     let out = ctx.reshape(t, &[b, s, num_heads * head])?;

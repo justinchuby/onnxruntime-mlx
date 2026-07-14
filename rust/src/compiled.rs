@@ -66,13 +66,22 @@ pub fn detect_seq_len(
 /// ctx once at compiled-closure build time: `cap` = a GQA past-KV cache's seq-axis (2) length, and
 /// `total` = valid keys after this step (= `total_sequence_length[0]`, or the `attention_mask` width
 /// when that scalar is computed in-subgraph). Shared iff `cap > total - S` (the buffer holds more
-/// than the valid past). Returns `None` when the shape is not a recognizable decoder GQA.
+/// than the valid past). Returns `(shared, mask_ctx_index)` — `mask_ctx_index` is the `attention_mask`
+/// ctx input used to recover the valid-past RoPE start at apply time (`-1` if unknown). `None` when
+/// the shape is not a recognizable decoder GQA.
 fn detect_shared_kv(
     plan: &Plan,
     api: *const ort::OrtApi,
     kctx: *mut ort::OrtKernelContext,
-) -> Option<bool> {
+) -> Option<(bool, i32)> {
     let s = detect_seq_len(api, kctx, plan).unwrap_or(1);
+    let mask_ctx_index = plan
+        .nodes
+        .iter()
+        .flat_map(|n| n.inputs.iter())
+        .find(|inp| inp.source == Src::CtxInput && inp.name == "attention_mask")
+        .map(|inp| inp.ctx_index as i32)
+        .unwrap_or(-1);
     for node in &plan.nodes {
         if node.op_type != "GroupQueryAttention" || node.inputs.len() < 7 {
             continue;
@@ -95,16 +104,15 @@ fn detect_shared_kv(
                 Ok((data, _shape, _t)) if !data.is_null() => unsafe { *(data as *const i32) },
                 _ => continue,
             }
-        } else {
-            let mask_ci = plan.nodes.iter().flat_map(|n| n.inputs.iter()).find(|inp| {
-                inp.source == Src::CtxInput && inp.name == "attention_mask"
-            })?;
-            match read_ctx_input_raw(api, kctx, mask_ci.ctx_index) {
+        } else if mask_ctx_index >= 0 {
+            match read_ctx_input_raw(api, kctx, mask_ctx_index as usize) {
                 Ok((_d, shape, _t)) => *shape.get(1)? as i32,
                 Err(_) => continue,
             }
+        } else {
+            continue;
         };
-        return Some(cap > total - s);
+        return Some((cap > total - s, mask_ctx_index));
     }
     None
 }
@@ -206,16 +214,25 @@ pub fn try_compiled_decode(
         }
     }
 
-    // Current RoPE start = past-KV sequence length (grows each step; fed as DATA via the rows below).
+    // Current RoPE start = position of the new query rows. In the growing contract this is the
+    // past-KV sequence length (past_k's seq axis). In the shared-buffer contract past_k's seq axis
+    // is the fixed capacity, so the true position is the VALID past = attention_mask width - S (the
+    // in-graph total_sequence_length). Either way it is fed as DATA via the pre-sliced rows below.
     let past = {
         let plan = unsafe { &*plan_ptr };
-        let idx = plan.compiled.rope_past_ctx_index as usize;
-        let axis = plan.compiled.rope_past_axis as usize;
-        let (_d, shape, _t) = read_ctx_input_raw(api, kctx, idx)?;
-        if axis < shape.len() {
-            shape[axis] as i32
+        if plan.compiled.shared_kv && plan.compiled.mask_ctx_index >= 0 {
+            let s = detect_seq_len(api, kctx, plan).unwrap_or(1);
+            let (_d, shape, _t) = read_ctx_input_raw(api, kctx, plan.compiled.mask_ctx_index as usize)?;
+            (*shape.get(1).unwrap_or(&0) as i32) - s
         } else {
-            0
+            let idx = plan.compiled.rope_past_ctx_index as usize;
+            let axis = plan.compiled.rope_past_axis as usize;
+            let (_d, shape, _t) = read_ctx_input_raw(api, kctx, idx)?;
+            if axis < shape.len() {
+                shape[axis] as i32
+            } else {
+                0
+            }
         }
     };
 
@@ -239,6 +256,21 @@ pub fn try_compiled_decode(
             arena.push(row);
             arena.push(full);
         }
+    }
+
+    // Shared-buffer contract: append the live `valid_past` (= `past`, computed above from the
+    // attention_mask width) as a [1] int32 closure input AFTER the synth RoPE rows. The compiled GQA
+    // op reads it to place the in-place K/V write and build the causal mask — as pure per-step data,
+    // so shapeless compile never freezes the growing offset. Kept in the arena for the apply's life.
+    if unsafe { &*plan_ptr }.compiled.shared_kv {
+        let vp = [past];
+        let arr = Array::from_data(
+            vp.as_ptr() as *const std::os::raw::c_void,
+            &[1],
+            mlxsys::mlx_dtype__MLX_INT32,
+        );
+        input.append(arr.as_raw());
+        arena.push(arr);
     }
 
     // Refresh the live kernel context on the trace payload (only read during the one-time trace).
@@ -377,19 +409,18 @@ fn build_compiled_closure(
         return; // partial-rotary head not supported by the compiled path
     }
 
-    // Disable the compiled fast path for a fixed-capacity shared KV buffer. In that contract the
-    // present output must be written IN PLACE at the (data-dependent) valid-past offset and emitted
-    // at the buffer's full capacity, which the shapeless compiled trace cannot express (its concat
-    // form would produce a cap+S present and fail ORT's pre-bound output-size check). Such sessions
-    // run the eager shared-buffer path instead — still O(1)/token, just not fused. Detected once here
-    // from live ctx: shared iff the past-KV capacity exceeds the valid-past length (= total keys - S).
-    if detect_shared_kv(unsafe { &*plan_ptr }, api, kctx).unwrap_or(false) {
-        return;
-    }
+    // Detect a fixed-capacity shared KV buffer once from live ctx. In that contract GQA writes the
+    // new K/V in place at the (data-dependent) valid-past offset and emits present at the buffer's
+    // full capacity — the trace handles both via a data start index + a static-shape additive mask,
+    // so the compiled fast path still applies. Recorded on the plan for the trace + apply steps.
+    let (shared_kv, mask_ctx_index) = detect_shared_kv(unsafe { &*plan_ptr }, api, kctx)
+        .unwrap_or((false, -1));
 
     // Publish the discovered schema + a stable trace payload onto the plan.
     unsafe {
         let plan = &mut *plan_ptr;
+        plan.compiled.shared_kv = shared_kv;
+        plan.compiled.mask_ctx_index = mask_ctx_index;
         plan.compiled.dyn_inputs = dyn_inputs;
         plan.compiled.ext_outputs = ext_outputs;
         plan.compiled.synth_ropes = synth_ropes;
@@ -476,12 +507,19 @@ fn trace_body(
             let raw = tc.keep(Array::from_raw(a));
             tc.seed(di.name.clone(), raw);
         }
-        // Seed the pre-sliced RoPE cos/sin row placeholders (closure inputs [ndyn..)).
+        // Seed the pre-sliced RoPE cos/sin row placeholders (closure inputs [ndyn..ndyn+nsynth)).
         for (j, sr) in synth_ropes.iter().enumerate() {
             let mut a = unsafe { mlxsys::mlx_array_new() };
             unsafe { mlxsys::mlx_vector_array_get(&mut a, input, ndyn + j) };
             let raw = tc.keep(Array::from_raw(a));
             tc.seed(sr.key.clone(), raw);
+        }
+        // Shared-buffer: seed the live `valid_past` scalar (closure input [ndyn+nsynth]).
+        if unsafe { &*plan_ptr }.compiled.shared_kv {
+            let mut a = unsafe { mlxsys::mlx_array_new() };
+            unsafe { mlxsys::mlx_vector_array_get(&mut a, input, ndyn + synth_ropes.len()) };
+            let raw = tc.keep(Array::from_raw(a));
+            tc.seed(crate::engine::GQA_VALID_PAST_KEY.to_string(), raw);
         }
 
         let res = tc.run_trace(&ext_outputs)?;

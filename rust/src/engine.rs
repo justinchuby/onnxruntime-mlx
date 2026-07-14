@@ -153,6 +153,13 @@ pub fn rope_row_key(cache_name: &str) -> String {
     format!("__rope_row__{cache_name}")
 }
 
+/// Placeholder env key for the shared-buffer `valid_past` scalar. In the compiled shared-buffer
+/// contract the number of valid past keys (`total_sequence_length - S`) is DATA that advances every
+/// step, so it is fed as a live `[1]` int32 closure input (appended after the synth RoPE rows)
+/// instead of being resolved from the in-graph `total_sequence_length` — which shapeless compile
+/// would freeze at trace time. The GQA op reads it to drive the in-place write offset + causal mask.
+pub const GQA_VALID_PAST_KEY: &str = "__gqa_valid_past";
+
 /// Opaque payload handed to the `mlx_closure` trace thunk. Holds the raw pointers the thunk needs to
 /// (re)build a `TranslationContext` over the plan for the ONE-TIME shapeless trace: the plan itself
 /// (nodes + constant cache), the live ORT api/kernel-context (for constant host reads during the
@@ -190,6 +197,13 @@ pub struct CompiledDecode {
     /// Ctx input to read the RoPE start (past KV length) from, and its sequence axis.
     pub rope_past_ctx_index: i32,
     pub rope_past_axis: i32,
+    /// This decode session drives a fixed-capacity SHARED KV buffer (present aliased onto past at a
+    /// runtime-owned max length) rather than the growing past/present contract. Detected once at
+    /// closure-build time; the trace then writes the new K/V in place and masks the buffer tail.
+    pub shared_kv: bool,
+    /// Ctx index of `attention_mask` — its width is the valid-keys count used to derive the RoPE
+    /// start (valid_past) at apply time in shared-buffer mode. `-1` when not shared / not found.
+    pub mask_ctx_index: i32,
     /// Transient MLX handles created during the one-time trace; the compiled graph references them
     /// after the thunk returns, so they must outlive the trace (freed once with the plan).
     pub trace_transient: Vec<Array>,
@@ -209,6 +223,8 @@ impl CompiledDecode {
             ext_outputs: Vec::new(),
             rope_past_ctx_index: -1,
             rope_past_axis: 2,
+            shared_kv: false,
+            mask_ctx_index: -1,
             trace_transient: Vec::new(),
             payload: None,
         }
@@ -335,6 +351,10 @@ pub struct TranslationContext<'a> {
     /// pre-sliced cos/sin ROW placeholders (fed as extra closure inputs) + a matmul rotate-half, so
     /// the graph carries no dynamic Slice (which shapeless `mlx_compile` cannot shape-infer).
     rope_dynamic: bool,
+    /// True when the compiled-decode trace is for a fixed-capacity SHARED KV buffer session (GQA
+    /// writes the new K/V in place at the valid-past offset and masks the buffer tail). Mirrors
+    /// `plan.compiled.shared_kv`; only meaningful while `rope_dynamic` is set.
+    shared_kv: bool,
 }
 
 impl<'a> TranslationContext<'a> {
@@ -354,6 +374,7 @@ impl<'a> TranslationContext<'a> {
             path_mark: None,
             trace_enabled: crate::trace::tracer().is_enabled(),
             rope_dynamic: false,
+            shared_kv: false,
         }
     }
 
@@ -822,6 +843,35 @@ impl<'a> TranslationContext<'a> {
         self.emit(|res, s| unsafe { mlxsys::mlx_expand_dims(res, a, axis, s) })
     }
 
+    /// `arange(start, stop, step)` of the given dtype.
+    pub fn arange(&mut self, start: f64, stop: f64, step: f64, dtype: mlxsys::mlx_dtype) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe { mlxsys::mlx_arange(res, start, stop, step, dtype, s) })
+    }
+
+    /// Elementwise `a <= b` (broadcasting), producing a bool array.
+    pub fn less_equal(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+        self.binary(mlxsys::mlx_less_equal, a, b)
+    }
+
+    /// `where(cond, x, y)` (elementwise select with broadcasting).
+    pub fn where_(&mut self, cond: mlxsys::mlx_array, x: mlxsys::mlx_array, y: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe { mlxsys::mlx_where(res, cond, x, y, s) })
+    }
+
+    /// Functional `slice_update` with a DATA start offset (an int array giving the start index for
+    /// each of `axes`; unspecified axes start at 0). Returns the full-shape updated `src`.
+    pub fn slice_update_dynamic(
+        &mut self,
+        src: mlxsys::mlx_array,
+        update: mlxsys::mlx_array,
+        start: mlxsys::mlx_array,
+        axes: &[i32],
+    ) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe {
+            mlxsys::mlx_slice_update_dynamic(res, src, update, start, axes.as_ptr(), axes.len(), s)
+        })
+    }
+
     /// `squeeze(a, axis)`.
     pub fn squeeze(&mut self, a: mlxsys::mlx_array, axis: i32) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, s| unsafe { mlxsys::mlx_squeeze_axis(res, a, axis, s) })
@@ -991,6 +1041,19 @@ impl<'a> TranslationContext<'a> {
         self.rope_dynamic
     }
 
+    /// True when the compiled-decode trace is for a fixed-capacity shared KV buffer session.
+    #[inline]
+    pub fn shared_kv(&self) -> bool {
+        self.shared_kv
+    }
+
+    /// The live `[1]` int32 `valid_past` array seeded into the compiled shared-buffer trace (see
+    /// [`GQA_VALID_PAST_KEY`]). `None` outside the compiled shared-buffer path.
+    #[inline]
+    pub fn shared_valid_past(&self) -> Option<mlxsys::mlx_array> {
+        self.env.get(GQA_VALID_PAST_KEY).copied()
+    }
+
     /// Construct a translation context in the compiled-decode TRACE mode (`rope_dynamic = true`).
     /// Used only by [`crate::compiled`] while building the closure body.
     pub(crate) fn new_trace(
@@ -999,8 +1062,10 @@ impl<'a> TranslationContext<'a> {
         kctx: *mut ort::OrtKernelContext,
         stream: mlxsys::mlx_stream,
     ) -> Self {
+        let shared_kv = plan.compiled.shared_kv;
         let mut tc = TranslationContext::new(plan, ort_api, kctx, stream);
         tc.rope_dynamic = true;
+        tc.shared_kv = shared_kv;
         tc
     }
 
