@@ -151,6 +151,16 @@ pub fn mlx_dtype_from_onnx(t: ort::ONNXTensorElementDataType) -> mlxsys::mlx_dty
 /// A translation/runtime error (mirrors the C++ `MlxError`, caught in `RunPlan`).
 pub type MlxError = String;
 
+/// Raw host bytes for a constant (initializer / constant-ctx-input) tensor, surfaced at translate
+/// time so shape/axes/indices operands (Reshape shape, Slice starts/ends/axes/steps, Pad pads, …)
+/// can be read as plain host integers. Faithful port of the C++ `HostBytes` / `RawHost`.
+pub struct HostBytes {
+    pub data: *const c_void,
+    pub shape: Vec<i64>,
+    pub count: usize,
+    pub dtype: ort::ONNXTensorElementDataType,
+}
+
 /// Per-Compute execution context: builds the MLX graph for one forward pass, evals once, copies out.
 /// Handlers receive `&mut TranslationContext` and use Resolve/Bind + the MLX op helpers.
 pub struct TranslationContext<'a> {
@@ -247,7 +257,49 @@ impl<'a> TranslationContext<'a> {
         }
     }
 
-    /// Read an ORT kernel-context input tensor: (data ptr, shape, element type).
+    /// Read a constant/parameter input's HOST bytes at translate time (shape/axes/indices operands).
+    /// Handles both a compile-time `Initializer` and a constant/dynamic `CtxInput` (read live from
+    /// the kernel context each run). Faithful port of `TranslationContext::RawHost`.
+    pub fn raw_host(&self, r: &TensorRef) -> Result<HostBytes, MlxError> {
+        match r.source {
+            Src::Initializer => {
+                let init = r
+                    .init
+                    .as_ref()
+                    .ok_or_else(|| format!("MLX: initializer {} has no data", r.name))?;
+                Ok(HostBytes {
+                    data: init.data,
+                    shape: init.shape.clone(),
+                    count: init.count,
+                    dtype: init.dtype,
+                })
+            }
+            Src::CtxInput => {
+                let (data, shape, dtype) = self.read_ctx_input(r.ctx_index)?;
+                let count = shape.iter().map(|&d| d as usize).product::<usize>();
+                Ok(HostBytes {
+                    data,
+                    shape,
+                    count,
+                    dtype,
+                })
+            }
+            _ => Err(format!("MLX: RawHost on non-constant input {}", r.name)),
+        }
+    }
+
+    /// Read a constant int64 parameter input (shape/axes/starts/ends/steps/pads/repeats/split) as a
+    /// host `Vec<i64>` at translate time. The claim predicate verified it is a tensor(int64) input.
+    pub fn read_ints(&self, r: &TensorRef) -> Result<Vec<i64>, MlxError> {
+        let h = self.raw_host(r)?;
+        if h.data.is_null() {
+            return Ok(Vec::new());
+        }
+        let p = h.data as *const i64;
+        Ok(unsafe { std::slice::from_raw_parts(p, h.count) }.to_vec())
+    }
+
+
     fn read_ctx_input(
         &self,
         index: usize,
@@ -344,6 +396,101 @@ impl<'a> TranslationContext<'a> {
             return Err("mlx_zeros_like failed".to_string());
         }
         Ok(self.keep(res))
+    }
+
+    /// Generic result-producing MLX op runner: builds a fresh result array, invokes the closure with
+    /// `(&mut result, stream)`, re-wraps whatever handle the op produced (RAII), errors on non-zero
+    /// return, and keeps + returns the raw result. This replaces the per-signature helper boilerplate
+    /// so each op handler is a one-liner regardless of the underlying `mlx_*` arity.
+    pub fn emit<F>(&mut self, f: F) -> Result<mlxsys::mlx_array, MlxError>
+    where
+        F: FnOnce(*mut mlxsys::mlx_array, mlxsys::mlx_stream) -> i32,
+    {
+        let mut res = Array::new();
+        let mut raw = res.as_raw();
+        let rc = f(&mut raw, self.stream);
+        res = Array::from_raw(raw);
+        if rc != 0 {
+            return Err("mlx op failed".to_string());
+        }
+        Ok(self.keep(res))
+    }
+
+    // ---- array introspection (borrowed raw handles; ownership stays with the arena/cache) ---------
+
+    pub fn shape_of(&self, a: mlxsys::mlx_array) -> Vec<i32> {
+        let nd = unsafe { mlxsys::mlx_array_ndim(a) };
+        let sh = unsafe { mlxsys::mlx_array_shape(a) };
+        (0..nd).map(|i| unsafe { *sh.add(i) }).collect()
+    }
+
+    pub fn ndim(&self, a: mlxsys::mlx_array) -> usize {
+        unsafe { mlxsys::mlx_array_ndim(a) }
+    }
+
+    pub fn dim(&self, a: mlxsys::mlx_array, i: i32) -> i32 {
+        unsafe { mlxsys::mlx_array_dim(a, i) }
+    }
+
+    pub fn size_of(&self, a: mlxsys::mlx_array) -> usize {
+        unsafe { mlxsys::mlx_array_size(a) }
+    }
+
+    pub fn dtype_of(&self, a: mlxsys::mlx_array) -> mlxsys::mlx_dtype {
+        unsafe { mlxsys::mlx_array_dtype(a) }
+    }
+
+    // ---- constant materialization helpers ---------------------------------------------------------
+
+    /// A kept 0-d float32 scalar array.
+    pub fn scalar_f32(&mut self, v: f32) -> mlxsys::mlx_array {
+        self.keep(Array::from_raw(unsafe { mlxsys::mlx_array_new_float32(v) }))
+    }
+
+    /// A kept 0-d int32 scalar array.
+    pub fn scalar_i32(&mut self, v: i32) -> mlxsys::mlx_array {
+        self.keep(Array::from_raw(unsafe { mlxsys::mlx_array_new_int(v) }))
+    }
+
+    /// A kept 0-d int64 scalar array.
+    pub fn scalar_i64(&mut self, v: i64) -> mlxsys::mlx_array {
+        let sh: [i32; 0] = [];
+        self.keep(Array::from_data(
+            &v as *const i64 as *const c_void,
+            &sh,
+            mlxsys::mlx_dtype__MLX_INT64,
+        ))
+    }
+
+    /// A kept 1-D (or 0-D) int64 array wrapping host values (Shape/Size outputs).
+    pub fn from_host_i64(&mut self, data: &[i64], shape: &[i32]) -> mlxsys::mlx_array {
+        self.keep(Array::from_data(
+            data.as_ptr() as *const c_void,
+            shape,
+            mlxsys::mlx_dtype__MLX_INT64,
+        ))
+    }
+
+    // ---- common data-movement helpers -------------------------------------------------------------
+
+    pub fn reshape(&mut self, a: mlxsys::mlx_array, shape: &[i32]) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe { mlxsys::mlx_reshape(res, a, shape.as_ptr(), shape.len(), s) })
+    }
+
+    pub fn transpose(&mut self, a: mlxsys::mlx_array, axes: &[i32]) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe {
+            mlxsys::mlx_transpose_axes(res, a, axes.as_ptr(), axes.len(), s)
+        })
+    }
+
+    /// Force a (possibly strided/broadcast) view to row-major contiguous — required before a boundary
+    /// output produced by a view op (transpose/slice/expand/split) is memcpy'd across the ORT boundary.
+    pub fn contiguous(&mut self, a: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe { mlxsys::mlx_contiguous(res, a, false, s) })
+    }
+
+    pub fn zeros(&mut self, shape: &[i32], dtype: mlxsys::mlx_dtype) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe { mlxsys::mlx_zeros(res, shape.as_ptr(), shape.len(), dtype, s) })
     }
 
     /// Softmax over the last axis (precise), used by the Softmax handler.

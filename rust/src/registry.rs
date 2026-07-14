@@ -72,6 +72,9 @@ fn registry() -> &'static OpRegistry {
 fn register_builtin_ops(registry: &mut OpRegistry) {
     crate::ops::elementwise::register(registry);
     crate::ops::math::register(registry);
+    crate::ops::reduction::register(registry);
+    crate::ops::shape::register(registry);
+    crate::ops::matmul::register(registry);
 }
 
 /// Run-time dispatch: find the handler for a node and translate it.
@@ -233,6 +236,15 @@ impl NodeView {
         outs.get(i).and_then(|&vi| self.slot_info(vi))
     }
 
+    /// Release a non-null `OrtStatus` returned on an error/not-found path (the OrtApi allocates a
+    /// status object even for "attribute not found", which the caller owns and must free).
+    #[inline]
+    unsafe fn release_status(&self, st: *mut ort::OrtStatus) {
+        if !st.is_null() {
+            (self.api().ReleaseStatus.unwrap())(st);
+        }
+    }
+
     /// Read a scalar INT attribute by name, or `default` when absent / of another type.
     pub fn int_attr(&self, name: &str, default: i64) -> i64 {
         unsafe {
@@ -244,7 +256,11 @@ impl NodeView {
             let mut attr: *const ort::OrtOpAttr = std::ptr::null();
             let st =
                 (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
-            if !st.is_null() || attr.is_null() {
+            if !st.is_null() {
+                self.release_status(st);
+                return default;
+            }
+            if attr.is_null() {
                 return default;
             }
             let mut atype: ort::OrtOpAttrType = 0;
@@ -262,9 +278,256 @@ impl NodeView {
                 &mut out_len,
             );
             if !st.is_null() {
+                self.release_status(st);
                 return default;
             }
             value
+        }
+    }
+
+    /// Read an INTS attribute. Returns `(present, values)`: `present` is whether the node carries a
+    /// genuine INTS attribute of that name (mirrors `IntsAttribute`).
+    pub fn ints_attr(&self, name: &str) -> (bool, Vec<i64>) {
+        unsafe {
+            let api = self.api();
+            let cname = match std::ffi::CString::new(name) {
+                Ok(c) => c,
+                Err(_) => return (false, Vec::new()),
+            };
+            let mut attr: *const ort::OrtOpAttr = std::ptr::null();
+            let st = (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
+            if !st.is_null() {
+                self.release_status(st);
+                return (false, Vec::new());
+            }
+            if attr.is_null() {
+                return (false, Vec::new());
+            }
+            let mut atype: ort::OrtOpAttrType = 0;
+            (api.OpAttr_GetType.unwrap())(attr, &mut atype);
+            if atype != ort::OrtOpAttrType_ORT_OP_ATTR_INTS {
+                return (false, Vec::new());
+            }
+            let read = api.ReadOpAttr.unwrap();
+            let mut needed: usize = 0;
+            let st0 = read(
+                attr,
+                atype,
+                std::ptr::null_mut(),
+                0,
+                &mut needed,
+            );
+            self.release_status(st0);
+            if needed == 0 {
+                return (true, Vec::new());
+            }
+            let count = needed / std::mem::size_of::<i64>();
+            let mut buf = vec![0i64; count];
+            let mut out: usize = 0;
+            let st = read(
+                attr,
+                atype,
+                buf.as_mut_ptr() as *mut std::os::raw::c_void,
+                needed,
+                &mut out,
+            );
+            if st.is_null() {
+                (true, buf)
+            } else {
+                self.release_status(st);
+                (false, Vec::new())
+            }
+        }
+    }
+
+    /// Read a STRING attribute, or `default` when absent / of another type.
+    pub fn string_attr(&self, name: &str, default: &str) -> String {
+        unsafe {
+            let api = self.api();
+            let cname = match std::ffi::CString::new(name) {
+                Ok(c) => c,
+                Err(_) => return default.to_string(),
+            };
+            let mut attr: *const ort::OrtOpAttr = std::ptr::null();
+            let st = (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
+            if !st.is_null() {
+                self.release_status(st);
+                return default.to_string();
+            }
+            if attr.is_null() {
+                return default.to_string();
+            }
+            let mut atype: ort::OrtOpAttrType = 0;
+            (api.OpAttr_GetType.unwrap())(attr, &mut atype);
+            if atype != ort::OrtOpAttrType_ORT_OP_ATTR_STRING {
+                return default.to_string();
+            }
+            let read = api.ReadOpAttr.unwrap();
+            let mut needed: usize = 0;
+            let st0 = read(attr, atype, std::ptr::null_mut(), 0, &mut needed);
+            self.release_status(st0);
+            if needed == 0 {
+                return String::new();
+            }
+            let mut buf = vec![0u8; needed];
+            let mut out: usize = 0;
+            let st = read(
+                attr,
+                atype,
+                buf.as_mut_ptr() as *mut std::os::raw::c_void,
+                needed,
+                &mut out,
+            );
+            if !st.is_null() {
+                self.release_status(st);
+                return default.to_string();
+            }
+            buf.truncate(out.min(needed));
+            String::from_utf8(buf).unwrap_or_else(|_| default.to_string())
+        }
+    }
+
+    /// True iff the node carries a genuine (non-UNDEFINED) attribute of `name`.
+    pub fn has_attr(&self, name: &str) -> bool {
+        unsafe {
+            let api = self.api();
+            let cname = match std::ffi::CString::new(name) {
+                Ok(c) => c,
+                Err(_) => return false,
+            };
+            let mut attr: *const ort::OrtOpAttr = std::ptr::null();
+            let st = (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
+            if !st.is_null() {
+                self.release_status(st);
+                return false;
+            }
+            if attr.is_null() {
+                return false;
+            }
+            let mut atype: ort::OrtOpAttrType = 0;
+            (api.OpAttr_GetType.unwrap())(attr, &mut atype);
+            atype != ort::OrtOpAttrType_ORT_OP_ATTR_UNDEFINED
+        }
+    }
+
+    /// True iff input `i` is present (non-null value info with a non-empty name).
+    pub fn input_present(&self, i: usize) -> bool {
+        let ins = self.inputs_raw();
+        match ins.get(i) {
+            Some(&vi) if !vi.is_null() => {
+                let mut p: *const c_char = std::ptr::null();
+                unsafe { (self.api().GetValueInfoName.unwrap())(vi, &mut p) };
+                !p.is_null() && unsafe { !std::ffi::CStr::from_ptr(p).to_bytes().is_empty() }
+            }
+            _ => false,
+        }
+    }
+
+    /// True iff input `i` is a constant initializer (readable at translate time).
+    pub fn is_constant_initializer(&self, i: usize) -> bool {
+        let ins = self.inputs_raw();
+        let vi = match ins.get(i) {
+            Some(&vi) if !vi.is_null() => vi,
+            _ => return false,
+        };
+        unsafe {
+            let mut is_const = false;
+            let st =
+                (self.api().ValueInfo_IsConstantInitializer.unwrap())(vi, &mut is_const);
+            if !st.is_null() {
+                self.release_status(st);
+                return false;
+            }
+            is_const
+        }
+    }
+
+    /// True iff input `i` is a tensor(int64) constant initializer.
+    pub fn is_const_int64(&self, i: usize) -> bool {
+        matches!(self.input_info(i), Some(info)
+            if info.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
+            && self.is_constant_initializer(i)
+    }
+
+    /// Read the int64 values of a constant-initializer input `i` AT CLAIM TIME. Returns None when the
+    /// input is not a readable int64 constant initializer (→ node left to CPU).
+    pub fn read_const_int64(&self, i: usize) -> Option<Vec<i64>> {
+        if !self.is_const_int64(i) {
+            return None;
+        }
+        let ins = self.inputs_raw();
+        let vi = *ins.get(i)?;
+        unsafe {
+            let api = self.api();
+            let mut value: *const ort::OrtValue = std::ptr::null();
+            let st = (api.ValueInfo_GetInitializerValue.unwrap())(vi, &mut value);
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            if value.is_null() {
+                return None;
+            }
+            let mut info: *mut ort::OrtTensorTypeAndShapeInfo = std::ptr::null_mut();
+            (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+            let mut count: usize = 0;
+            (api.GetTensorShapeElementCount.unwrap())(info, &mut count);
+            (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+            let mut data: *const std::os::raw::c_void = std::ptr::null();
+            (api.GetTensorData.unwrap())(value, &mut data);
+            if data.is_null() {
+                return if count == 0 { Some(Vec::new()) } else { None };
+            }
+            Some(std::slice::from_raw_parts(data as *const i64, count).to_vec())
+        }
+    }
+
+    /// Read a scalar (count-1) constant-initializer integer input `i` as f64 at CLAIM time, honoring
+    /// int16/int32/int64 element types (the Range element dtypes). Returns None when the input is not
+    /// a readable scalar integer constant initializer.
+    pub fn read_const_scalar_f64(&self, i: usize) -> Option<f64> {
+        if !self.is_constant_initializer(i) {
+            return None;
+        }
+        let dtype = self.input_info(i)?.dtype;
+        let ins = self.inputs_raw();
+        let vi = *ins.get(i)?;
+        unsafe {
+            let api = self.api();
+            let mut value: *const ort::OrtValue = std::ptr::null();
+            let st = (api.ValueInfo_GetInitializerValue.unwrap())(vi, &mut value);
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            if value.is_null() {
+                return None;
+            }
+            let mut info: *mut ort::OrtTensorTypeAndShapeInfo = std::ptr::null_mut();
+            (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+            let mut count: usize = 0;
+            (api.GetTensorShapeElementCount.unwrap())(info, &mut count);
+            (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+            if count != 1 {
+                return None;
+            }
+            let mut data: *const std::os::raw::c_void = std::ptr::null();
+            (api.GetTensorData.unwrap())(value, &mut data);
+            if data.is_null() {
+                return None;
+            }
+            match dtype {
+                t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16 => {
+                    Some(*(data as *const i16) as f64)
+                }
+                t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 => {
+                    Some(*(data as *const i32) as f64)
+                }
+                t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => {
+                    Some(*(data as *const i64) as f64)
+                }
+                _ => None,
+            }
         }
     }
 }
@@ -283,6 +546,52 @@ pub fn is_mlx_float(t: ort::ONNXTensorElementDataType) -> bool {
 pub fn is_signed_integer(t: ort::ONNXTensorElementDataType) -> bool {
     t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+}
+
+pub fn is_unsigned_integer(t: ort::ONNXTensorElementDataType) -> bool {
+    t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64
+}
+
+/// The most relaxed dtype set the MLX Metal backend can carry: bool, all int/uint widths (8-64),
+/// and fp16/bf16/fp32. EXCLUDES float64/complex/string/fp8. Port of `IsMlxSupportedType`.
+pub fn is_mlx_supported(t: ort::ONNXTensorElementDataType) -> bool {
+    is_mlx_float(t) || is_signed_integer(t) || is_unsigned_integer(t)
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL
+}
+
+/// Numeric (non-bool) MLX types: the reductions/argmin-max/cumsum dtype set.
+pub fn is_mlx_numeric(t: ort::ONNXTensorElementDataType) -> bool {
+    is_mlx_float(t) || is_signed_integer(t) || is_unsigned_integer(t)
+}
+
+/// Dtypes the pure data-movement ops carry end-to-end (every case CopyOut can memcpy). Excludes
+/// float64 and uint64 (no CopyOut case). Port of `IsMovableType`.
+pub fn is_movable(t: ort::ONNXTensorElementDataType) -> bool {
+    is_mlx_float(t)
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL
+}
+
+/// int32/int64 — the gather/scatter index dtype.
+pub fn is_int_index(t: ort::ONNXTensorElementDataType) -> bool {
+    t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+}
+
+/// int16/int32/int64 — the Range element dtype.
+pub fn is_range_type(t: ort::ONNXTensorElementDataType) -> bool {
+    t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
 }

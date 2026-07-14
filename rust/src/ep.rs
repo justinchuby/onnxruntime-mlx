@@ -146,6 +146,15 @@ unsafe extern "C" fn get_capability(
     ptr::null_mut()
 }
 
+/// Release a non-null `OrtStatus` returned on an error / not-found path (the OrtApi allocates a
+/// status object the caller owns even for benign "not found" / "buffer too small" results).
+#[inline]
+unsafe fn release_status(api: &ort::OrtApi, st: *mut ort::OrtStatus) {
+    if !st.is_null() {
+        (api.ReleaseStatus.unwrap())(st);
+    }
+}
+
 /// Value-info tensor name, or "" for an omitted optional slot.
 unsafe fn value_info_name(api: &ort::OrtApi, vi: *const ort::OrtValueInfo) -> String {
     if vi.is_null() {
@@ -153,7 +162,11 @@ unsafe fn value_info_name(api: &ort::OrtApi, vi: *const ort::OrtValueInfo) -> St
     }
     let mut p: *const c_char = ptr::null();
     let st = (api.GetValueInfoName.unwrap())(vi, &mut p);
-    if !st.is_null() || p.is_null() {
+    if !st.is_null() {
+        release_status(api, st);
+        return String::new();
+    }
+    if p.is_null() {
         return String::new();
     }
     CStr::from_ptr(p).to_string_lossy().into_owned()
@@ -522,7 +535,11 @@ unsafe fn collect_initializers(
         }
         let mut value: *const ort::OrtValue = ptr::null();
         let st = (api.ValueInfo_GetInitializerValue.unwrap())(vi, &mut value);
-        if !st.is_null() || value.is_null() {
+        if !st.is_null() {
+            release_status(api, st);
+            continue;
+        }
+        if value.is_null() {
             continue;
         }
         let mut info: *mut ort::OrtTensorTypeAndShapeInfo = ptr::null_mut();
@@ -636,7 +653,11 @@ unsafe fn output_element_type(
         }
         let mut ti: *const ort::OrtTypeInfo = ptr::null();
         let st = (api.GetValueInfoTypeInfo.unwrap())(vi, &mut ti);
-        if !st.is_null() || ti.is_null() {
+        if !st.is_null() {
+            release_status(api, st);
+            return 0;
+        }
+        if ti.is_null() {
             return 0;
         }
         let mut onnx_type: ort::ONNXType = 0;
@@ -691,6 +712,8 @@ unsafe fn collect_attributes(api: &ort::OrtApi, node: *const ort::OrtNode, nd: &
                 );
                 if st.is_null() {
                     nd.ints.insert(name, v);
+                } else {
+                    release_status(api, st);
                 }
             }
             t if t == ort::OrtOpAttrType_ORT_OP_ATTR_FLOAT => {
@@ -705,21 +728,24 @@ unsafe fn collect_attributes(api: &ort::OrtApi, node: *const ort::OrtNode, nd: &
                 );
                 if st.is_null() {
                     nd.floats.insert(name, v);
+                } else {
+                    release_status(api, st);
                 }
             }
             t if t == ort::OrtOpAttrType_ORT_OP_ATTR_INTS => {
-                if let Some(v) = read_array::<i64>(read, attr, atype) {
+                if let Some(v) = read_array::<i64>(api, attr, atype) {
                     nd.int_arrays.insert(name, v);
                 }
             }
             t if t == ort::OrtOpAttrType_ORT_OP_ATTR_FLOATS => {
-                if let Some(v) = read_array::<f32>(read, attr, atype) {
+                if let Some(v) = read_array::<f32>(api, attr, atype) {
                     nd.float_arrays.insert(name, v);
                 }
             }
             t if t == ort::OrtOpAttrType_ORT_OP_ATTR_STRING => {
                 let mut needed: usize = 0;
-                let _ = read(attr, atype, ptr::null_mut(), 0, &mut needed);
+                let probe = read(attr, atype, ptr::null_mut(), 0, &mut needed);
+                release_status(api, probe);
                 if needed > 0 {
                     let mut buf: Vec<u8> = vec![0u8; needed];
                     let mut out: usize = 0;
@@ -729,6 +755,8 @@ unsafe fn collect_attributes(api: &ort::OrtApi, node: *const ort::OrtNode, nd: &
                         if let Ok(s) = String::from_utf8(buf) {
                             nd.strings.insert(name, s);
                         }
+                    } else {
+                        release_status(api, st);
                     }
                 }
             }
@@ -739,18 +767,15 @@ unsafe fn collect_attributes(api: &ort::OrtApi, node: *const ort::OrtNode, nd: &
 
 /// Read an array-valued attribute (INTS/FLOATS): size, allocate, read.
 unsafe fn read_array<T: Copy + Default>(
-    read: unsafe extern "C" fn(
-        *const ort::OrtOpAttr,
-        ort::OrtOpAttrType,
-        *mut c_void,
-        usize,
-        *mut usize,
-    ) -> *mut ort::OrtStatus,
+    api: &ort::OrtApi,
     attr: *const ort::OrtOpAttr,
     atype: ort::OrtOpAttrType,
 ) -> Option<Vec<T>> {
+    let read = api.ReadOpAttr.unwrap();
     let mut needed_bytes: usize = 0;
-    let _ = read(attr, atype, ptr::null_mut(), 0, &mut needed_bytes);
+    // The size-probe read returns a non-OK status ("result buffer too small") that must be freed.
+    let probe = read(attr, atype, ptr::null_mut(), 0, &mut needed_bytes);
+    release_status(api, probe);
     if needed_bytes == 0 {
         return Some(Vec::new());
     }
@@ -768,6 +793,7 @@ unsafe fn read_array<T: Copy + Default>(
     if st.is_null() {
         Some(buf)
     } else {
+        release_status(api, st);
         None
     }
 }

@@ -133,14 +133,38 @@ impl VectorArray {
         }
     }
 
+    /// Take ownership of a raw `mlx_vector_array` handle (e.g. a `mlx_split` out-param).
+    #[inline]
+    pub fn from_raw(raw: mlx::mlx_vector_array) -> Self {
+        VectorArray { raw }
+    }
+
     /// Append a borrowed array handle (the vector takes its own reference).
     pub fn append(&mut self, a: mlx::mlx_array) {
         unsafe { mlx::mlx_vector_array_append_value(self.raw, a) };
     }
 
+    /// Number of arrays held.
+    pub fn size(&self) -> usize {
+        unsafe { mlx::mlx_vector_array_size(self.raw) }
+    }
+
+    /// A fresh owning reference to element `i` (the vector keeps its own; the returned `Array` owns
+    /// the new reference and frees it on drop).
+    pub fn get(&self, i: usize) -> Array {
+        let mut a = unsafe { mlx::mlx_array_new() };
+        unsafe { mlx::mlx_vector_array_get(&mut a, self.raw, i) };
+        Array::from_raw(a)
+    }
+
     #[inline]
     pub fn as_raw(&self) -> mlx::mlx_vector_array {
         self.raw
+    }
+
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut mlx::mlx_vector_array {
+        &mut self.raw
     }
 }
 

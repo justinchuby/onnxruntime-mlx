@@ -2,3 +2,6 @@
 
 pub mod elementwise;
 pub mod math;
+pub mod matmul;
+pub mod reduction;
+pub mod shape;
