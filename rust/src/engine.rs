@@ -204,6 +204,20 @@ impl<'a> TranslationContext<'a> {
         raw
     }
 
+    /// Look up a persistent (plan-cached) array by key — the borrowed raw handle if present. Used by
+    /// weight-repack handlers (MatMulNBits) to reuse a once-built constant across runs.
+    pub fn cache_get(&self, key: &str) -> Option<mlxsys::mlx_array> {
+        self.plan.cache.get(key).map(|a| a.as_raw())
+    }
+
+    /// Insert an owning array into the persistent plan cache under `key` (freed with the plan) and
+    /// return its borrowed raw handle. Use only for genuinely constant (initializer) data.
+    pub fn cache_put(&mut self, key: String, a: Array) -> mlxsys::mlx_array {
+        let raw = a.as_raw();
+        self.plan.cache.insert(key, a);
+        raw
+    }
+
     /// Bind a node output name to a produced MLX array (visible to downstream nodes and CopyOut).
     pub fn bind(&mut self, o: &OutRef, a: mlxsys::mlx_array) {
         self.env.insert(o.name.clone(), a);

@@ -81,6 +81,7 @@ fn register_builtin_ops(registry: &mut OpRegistry) {
     // conv+vision
     crate::ops::conv::register_conv(registry);
     crate::ops::vision::register_vision(registry);
+    crate::ops::quant::register(registry); // quant
 }
 
 /// Run-time dispatch: find the handler for a node and translate it.

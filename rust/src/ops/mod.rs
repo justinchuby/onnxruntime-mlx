@@ -6,6 +6,7 @@ pub mod elementwise;
 pub mod math;
 pub mod matmul;
 pub mod norm;
+pub mod quant;
 pub mod reduction;
 pub mod shape;
 pub mod vision;
