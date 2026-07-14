@@ -33,11 +33,12 @@ set(ORT_MLX_BUILD_E2E OFF CACHE BOOL "" FORCE)
 set(ORT_MLX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory("${ORT_MLX_REPO_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/ep_build")
 
-# --- nanobind extension: onnxruntime_mlx._core --------------------------------
-find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
+# --- nanobind extension: onnxruntime_mlx._core (CPython Stable ABI, py3.12+) ---
+find_package(Python 3.12 REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 find_package(nanobind CONFIG REQUIRED)
 
-nanobind_add_module(_core src/_core.cpp)
+# STABLE_ABI builds against Py_LIMITED_API so one cp312-abi3 wheel serves 3.12+.
+nanobind_add_module(_core STABLE_ABI src/_core.cpp)
 target_include_directories(_core PRIVATE "${ORT_MLX_REPO_ROOT}/include")
 
 # --- Where the wheel package lands (matches wheel.packages in pyproject) -------

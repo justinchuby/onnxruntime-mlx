@@ -69,16 +69,31 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build + install the wheel
+      - name: Build the abi3 wheel (Python 3.12)
         run: |
-          python -m pip install --upgrade pip "onnxruntime==${ORT_VERSION}"
-          MACOSX_DEPLOYMENT_TARGET=14.0 python -m pip install ./python -v \
+          python -m pip install --upgrade pip build "onnxruntime==${ORT_VERSION}"
+          MACOSX_DEPLOYMENT_TARGET=14.0 python -m build --wheel ./python -o dist \
             -C cmake.define.ORT_HOME="$ORT_HOME"
+          ls -la dist
+          # Must be a single CPython Stable ABI (abi3) wheel, not per-version.
+          test -n "$(ls dist/onnxruntime_mlx-*-cp312-abi3-*.whl 2>/dev/null)"
 
-      - name: Import + register smoke test
+      - name: Audit the wheel is genuinely abi3 (abi3audit)
         run: |
+          python -m pip install --upgrade abi3audit
+          python -m abi3audit --strict --report dist/onnxruntime_mlx-*-cp312-abi3-*.whl
+
+      - name: Import + register under Python 3.13 (proves abi3 portability)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: abi3 cross-version smoke test
+        run: |
+          python -m pip install --upgrade "onnxruntime==${ORT_VERSION}"
+          python -m pip install dist/onnxruntime_mlx-*-cp312-abi3-*.whl
           python - <<'PY'
-          import os, onnxruntime_mlx as m
+          import os, sys, onnxruntime_mlx as m
+          print("python", sys.version.split()[0], "ext", [f for f in os.listdir(os.path.dirname(m.__file__)) if f.startswith("_core")])
           print("version", m.version(), "ep", m.ep_name(), "lib", m.library_path())
           assert os.path.isfile(m.library_path())
           m.register_execution_provider_library()

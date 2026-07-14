@@ -7,7 +7,7 @@ name = "onnxruntime-mlx"
 version = "0.1.0"
 description = "MLX-native ONNX Runtime execution provider (plugin EP) for Apple Silicon"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "onnxruntime-mlx" }]
 keywords = ["onnxruntime", "mlx", "execution-provider", "apple-silicon", "metal", "coreml"]
@@ -19,9 +19,6 @@ classifiers = [
   "Operating System :: MacOS :: MacOS X",
   "Programming Language :: C++",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -38,6 +35,9 @@ Repository = "https://github.com/justinchuby/onnxruntime-mlx"
 wheel.packages = ["src/onnxruntime_mlx"]
 minimum-version = "build-system.requires"
 build-dir = "build/{wheel_tag}"
+# Build a single CPython Stable ABI (abi3) wheel targeting Python 3.12+, so one
+# cp312-abi3 wheel serves 3.12/3.13/... instead of one wheel per version.
+wheel.py-api = "cp312"
 
 [tool.scikit-build.cmake.define]
 # Absolute path to the repository root (the parent of python/), which holds the
@@ -47,7 +47,9 @@ build-dir = "build/{wheel_tag}"
 ORT_MLX_REPO_ROOT = ""
 
 [tool.cibuildwheel]
-build = "cp39-macosx_arm64 cp310-macosx_arm64 cp311-macosx_arm64 cp312-macosx_arm64 cp313-macosx_arm64"
+# Stable ABI (abi3) → build ONCE on CPython 3.12; the resulting cp312-abi3 wheel
+# is installable on 3.12 and all newer CPythons.
+build = "cp312-macosx_arm64"
 # The EP dylib links mlx-c/mlx (brew) at build time; delocate bundles them into
 # the wheel. onnxruntime is resolved from the host onnxruntime package at runtime
 # (two-level namespace), so it must NOT be vendored.
