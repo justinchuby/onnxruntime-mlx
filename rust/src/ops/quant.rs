@@ -688,6 +688,12 @@ fn conv_integer_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), Mlx
 }
 
 // ---- QLinearMatMul ------------------------------------------------------------------------------
+//
+// The dequant->matmul->requantize intermediate stays fp32 on purpose. Although the final output is
+// requantized to int8/uint8 (so an fp16 intermediate looked near-free), the matmul here accumulates
+// the UN-scaled centered integers: each product is O(2^8 * 2^8) and summed over K, the accumulator
+// routinely exceeds the fp16 max (65504) — even at K=16 full-range int8 inputs overflow to inf,
+// which then corrupts the requantized output. Measured: fp16 here is unsafe, so we keep fp32.
 
 fn qlinear_matmul_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let a0 = ctx.resolve(&n.inputs[0])?;
@@ -759,6 +765,10 @@ fn qlinear_matmul_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), M
 }
 
 // ---- QLinearConv --------------------------------------------------------------------------------
+//
+// Like QLinearMatMul, the conv intermediate stays fp32: the un-scaled centered-integer accumulation
+// over the receptive field overflows the fp16 range (see the QLinearMatMul note), so fp16 is unsafe
+// despite the int8/uint8 requantized output.
 
 fn qlinear_conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
