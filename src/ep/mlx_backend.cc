@@ -20,7 +20,7 @@
 #include "mlx_engine.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 mlx_dtype MlxDtypeFromOnnx(ONNXTensorElementDataType t) {
   switch (t) {
@@ -305,4 +305,4 @@ bool RunPlan(Plan& plan, Ort::KernelContext& ctx, std::string& error) {
   }
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

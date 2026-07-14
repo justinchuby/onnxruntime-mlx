@@ -17,7 +17,7 @@
 #include "onnxruntime_cxx_api.h"
 #include "plugin_ep_utils.h"  // IsFloat32Tensor, ElementwiseOrSuffixBroadcast
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 // True iff `value` wraps a live OrtValueInfo. ORT surfaces an OMITTED optional node input (e.g.
 // Clip's min/max, Slice's axes/steps, a Conv bias) as a NULL OrtValueInfo; any ValueInfo method
@@ -172,4 +172,4 @@ inline bool ScalarOrSuffixBroadcast(Ort::ConstValueInfo a, Ort::ConstValueInfo b
   return SuffixBroadcast(a, b);
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

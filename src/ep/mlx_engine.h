@@ -23,7 +23,7 @@
 #include "mlx_backend.h"
 #include "onnxruntime_cxx_api.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 // ONNX tensor element type -> MLX dtype. Covers every dtype mlx-c exposes that the decoder graph can
 // carry: fp32/fp16/bf16, the signed/unsigned integer widths, and bool. Unknown types fall back to
@@ -38,7 +38,7 @@ struct MlxError : std::runtime_error {
 
 #define MLX_CHECK(expr)                                                         \
   do {                                                                          \
-    if ((expr) != 0) throw ort_mps_mlx::MlxError(std::string("mlx call failed: ") + #expr); \
+    if ((expr) != 0) throw ort_mlx::MlxError(std::string("mlx call failed: ") + #expr); \
   } while (0)
 
 // Persistent, per-subgraph MLX state: the stream, tuned memory bounds, and the cache of
@@ -132,4 +132,4 @@ class TranslationContext {
   std::vector<mlx_array> transient_;
 };
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

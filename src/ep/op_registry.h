@@ -17,7 +17,7 @@
 
 #include "mlx_backend.h"  // NodeDesc
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 // The engine object a handler uses to resolve inputs, bind outputs, and emit MLX ops. Fully defined
 // in mlx_engine.h; handler modules include that header. Forward-declared here so op_registry.h stays
@@ -101,4 +101,4 @@ void RegisterNormPoolOps(OpRegistry& registry);
 void RegisterQuantizeOps(OpRegistry& registry);
 void RegisterRandomMiscOps(OpRegistry& registry);
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

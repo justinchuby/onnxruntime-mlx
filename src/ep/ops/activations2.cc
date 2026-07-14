@@ -9,7 +9,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -289,4 +289,4 @@ void RegisterActivations2Ops(OpRegistry& registry) {
   registry.Register({"", "IsNaN", 13, kAnyOpset, &IsNaNOp, &PredicateClaim});
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

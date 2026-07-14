@@ -6,7 +6,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -63,4 +63,4 @@ void RegisterTrigOps(OpRegistry& registry) {
   // The installed mlx-c does not expose a linalg determinant operation, so Det stays on ORT CPU.
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

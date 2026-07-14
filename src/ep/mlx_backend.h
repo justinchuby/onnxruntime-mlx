@@ -24,7 +24,7 @@
 
 #include "onnxruntime_cxx_api.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 // Where a node input resolves from. Mirrors ep.cc's Source but kept independent so the MLX backend
 // stays decoupled from the EP-internal (anonymous-namespace) plan structures.
@@ -107,4 +107,4 @@ struct PlanDeleter {
   void operator()(Plan* p) const { DestroyPlan(p); }
 };
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

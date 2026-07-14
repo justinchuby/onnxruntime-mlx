@@ -6,7 +6,7 @@
 
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -82,4 +82,4 @@ bool Claimable(Ort::ConstNode node) {
   return entry != nullptr && entry->claimable != nullptr && entry->claimable(node);
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

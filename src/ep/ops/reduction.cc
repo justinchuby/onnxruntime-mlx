@@ -12,7 +12,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -387,4 +387,4 @@ void RegisterReductionOps(OpRegistry& registry) {
   registry.Register({"", "TopK", 10, kAnyOpset, &TopKOp, &TopKClaim});
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

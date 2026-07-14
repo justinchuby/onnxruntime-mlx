@@ -70,7 +70,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -542,4 +542,4 @@ void RegisterAttentionExtOps(OpRegistry& registry) {
                      &RotaryEmbeddingClaim});
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

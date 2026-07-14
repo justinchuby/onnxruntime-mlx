@@ -20,13 +20,13 @@
 namespace {
 
 // Claim-time node predicate. The per-op dtype/shape/attribute claim logic now lives beside each
-// translate handler in src/ep/ops/*.cc (registered as an OpRegistration::claimable). ort_mps_mlx::
+// translate handler in src/ep/ops/*.cc (registered as an OpRegistration::claimable). ort_mlx::
 // Claimable consults the SAME (domain, op, opset) registry the run-time translator dispatches
 // through, so "claimed" can never outrun "translatable" and adding an op needs ZERO edits here.
 // config.claim_enabled is the single kill-switch (ONNX_GENAI_METAL_EP_CLAIM=none -> claim nothing).
 bool NodeClaimable(Ort::ConstNode node, const MetalEp::Config& config) {
   if (!config.claim_enabled) return false;
-  return ort_mps_mlx::Claimable(node);
+  return ort_mlx::Claimable(node);
 }
 
 // ORT surfaces an OMITTED interior optional node input (e.g. Resize's `roi`, Clip's `min`) as a
@@ -53,7 +53,7 @@ struct SubgraphPlan {
   // SAME ORT ctx outputs in the identical [B, kv_heads, total_seq, head] fp32 layout with RoPE
   // applied to stored K at absolute positions [past, past+M), so the KV cache handoff across the
   // prefill->decode boundary (and every decode step) is layout- and position-continuous.
-  std::unique_ptr<ort_mps_mlx::Plan, ort_mps_mlx::PlanDeleter> mlx_plan;
+  std::unique_ptr<ort_mlx::Plan, ort_mlx::PlanDeleter> mlx_plan;
 };
 
 namespace {
@@ -70,7 +70,7 @@ OrtStatus* RunSubgraph(SubgraphPlan& plan, OrtKernelContext* kernel_context) {
       return ort_api_.CreateStatus(ORT_EP_FAIL, "MetalEP: fused subgraph has no MLX plan");
     }
     std::string mlx_err;
-    if (!ort_mps_mlx::RunPlan(*plan.mlx_plan, ctx, mlx_err)) {
+    if (!ort_mlx::RunPlan(*plan.mlx_plan, ctx, mlx_err)) {
       return ort_api_.CreateStatus(ORT_EP_FAIL,
                                    ("MetalEP MLX subgraph failed: " + mlx_err).c_str());
     }
@@ -380,7 +380,7 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
 
       auto plan = std::make_unique<SubgraphPlan>();
       plan->ep = ep;
-      std::vector<ort_mps_mlx::NodeDesc> mlx_nodes;  // the whole subgraph, translated to MLX
+      std::vector<ort_mlx::NodeDesc> mlx_nodes;  // the whole subgraph, translated to MLX
 
       // Fused-node input/output name -> OrtKernelContext index (the runtime I/O boundary).
       std::unordered_map<std::string, size_t> ctx_input_index;
@@ -474,7 +474,7 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
       for (size_t idx : order) {
         Ort::ConstNode node = snodes[idx];
 
-        ort_mps_mlx::NodeDesc mnd;
+        ort_mlx::NodeDesc mnd;
         mnd.op_type = node.GetOperatorType();
         mnd.domain = node.GetDomain();
         // Opset version the op was introduced at — threaded so the MLX registry can dispatch
@@ -519,17 +519,17 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
         }
 
         for (const auto& in : node.GetInputs()) {
-          ort_mps_mlx::TensorRef tr;
+          ort_mlx::TensorRef tr;
           tr.name = InputName(in);
           if (tr.name.empty()) {
-            tr.source = ort_mps_mlx::Src::Absent;
+            tr.source = ort_mlx::Src::Absent;
           } else if (producer.count(tr.name)) {
-            tr.source = ort_mps_mlx::Src::Intermediate;
+            tr.source = ort_mlx::Src::Intermediate;
           } else if (auto ci = ctx_input_index.find(tr.name); ci != ctx_input_index.end()) {
-            tr.source = ort_mps_mlx::Src::CtxInput;
+            tr.source = ort_mlx::Src::CtxInput;
             tr.ctx_index = ci->second;
           } else if (auto ii = initializers.find(tr.name); ii != initializers.end()) {
-            tr.source = ort_mps_mlx::Src::Initializer;
+            tr.source = ort_mlx::Src::Initializer;
             tr.init_data = ii->second.data;
             tr.init_shape = ii->second.shape;
             tr.init_type = ii->second.type;
@@ -544,13 +544,13 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
           // after Compile, so we must NOT dereference them at Run; instead we mark which ctx inputs
           // are constant so the MLX translator wraps/repacks each ONCE (from live ctx data on the
           // first Run) and caches it on the plan, avoiding a per-decode-step recopy.
-          tr.constant = tr.source == ort_mps_mlx::Src::CtxInput &&
+          tr.constant = tr.source == ort_mlx::Src::CtxInput &&
                         initializers.find(tr.name) != initializers.end();
           mnd.inputs.push_back(std::move(tr));
         }
 
         for (const auto& out : node.GetOutputs()) {
-          ort_mps_mlx::OutRef o;
+          ort_mlx::OutRef o;
           o.name = out.GetName();
           auto tinfo = out.TypeInfo();
           if (tinfo.GetONNXType() == ONNX_TYPE_TENSOR) {
@@ -571,7 +571,7 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
 
       const size_t node_count = mlx_nodes.size();
       std::string mlx_err;
-      plan->mlx_plan.reset(ort_mps_mlx::BuildPlan(std::move(mlx_nodes), mlx_err));
+      plan->mlx_plan.reset(ort_mlx::BuildPlan(std::move(mlx_nodes), mlx_err));
       if (!plan->mlx_plan) {
         // MLX is the sole compute path: an untranslatable op in a claimed subgraph is a hard error
         // (there is no hand-kernel fallback). GetCapability claims only MLX-translatable ops, so

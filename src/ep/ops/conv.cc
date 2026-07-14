@@ -12,7 +12,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -542,4 +542,4 @@ void RegisterConvOps(OpRegistry &registry) {
       {"", "GlobalMaxPool", 1, kAnyOpset, &GlobalMaxPoolOp, &GlobalPoolClaim});
 }
 
-} // namespace ort_mps_mlx
+} // namespace ort_mlx

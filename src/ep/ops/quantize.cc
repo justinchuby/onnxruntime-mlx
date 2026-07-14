@@ -38,7 +38,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -400,4 +400,4 @@ void RegisterQuantizeOps(OpRegistry& registry) {
   registry.Register({"", "Dropout", kAnyOpset, kAnyOpset, &DropoutOp, &DropoutClaim});
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

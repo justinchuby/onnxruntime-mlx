@@ -11,7 +11,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -670,4 +670,4 @@ void RegisterMathOps(OpRegistry& registry) {
   registry.Register({"", "Not", kAnyOpset, kAnyOpset, &NotOp, &NotClaim});
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

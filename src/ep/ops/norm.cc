@@ -8,7 +8,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -77,4 +77,4 @@ void RegisterNormOps(OpRegistry& registry) {
                      &SkipRmsNormOp, &SkipRmsNormClaim});
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

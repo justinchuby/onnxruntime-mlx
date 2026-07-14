@@ -28,7 +28,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -704,4 +704,4 @@ void RegisterShape2Ops(OpRegistry& registry) {
   registry.Register({"", "Upsample", kAnyOpset, kAnyOpset, &UpsampleOp, &UpsampleClaim});
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx

@@ -14,7 +14,7 @@
 #include "op_claim.h"
 #include "op_registry.h"
 
-namespace ort_mps_mlx {
+namespace ort_mlx {
 
 namespace {
 
@@ -147,4 +147,4 @@ void RegisterBitwiseOps(OpRegistry& registry) {
   registry.Register({"", "Xor", kAnyOpset, kAnyOpset, &XorOp, &XorClaim});
 }
 
-}  // namespace ort_mps_mlx
+}  // namespace ort_mlx
