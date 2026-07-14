@@ -70,6 +70,24 @@ pub struct OutRef {
     pub otype: ort::ONNXTensorElementDataType,
 }
 
+/// A partial copy-out descriptor for a shared-buffer KV `present` output. In shared-buffer mode
+/// `present` is bound to the SAME ORT buffer as `past`, so the rows outside `[offset, offset+count)`
+/// on `axis` are already correct (they are last step's `past`); only the `count` newly written rows
+/// need to be copied back. This turns the per-token copy-out from O(capacity) into O(new-tokens).
+///
+/// `alias_ptr` is the ORT `past` input buffer address this `present` is expected to alias. The
+/// partial write is applied ONLY when the actual `present` output buffer equals `alias_ptr` — i.e.
+/// the runtime really bound `present` onto `past` (share-buffer IoBinding). When they differ (e.g.
+/// the op-test harness, or any non-aliasing runtime) the full copy is used, so correctness never
+/// depends on an assumption about ORT's binding.
+#[derive(Clone, Copy)]
+pub struct DeltaWrite {
+    pub axis: usize,
+    pub offset: i64,
+    pub count: i64,
+    pub alias_ptr: usize,
+}
+
 /// A TENSOR-valued attribute payload (Constant `value`, ConstantOfShape `value`) surfaced at compile
 /// time. Raw host bytes are copied into `data` (owned, kept alive for the plan's lifetime) so the
 /// handler can materialize an MLX array from it. Mirrors the C++ `CopyScalarAttrs` TENSOR path.
@@ -204,6 +222,10 @@ pub struct CompiledDecode {
     /// Ctx index of `attention_mask` — its width is the valid-keys count used to derive the RoPE
     /// start (valid_past) at apply time in shared-buffer mode. `-1` when not shared / not found.
     pub mask_ctx_index: i32,
+    /// GQA `present` KV outputs (shared-buffer mode) as `(present_output_name, past_input_ctx_index)`.
+    /// These are `present`-aliases-`past` outputs whose copy-out is a delta write of only the `S` new
+    /// rows (offset/count/past-pointer computed per apply). Populated once during the closure trace.
+    pub kv_present_names: Vec<(String, usize)>,
     /// Transient MLX handles created during the one-time trace; the compiled graph references them
     /// after the thunk returns, so they must outlive the trace (freed once with the plan).
     pub trace_transient: Vec<Array>,
@@ -225,6 +247,7 @@ impl CompiledDecode {
             rope_past_axis: 2,
             shared_kv: false,
             mask_ctx_index: -1,
+            kv_present_names: Vec::new(),
             trace_transient: Vec::new(),
             payload: None,
         }
@@ -355,6 +378,10 @@ pub struct TranslationContext<'a> {
     /// writes the new K/V in place at the valid-past offset and masks the buffer tail). Mirrors
     /// `plan.compiled.shared_kv`; only meaningful while `rope_dynamic` is set.
     shared_kv: bool,
+    /// Shared-buffer KV `present` outputs (name -> delta) for the EAGER path: only the `count` new
+    /// rows at `offset` need copying back (the rest already alias correct `past` rows). Empty on the
+    /// growing path so its copy-out stays a full, bit-for-bit-unchanged memcpy.
+    kv_deltas: HashMap<String, DeltaWrite>,
 }
 
 impl<'a> TranslationContext<'a> {
@@ -375,6 +402,7 @@ impl<'a> TranslationContext<'a> {
             trace_enabled: crate::trace::tracer().is_enabled(),
             rope_dynamic: false,
             shared_kv: false,
+            kv_deltas: HashMap::new(),
         }
     }
 
@@ -516,12 +544,20 @@ impl<'a> TranslationContext<'a> {
                 }
                 let (data, shape, dtype) = self.read_ctx_input(r.ctx_index)?;
                 let ishape: Vec<i32> = shape.iter().map(|&d| dim_i32(d)).collect::<Result<_, _>>()?;
-                let arr = Array::from_data(data, &ishape, mlx_dtype_from_onnx(dtype));
                 if r.constant {
+                    // Constants are cached and reused across Compute calls, so they must OWN a copy
+                    // (the ORT ctx-input buffer is not guaranteed stable past this Compute).
+                    let arr = Array::from_data(data, &ishape, mlx_dtype_from_onnx(dtype));
                     let raw = arr.as_raw();
                     self.plan.cache.insert(r.name.clone(), arr);
                     Ok(raw)
                 } else {
+                    // Zero-copy wrap of the live ORT input buffer (ORT owns it for the whole Compute
+                    // call; MLX borrows via a no-op deallocator and the wrapper drops before we
+                    // return, after the synchronous boundary eval). Dominant win in shared-buffer
+                    // mode where the per-token past K/V is a full [B,kv,cap,hd] buffer that
+                    // `from_data` used to memcpy every token.
+                    let arr = Array::from_data_managed(data, &ishape, mlx_dtype_from_onnx(dtype));
                     let raw = self.keep(arr);
                     self.env.insert(r.name.clone(), raw);
                     Ok(raw)
@@ -1047,6 +1083,31 @@ impl<'a> TranslationContext<'a> {
         self.shared_kv
     }
 
+    /// Register a shared-buffer KV `present` output for delta copy-out. `offset`/`count` are the new
+    /// K/V rows written this step (axis 2 of `[B,kv,cap,hd]`) and `past_ctx_index` is the ctx index
+    /// of the matching `past` input (whose buffer `present` should alias). In the EAGER path this
+    /// records the live per-run delta (including the `past` pointer) consumed by `copy_out`. In the
+    /// COMPILED trace (`rope_dynamic`) `offset` is still the capacity placeholder, so we only remember
+    /// `(name, past_ctx_index)` on the plan; the real per-token offset/count/pointer are supplied at
+    /// apply time by `try_compiled_decode`.
+    pub fn record_kv_present(&mut self, out_name: &str, offset: i64, count: i64, past_ctx_index: usize) {
+        if self.rope_dynamic {
+            let names = &mut self.plan.compiled.kv_present_names;
+            if !names.iter().any(|(n, _)| n == out_name) {
+                names.push((out_name.to_string(), past_ctx_index));
+            }
+        } else {
+            let alias_ptr = self
+                .read_ctx_input(past_ctx_index)
+                .map(|(p, _, _)| p as usize)
+                .unwrap_or(0);
+            self.kv_deltas.insert(
+                out_name.to_string(),
+                DeltaWrite { axis: 2, offset, count, alias_ptr },
+            );
+        }
+    }
+
     /// The live `[1]` int32 `valid_past` array seeded into the compiled shared-buffer trace (see
     /// [`GQA_VALID_PAST_KEY`]). `None` outside the compiled shared-buffer path.
     #[inline]
@@ -1219,9 +1280,11 @@ impl<'a> TranslationContext<'a> {
         Ok(())
     }
 
-    /// Create the ORT output tensor with the MLX result shape and memcpy on unified memory.
+    /// Create the ORT output tensor with the MLX result shape and memcpy on unified memory. For a
+    /// shared-buffer KV `present` output only the newly written rows are copied (delta write).
     fn copy_out(&self, o: &OutRef, a: mlxsys::mlx_array) -> Result<(), MlxError> {
-        copy_out_raw(self.ort_api, self.kctx, o, a)
+        let delta = self.kv_deltas.get(&o.name).copied();
+        copy_out_raw_delta(self.ort_api, self.kctx, o, a, delta)
     }
 }
 
@@ -1264,6 +1327,20 @@ pub(crate) fn copy_out_raw(
     o: &OutRef,
     a: mlxsys::mlx_array,
 ) -> Result<(), MlxError> {
+    copy_out_raw_delta(ort_api, kctx, o, a, None)
+}
+
+/// As [`copy_out_raw`], but when `delta` is `Some` only the `count` rows at `offset` along
+/// `axis` are memcpy'd back (shared-buffer KV `present`: the rest of the buffer already holds the
+/// correct `past` rows because `present` aliases `past` in ORT memory). The ORT output tensor is
+/// still created at the MLX array's FULL shape so ORT sees the whole `[B,kv,cap,hd]` present.
+pub(crate) fn copy_out_raw_delta(
+    ort_api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+    o: &OutRef,
+    a: mlxsys::mlx_array,
+    delta: Option<DeltaWrite>,
+) -> Result<(), MlxError> {
     let arr = std::mem::ManuallyDrop::new(Array::from_raw(a)); // borrow, do not free
     let shape = arr.shape();
     let count: usize = shape.iter().map(|&d| d as usize).product::<usize>().max(0);
@@ -1284,8 +1361,48 @@ pub(crate) fn copy_out_raw(
         let mut dst: *mut c_void = std::ptr::null_mut();
         (api.GetTensorMutableData.unwrap())(out, &mut dst);
         let src = arr.data_bytes();
-        if !src.is_null() && !dst.is_null() {
-            std::ptr::copy_nonoverlapping(src, dst as *mut u8, count * itemsize);
+        if src.is_null() || dst.is_null() {
+            return Ok(());
+        }
+        match delta {
+            // Partial copy: only the newly written rows along `axis`, and ONLY when `present` really
+            // aliases `past` in ORT memory (dst pointer matches the recorded `past` address). `past`
+            // supplies every other row, so they are already correct. For a row-major [outer.., axis,
+            // inner..] layout each of the `outer` slabs contributes one contiguous run of
+            // `count*inner` elements at `(outer_idx*axis_len + offset)*inner`.
+            Some(d)
+                if d.count > 0
+                    && d.axis < shape.len()
+                    && d.alias_ptr != 0
+                    && d.alias_ptr == dst as usize =>
+            {
+                let axis_len = shape[d.axis].max(0) as usize;
+                let offset = d.offset.max(0) as usize;
+                let n_rows = (d.count as usize).min(axis_len.saturating_sub(offset));
+                if n_rows == 0 {
+                    return Ok(());
+                }
+                let outer: usize =
+                    shape[..d.axis].iter().map(|&x| x as usize).product::<usize>().max(1);
+                let inner: usize =
+                    shape[d.axis + 1..].iter().map(|&x| x as usize).product::<usize>().max(1);
+                let run = n_rows * inner * itemsize; // bytes per outer slab
+                let stride = axis_len * inner * itemsize; // bytes between slabs
+                let start = offset * inner * itemsize; // byte offset of first row within a slab
+                for o_idx in 0..outer {
+                    let byte_off = o_idx * stride + start;
+                    std::ptr::copy_nonoverlapping(
+                        src.add(byte_off),
+                        (dst as *mut u8).add(byte_off),
+                        run,
+                    );
+                }
+            }
+            // No delta, or `present` did NOT alias `past`: full contiguous copy (growing path is
+            // bit-for-bit unchanged; also the safe fallback whenever aliasing can't be confirmed).
+            _ => {
+                std::ptr::copy_nonoverlapping(src, dst as *mut u8, count * itemsize);
+            }
         }
     }
     Ok(())

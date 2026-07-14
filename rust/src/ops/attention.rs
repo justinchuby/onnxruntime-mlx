@@ -479,6 +479,28 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     if n.outputs.len() >= 3 {
         ctx.bind(&n.outputs[2], present_v);
     }
+    // Shared-buffer `present` aliases `past` in ORT memory, so copy-out only needs the S new rows
+    // written this step at axis-2 offset `valid_past`. Register the delta so the boundary copy-out
+    // is O(new-tokens) instead of O(capacity). (No-op for the growing path, which never sets
+    // `shared_buffer`, keeping its full copy-out bit-for-bit unchanged.)
+    if shared_buffer {
+        if n.outputs.len() >= 2 {
+            ctx.record_kv_present(
+                &n.outputs[1].name,
+                valid_past as i64,
+                s as i64,
+                n.inputs[3].ctx_index,
+            );
+        }
+        if n.outputs.len() >= 3 {
+            ctx.record_kv_present(
+                &n.outputs[2].name,
+                valid_past as i64,
+                s as i64,
+                n.inputs[4].ctx_index,
+            );
+        }
+    }
     Ok(())
 }
 

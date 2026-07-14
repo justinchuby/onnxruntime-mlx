@@ -67,6 +67,37 @@ impl Array {
         }
     }
 
+    /// Wrap an externally-owned buffer WITHOUT copying (zero-copy). MLX takes the raw pointer and,
+    /// on Apple unified memory, hands it straight to Metal via `newBufferWithBytesNoCopy` — no host
+    /// memcpy. If the pointer is not page-aligned (so Metal refuses the no-copy buffer) MLX silently
+    /// falls back to allocate+copy, so correctness is preserved unconditionally; only the perf win is
+    /// conditional on alignment.
+    ///
+    /// SAFETY / LIFETIME: `data` is owned by the caller (here: ORT owns the Compute input tensors for
+    /// the whole `Compute` call). The registered deallocator is a NO-OP, so MLX never frees `data`.
+    /// The buffer MUST stay valid and unmodified until every `mlx_eval` that reads this array has
+    /// completed — guaranteed because the EP evaluates the whole boundary graph synchronously and
+    /// drops the wrapping `Array` (and thus any MLX reference to `data`) before `Compute` returns.
+    pub fn from_data_managed(
+        data: *const std::os::raw::c_void,
+        shape: &[i32],
+        dtype: mlx::mlx_dtype,
+    ) -> Self {
+        // ORT owns the buffer; MLX must never free it. A no-op dtor makes the wrap purely borrowing.
+        unsafe extern "C" fn noop_dtor(_: *mut std::os::raw::c_void) {}
+        Array {
+            raw: unsafe {
+                mlx::mlx_array_new_data_managed(
+                    data as *mut std::os::raw::c_void,
+                    shape.as_ptr(),
+                    shape.len() as i32,
+                    dtype,
+                    Some(noop_dtor),
+                )
+            },
+        }
+    }
+
     /// The raw handle, for passing to `mlx_*` calls. Ownership is NOT transferred.
     #[inline]
     pub fn as_raw(&self) -> mlx::mlx_array {

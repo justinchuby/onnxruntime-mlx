@@ -24,8 +24,8 @@ use std::os::raw::c_void;
 use std::panic::AssertUnwindSafe;
 
 use crate::engine::{
-    copy_out_raw, dim_i32, mlx_dtype_from_onnx, read_ctx_input_raw, rope_row_key, DynInput, MlxError, OutRef,
-    Plan, Src, SynthRope, TracePayload, TranslationContext,
+    copy_out_raw_delta, dim_i32, mlx_dtype_from_onnx, read_ctx_input_raw, rope_row_key, DynInput,
+    MlxError, OutRef, Plan, Src, SynthRope, TracePayload, TranslationContext,
 };
 use crate::mlx::{self, Array, Closure, VectorArray};
 use crate::sys::mlx as mlxsys;
@@ -208,7 +208,13 @@ pub fn try_compiled_decode(
         for di in &plan.compiled.dyn_inputs {
             let (data, shape, dtype) = read_ctx_input_raw(api, kctx, di.ctx_index)?;
             let ishape: Vec<i32> = shape.iter().map(|&d| dim_i32(d)).collect::<Result<_, _>>()?;
-            let arr = Array::from_data(data, &ishape, mlx_dtype_from_onnx(dtype));
+            // Zero-copy wrap of the live ORT input buffer: MLX borrows it (no-op deallocator) for
+            // this apply only. `arena` keeps the wrapper alive until after eval + copy-out, and the
+            // ORT tensor is valid for the whole Compute call, so the borrow never dangles. In
+            // shared-buffer mode this is the per-token past K/V full [B,kv,cap,hd] buffer whose
+            // memcpy dominated decode. (ORT KV buffers are 16 KB page-aligned, so Metal takes the
+            // true no-copy path; small unaligned inputs fall back to MLX's internal copy.)
+            let arr = Array::from_data_managed(data, &ishape, mlx_dtype_from_onnx(dtype));
             input.append(arr.as_raw());
             arena.push(arr);
         }
@@ -306,11 +312,42 @@ pub fn try_compiled_decode(
         unsafe { &mut *plan_ptr }.compiled.valid = false;
         return Ok(false);
     }
+    // Shared-buffer KV `present` outputs alias `past` in ORT memory, so their per-token copy-out is
+    // a delta write of only the `S` new rows at axis-2 offset `valid_past` (== `past` computed above)
+    // instead of the whole [B,kv,cap,hd] buffer. This is the O(1) copy-out win. The write is gated on
+    // the present buffer actually matching the recorded `past` pointer, so a non-aliasing runtime
+    // safely takes the full copy. Empty set (growing path) => every output takes the full copy.
+    let kv_present: Vec<(String, usize)> = {
+        let plan = unsafe { &*plan_ptr };
+        if plan.compiled.shared_kv {
+            plan.compiled.kv_present_names.clone()
+        } else {
+            Vec::new()
+        }
+    };
+    let s_new = if kv_present.is_empty() {
+        0
+    } else {
+        detect_seq_len(api, kctx, unsafe { &*plan_ptr }).unwrap_or(1)
+    };
     for i in 0..ext_len {
         let a = outs.get(i);
         // Clone the small OutRef so we don't hold a plan borrow across the copy-out FFI.
         let o: OutRef = unsafe { &*plan_ptr }.compiled.ext_outputs[i].clone();
-        copy_out_raw(api, kctx, &o, a.as_raw())?;
+        let delta = kv_present
+            .iter()
+            .find(|(name, _)| *name == o.name)
+            .and_then(|(_, past_ctx)| {
+                read_ctx_input_raw(api, kctx, *past_ctx)
+                    .ok()
+                    .map(|(p, _, _)| crate::engine::DeltaWrite {
+                        axis: 2,
+                        offset: past as i64,
+                        count: s_new as i64,
+                        alias_ptr: p as usize,
+                    })
+            });
+        copy_out_raw_delta(api, kctx, &o, a.as_raw(), delta)?;
     }
     // `arena` (transient per-step inputs) drops here — after eval + copy-out have consumed them.
     Ok(true)
