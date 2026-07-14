@@ -77,6 +77,30 @@ inline bool IsMlxFloatType(ONNXTensorElementDataType type) {
          type == ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16;
 }
 
+// The most relaxed dtype set the MLX Metal backend can carry: bool, all int/uint widths (8-64), and
+// fp16/bf16/fp32. EXCLUDES float64 (Apple GPUs have no double precision), plus complex/string/fp8.
+// Use for dtype-agnostic ops (data movement, comparison, bitwise); use IsMlxFloatType for float-only
+// arithmetic. Prefer the BROADEST set an op's MLX translation supports (project dtype policy).
+inline bool IsMlxSupportedType(ONNXTensorElementDataType t) {
+  switch (t) {
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16:
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Read a scalar INT attribute, falling back to `default_value` when absent or of another type.
 inline int64_t IntAttribute(Ort::ConstNode node, const char* name, int64_t default_value) {
   Ort::ConstOpAttr attr;

@@ -24,6 +24,14 @@ void RegisterBuiltinOps(OpRegistry& registry) {
   RegisterConvOps(registry);
   RegisterSsmMiscOps(registry);
   RegisterMatMulOps(registry);
+  RegisterTrigOps(registry);
+  RegisterActivations2Ops(registry);
+  RegisterBitwiseOps(registry);
+  RegisterReduction2Ops(registry);
+  RegisterShape2Ops(registry);
+  RegisterNormPoolOps(registry);
+  RegisterQuantizeOps(registry);
+  RegisterRandomMiscOps(registry);
 }
 
 }  // namespace

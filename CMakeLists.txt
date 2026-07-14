@@ -64,6 +64,14 @@ add_library(onnxruntime_mlx_ep SHARED
   src/ep/ops/conv.cc
   src/ep/ops/ssm_misc.cc
   src/ep/ops/matmul.cc
+  src/ep/ops/trig.cc
+  src/ep/ops/activations2.cc
+  src/ep/ops/bitwise.cc
+  src/ep/ops/reduction2.cc
+  src/ep/ops/shape2.cc
+  src/ep/ops/normpool.cc
+  src/ep/ops/quantize.cc
+  src/ep/ops/randommisc.cc
   src/ep/data_transfer.cc
   src/ep/metal_context.mm)
 

@@ -92,5 +92,13 @@ void RegisterAttentionExtOps(OpRegistry& registry);
 void RegisterConvOps(OpRegistry& registry);
 void RegisterSsmMiscOps(OpRegistry& registry);
 void RegisterMatMulOps(OpRegistry& registry);
+void RegisterTrigOps(OpRegistry& registry);
+void RegisterActivations2Ops(OpRegistry& registry);
+void RegisterBitwiseOps(OpRegistry& registry);
+void RegisterReduction2Ops(OpRegistry& registry);
+void RegisterShape2Ops(OpRegistry& registry);
+void RegisterNormPoolOps(OpRegistry& registry);
+void RegisterQuantizeOps(OpRegistry& registry);
+void RegisterRandomMiscOps(OpRegistry& registry);
 
 }  // namespace ort_mps_mlx
