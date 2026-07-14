@@ -75,6 +75,13 @@ fn register_builtin_ops(registry: &mut OpRegistry) {
     crate::ops::reduction::register(registry);
     crate::ops::shape::register(registry);
     crate::ops::matmul::register(registry);
+    // signal/random/recurrent/ssm/misc/controlflow
+    crate::ops::signal::register(registry);
+    crate::ops::random::register(registry);
+    crate::ops::recurrent::register(registry);
+    crate::ops::ssm::register(registry);
+    crate::ops::misc::register(registry);
+    crate::ops::controlflow::register(registry);
     // norm+attention
     crate::ops::norm::register_norm(registry);
     crate::ops::attention::register_attention(registry);
@@ -448,9 +455,98 @@ impl NodeView {
         }
     }
 
-    /// True iff the node carries a genuine (non-UNDEFINED) attribute of `name`.
-    pub fn has_attr(&self, name: &str) -> bool {
+    /// Read a scalar FLOAT attribute. Returns `None` when absent or of another type (so callers can
+    /// distinguish "absent" from a genuine value, needed for optional-seed validation).
+    pub fn float_attr_opt(&self, name: &str) -> Option<f32> {
         unsafe {
+            let api = self.api();
+            let cname = std::ffi::CString::new(name).ok()?;
+            let mut attr: *const ort::OrtOpAttr = std::ptr::null();
+            let st = (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            if attr.is_null() {
+                return None;
+            }
+            let mut atype: ort::OrtOpAttrType = 0;
+            (api.OpAttr_GetType.unwrap())(attr, &mut atype);
+            if atype != ort::OrtOpAttrType_ORT_OP_ATTR_FLOAT {
+                return None;
+            }
+            let mut value: f32 = 0.0;
+            let mut out_len: usize = 0;
+            let st = (api.ReadOpAttr.unwrap())(
+                attr,
+                ort::OrtOpAttrType_ORT_OP_ATTR_FLOAT,
+                &mut value as *mut f32 as *mut std::os::raw::c_void,
+                std::mem::size_of::<f32>(),
+                &mut out_len,
+            );
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            Some(value)
+        }
+    }
+
+    /// Read a STRINGS attribute as a `Vec<String>` (null-separated buffer per the ORT ABI). Returns
+    /// `None` when absent or of another type. Used to validate recurrent `activations` against the
+    /// per-op defaults at claim time.
+    pub fn strings_attr(&self, name: &str) -> Option<Vec<String>> {
+        unsafe {
+            let api = self.api();
+            let cname = std::ffi::CString::new(name).ok()?;
+            let mut attr: *const ort::OrtOpAttr = std::ptr::null();
+            let st = (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            if attr.is_null() {
+                return None;
+            }
+            let mut atype: ort::OrtOpAttrType = 0;
+            (api.OpAttr_GetType.unwrap())(attr, &mut atype);
+            if atype != ort::OrtOpAttrType_ORT_OP_ATTR_STRINGS {
+                return None;
+            }
+            let read = api.ReadOpAttr.unwrap();
+            let mut needed: usize = 0;
+            let st0 = read(attr, atype, std::ptr::null_mut(), 0, &mut needed);
+            self.release_status(st0);
+            if needed == 0 {
+                return Some(Vec::new());
+            }
+            let mut buf = vec![0u8; needed];
+            let mut out: usize = 0;
+            let st = read(
+                attr,
+                atype,
+                buf.as_mut_ptr() as *mut std::os::raw::c_void,
+                needed,
+                &mut out,
+            );
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            buf.truncate(out.min(needed));
+            // Null-separated concatenation of C strings.
+            let mut result = Vec::new();
+            for part in buf.split(|&b| b == 0) {
+                if !part.is_empty() {
+                    result.push(String::from_utf8_lossy(part).into_owned());
+                }
+            }
+            Some(result)
+        }
+    }
+
+    /// True iff the node carries a genuine (non-UNDEFINED) attribute of `name`.
+    pub fn has_attr(&self, name: &str) -> bool {        unsafe {
             let api = self.api();
             let cname = match std::ffi::CString::new(name) {
                 Ok(c) => c,
@@ -468,6 +564,70 @@ impl NodeView {
             let mut atype: ort::OrtOpAttrType = 0;
             (api.OpAttr_GetType.unwrap())(attr, &mut atype);
             atype != ort::OrtOpAttrType_ORT_OP_ATTR_UNDEFINED
+        }
+    }
+
+    /// The raw attribute type of `name` (ORT_OP_ATTR_UNDEFINED when absent). Lets a claim match a
+    /// specific attribute form (e.g. Constant's value_int/value_float/value_ints/value_floats).
+    pub fn attr_type(&self, name: &str) -> ort::OrtOpAttrType {
+        unsafe {
+            let api = self.api();
+            let cname = match std::ffi::CString::new(name) {
+                Ok(c) => c,
+                Err(_) => return ort::OrtOpAttrType_ORT_OP_ATTR_UNDEFINED,
+            };
+            let mut attr: *const ort::OrtOpAttr = std::ptr::null();
+            let st = (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
+            if !st.is_null() {
+                self.release_status(st);
+                return ort::OrtOpAttrType_ORT_OP_ATTR_UNDEFINED;
+            }
+            if attr.is_null() {
+                return ort::OrtOpAttrType_ORT_OP_ATTR_UNDEFINED;
+            }
+            let mut atype: ort::OrtOpAttrType = 0;
+            (api.OpAttr_GetType.unwrap())(attr, &mut atype);
+            atype
+        }
+    }
+
+    /// The int64 value of a constant scalar (rank-0 or [1]) INT64 initializer input `i`, or None.
+    /// Mirrors the C++ `IsConstScalarI64` used by OneHot/Trilu claim predicates.
+    pub fn const_scalar_i64(&self, i: usize) -> Option<i64> {
+        let info = self.input_info(i)?;
+        if info.dtype != ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 {
+            return None;
+        }
+        if !(info.shape.is_empty() || info.shape == [1]) {
+            return None;
+        }
+        if !self.is_constant_initializer(i) {
+            return None;
+        }
+        let ins = self.inputs_raw();
+        let vi = *ins.get(i)?;
+        if vi.is_null() {
+            return None;
+        }
+        unsafe {
+            let api = self.api();
+            let mut val: *const ort::OrtValue = std::ptr::null();
+            let st = (api.ValueInfo_GetInitializerValue.unwrap())(vi, &mut val);
+            if !st.is_null() || val.is_null() {
+                if !st.is_null() {
+                    self.release_status(st);
+                }
+                return None;
+            }
+            let mut data: *mut std::os::raw::c_void = std::ptr::null_mut();
+            let st = (api.GetTensorMutableData.unwrap())(val as *mut ort::OrtValue, &mut data);
+            if !st.is_null() || data.is_null() {
+                if !st.is_null() {
+                    self.release_status(st);
+                }
+                return None;
+            }
+            Some(*(data as *const i64))
         }
     }
 
@@ -540,6 +700,68 @@ impl NodeView {
                 return if count == 0 { Some(Vec::new()) } else { None };
             }
             Some(std::slice::from_raw_parts(data as *const i64, count).to_vec())
+        }
+    }
+
+    /// Positional input names of the node (empty string for an omitted optional slot).
+    pub fn input_names(&self) -> Vec<String> {
+        self.inputs_raw()
+            .iter()
+            .map(|&vi| {
+                if vi.is_null() {
+                    return String::new();
+                }
+                let mut p: *const c_char = std::ptr::null();
+                unsafe { (self.api().GetValueInfoName.unwrap())(vi, &mut p) };
+                self.cstr(p)
+            })
+            .collect()
+    }
+
+    /// Positional output names of the node.
+    pub fn output_names(&self) -> Vec<String> {
+        self.outputs_raw()
+            .iter()
+            .map(|&vi| {
+                if vi.is_null() {
+                    return String::new();
+                }
+                let mut p: *const c_char = std::ptr::null();
+                unsafe { (self.api().GetValueInfoName.unwrap())(vi, &mut p) };
+                self.cstr(p)
+            })
+            .collect()
+    }
+
+    /// The node's body subgraphs (If/Scan/Loop) as `(attribute_name, GraphView)` pairs. Empty for an
+    /// ordinary op. The returned graph handles are borrowed (tied to the node's lifetime).
+    pub fn subgraphs(&self) -> Vec<(String, GraphView)> {
+        unsafe {
+            let api = self.api();
+            let mut num: usize = 0;
+            let st = (api.Node_GetNumSubgraphs.unwrap())(self.node, &mut num);
+            if !st.is_null() {
+                self.release_status(st);
+                return Vec::new();
+            }
+            if num == 0 {
+                return Vec::new();
+            }
+            let mut graphs: Vec<*const ort::OrtGraph> = vec![std::ptr::null(); num];
+            let mut names: Vec<*const c_char> = vec![std::ptr::null(); num];
+            let st = (api.Node_GetSubgraphs.unwrap())(
+                self.node,
+                graphs.as_mut_ptr(),
+                num,
+                names.as_mut_ptr(),
+            );
+            if !st.is_null() {
+                self.release_status(st);
+                return Vec::new();
+            }
+            (0..num)
+                .map(|i| (self.cstr(names[i]), GraphView::new(self.api, graphs[i])))
+                .collect()
         }
     }
 
@@ -641,6 +863,94 @@ impl NodeView {
                 _ => None,
             }
         }
+    }
+}
+
+/// A light read-only view over an `OrtGraph` (a control-flow body), used by control-flow claim
+/// predicates to inspect body nodes/inputs/outputs. All FFI is confined here.
+pub struct GraphView {
+    api: *const ort::OrtApi,
+    graph: *const ort::OrtGraph,
+}
+
+impl GraphView {
+    pub fn new(api: *const ort::OrtApi, graph: *const ort::OrtGraph) -> Self {
+        GraphView { api, graph }
+    }
+
+    fn api(&self) -> &ort::OrtApi {
+        unsafe { &*self.api }
+    }
+
+    fn name(&self, p: *const c_char) -> String {
+        if p.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned() }
+        }
+    }
+
+    /// The body's nodes as claim-time views.
+    pub fn nodes(&self) -> Vec<NodeView> {
+        unsafe {
+            let api = self.api();
+            let mut num: usize = 0;
+            (api.Graph_GetNumNodes.unwrap())(self.graph, &mut num);
+            if num == 0 {
+                return Vec::new();
+            }
+            let mut nodes: Vec<*const ort::OrtNode> = vec![std::ptr::null(); num];
+            (api.Graph_GetNodes.unwrap())(self.graph, nodes.as_mut_ptr(), num);
+            nodes.into_iter().map(|n| NodeView::new(self.api, n)).collect()
+        }
+    }
+
+    fn value_names(
+        &self,
+        count_fn: unsafe extern "C" fn(*const ort::OrtGraph, *mut usize) -> *mut ort::OrtStatus,
+        get_fn: unsafe extern "C" fn(*const ort::OrtGraph, *mut *const ort::OrtValueInfo, usize) -> *mut ort::OrtStatus,
+    ) -> Vec<String> {
+        unsafe {
+            let mut num: usize = 0;
+            count_fn(self.graph, &mut num);
+            if num == 0 {
+                return Vec::new();
+            }
+            let mut vis: Vec<*const ort::OrtValueInfo> = vec![std::ptr::null(); num];
+            get_fn(self.graph, vis.as_mut_ptr(), num);
+            vis.into_iter()
+                .map(|vi| {
+                    if vi.is_null() {
+                        return String::new();
+                    }
+                    let mut p: *const c_char = std::ptr::null();
+                    (self.api().GetValueInfoName.unwrap())(vi, &mut p);
+                    self.name(p)
+                })
+                .collect()
+        }
+    }
+
+    /// The body's formal input names.
+    pub fn input_names(&self) -> Vec<String> {
+        self.value_names(
+            self.api().Graph_GetNumInputs.unwrap(),
+            self.api().Graph_GetInputs.unwrap(),
+        )
+    }
+
+    /// The body's formal output names.
+    pub fn output_names(&self) -> Vec<String> {
+        self.value_names(
+            self.api().Graph_GetNumOutputs.unwrap(),
+            self.api().Graph_GetOutputs.unwrap(),
+        )
+    }
+
+    /// Every node in this body is MLX-translatable (recursively via the registry claim). A body with
+    /// no nodes (e.g. a pure alias branch) is trivially claimable.
+    pub fn all_nodes_claimable(&self) -> bool {
+        self.nodes().iter().all(claimable)
     }
 }
 

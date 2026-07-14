@@ -9,4 +9,11 @@ pub mod norm;
 pub mod quant;
 pub mod reduction;
 pub mod shape;
+// signal/random/recurrent/ssm/misc/controlflow
+pub mod controlflow;
+pub mod misc;
+pub mod random;
+pub mod recurrent;
+pub mod signal;
+pub mod ssm;
 pub mod vision;

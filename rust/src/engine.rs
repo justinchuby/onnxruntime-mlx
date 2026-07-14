@@ -21,7 +21,10 @@ pub enum Src {
     Absent,
 }
 
-/// A constant initializer payload surfaced at compile time (session-owned storage).
+/// A constant initializer payload surfaced at compile time (session-owned storage). For a
+/// control-flow BODY initializer the bytes are COPIED into `owned` (the subgraph handle is released
+/// after the compile-time walk), and `data` points into that owned buffer; for an ordinary
+/// session-owned initializer `owned` is `None` and `data` points at ORT's storage.
 #[derive(Clone)]
 pub struct InitData {
     pub data: *const c_void,
@@ -30,6 +33,8 @@ pub struct InitData {
     /// Element count of the initializer (kept for weight-repack handlers in the next wave).
     #[allow(dead_code)]
     pub count: usize,
+    /// Owned copy of the bytes (control-flow body initializers), keeping `data` valid.
+    pub owned: Option<std::sync::Arc<Vec<u8>>>,
 }
 
 /// A single node input reference.
@@ -65,6 +70,30 @@ pub struct OutRef {
     pub otype: ort::ONNXTensorElementDataType,
 }
 
+/// A TENSOR-valued attribute payload (Constant `value`, ConstantOfShape `value`) surfaced at compile
+/// time. Raw host bytes are copied into `data` (owned, kept alive for the plan's lifetime) so the
+/// handler can materialize an MLX array from it. Mirrors the C++ `CopyScalarAttrs` TENSOR path.
+#[derive(Clone)]
+pub struct ConstTensor {
+    pub data: Vec<u8>,
+    pub shape: Vec<i64>,
+    pub dtype: ort::ONNXTensorElementDataType,
+    pub count: usize,
+}
+
+/// A control-flow node's body subgraph (If then/else branch, Scan/Loop body), captured recursively so
+/// the translator can realize the control flow by translating the body inline. `input_names` /
+/// `output_names` are the body graph's FORMAL inputs/outputs (positional). `nodes` are the body's
+/// nodes in topological order, whose input TensorRefs already resolve against the body scope with a
+/// fall-through to the enclosing scope (implicit inputs). Faithful port of the C++ `SubgraphDesc`.
+#[derive(Clone)]
+pub struct SubgraphDesc {
+    pub attr_name: String,
+    pub input_names: Vec<String>,
+    pub output_names: Vec<String>,
+    pub nodes: Vec<NodeDesc>,
+}
+
 /// One ONNX node with just the metadata the MLX translator needs.
 #[derive(Clone)]
 pub struct NodeDesc {
@@ -76,8 +105,12 @@ pub struct NodeDesc {
     pub int_arrays: HashMap<String, Vec<i64>>,
     pub float_arrays: HashMap<String, Vec<f32>>,
     pub strings: HashMap<String, String>,
+    /// TENSOR-valued attributes (Constant/ConstantOfShape `value`), keyed by attribute name.
+    pub tensors: HashMap<String, ConstTensor>,
     pub inputs: Vec<TensorRef>,
     pub outputs: Vec<OutRef>,
+    /// Body subgraphs for a control-flow node (If/Scan/Loop). Empty for every ordinary op.
+    pub subgraphs: Vec<SubgraphDesc>,
 }
 
 impl NodeDesc {
@@ -91,8 +124,10 @@ impl NodeDesc {
             int_arrays: HashMap::new(),
             float_arrays: HashMap::new(),
             strings: HashMap::new(),
+            tensors: HashMap::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
+            subgraphs: Vec::new(),
         }
     }
 }
@@ -520,6 +555,166 @@ impl<'a> TranslationContext<'a> {
             return Err("mlx_softmax_axis failed".to_string());
         }
         Ok(self.keep(res))
+    }
+
+    // ---- extra op helpers shared by the signal/random/recurrent/ssm/misc/controlflow ops ---------
+
+    /// `a * b` (elementwise, with MLX broadcast).
+    pub fn mul(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+        self.binary(mlxsys::mlx_multiply, a, b)
+    }
+
+    /// `a + b`.
+    pub fn add(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+        self.binary(mlxsys::mlx_add, a, b)
+    }
+
+    /// `a - b`.
+    pub fn sub(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+        self.binary(mlxsys::mlx_subtract, a, b)
+    }
+
+    /// `a @ b` (matmul).
+    pub fn matmul(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe { mlxsys::mlx_matmul(res, a, b, s) })
+    }
+
+    /// Concatenate two arrays along `axis`.
+    pub fn concat2(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array, axis: i32) -> Result<mlxsys::mlx_array, MlxError> {
+        let mut vec = VectorArray::new();
+        vec.append(a);
+        vec.append(b);
+        self.emit(|res, s| unsafe { mlxsys::mlx_concatenate_axis(res, vec.as_raw(), axis, s) })
+    }
+
+    /// Contiguous strided slice with unit stride (`start`/`stop` per axis).
+    pub fn slice(&mut self, a: mlxsys::mlx_array, start: &[i32], stop: &[i32]) -> Result<mlxsys::mlx_array, MlxError> {
+        let stride = vec![1i32; start.len()];
+        self.emit(|res, s| unsafe {
+            mlxsys::mlx_slice(
+                res, a, start.as_ptr(), start.len(), stop.as_ptr(), stop.len(),
+                stride.as_ptr(), stride.len(), s,
+            )
+        })
+    }
+
+    /// `expand_dims(a, axis)`.
+    pub fn expand_dims(&mut self, a: mlxsys::mlx_array, axis: i32) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe { mlxsys::mlx_expand_dims(res, a, axis, s) })
+    }
+
+    /// `squeeze(a, axis)`.
+    pub fn squeeze(&mut self, a: mlxsys::mlx_array, axis: i32) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe { mlxsys::mlx_squeeze_axis(res, a, axis, s) })
+    }
+
+    /// Stack a list of same-shaped arrays along a new `axis`.
+    pub fn stack(&mut self, parts: &[mlxsys::mlx_array], axis: i32) -> Result<mlxsys::mlx_array, MlxError> {
+        let mut vec = VectorArray::new();
+        for &p in parts {
+            vec.append(p);
+        }
+        self.emit(|res, s| unsafe { mlxsys::mlx_stack_axis(res, vec.as_raw(), axis, s) })
+    }
+
+    /// `full(shape, value, dtype)`.
+    pub fn full(&mut self, shape: &[i32], value: mlxsys::mlx_array, dtype: mlxsys::mlx_dtype) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, s| unsafe { mlxsys::mlx_full(res, shape.as_ptr(), shape.len(), value, dtype, s) })
+    }
+
+    /// A kept 0-d complex64 scalar array (real, imag).
+    pub fn scalar_complex(&mut self, re: f32, im: f32) -> mlxsys::mlx_array {
+        self.keep(Array::from_raw(unsafe { mlxsys::mlx_array_new_complex(re, im) }))
+    }
+
+    /// A kept 0-d bool scalar array.
+    pub fn scalar_bool(&mut self, v: bool) -> mlxsys::mlx_array {
+        self.keep(Array::from_raw(unsafe { mlxsys::mlx_array_new_bool(v) }))
+    }
+
+    /// A kept array wrapping host bytes of the given `dtype` and `shape`.
+    pub fn from_host(&mut self, data: *const c_void, shape: &[i32], dtype: mlxsys::mlx_dtype) -> mlxsys::mlx_array {
+        self.keep(Array::from_data(data, shape, dtype))
+    }
+
+    /// Force `a` contiguous, evaluate it, and return `(kept handle, shape, dtype)` so a handler can
+    /// read its host bytes mid-graph (the host-computed ops: Det / NonZero / Unique). The kept handle
+    /// stays alive for the rest of the run.
+    pub fn contiguous_eval(&mut self, a: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+        let r = self.contiguous(a)?;
+        let mut v = VectorArray::new();
+        v.append(r);
+        mlx::eval(&v)?;
+        Ok(r)
+    }
+
+    /// Raw host byte pointer of an (evaluated) array — valid until the array is freed.
+    pub fn host_ptr(&self, a: mlxsys::mlx_array) -> *const u8 {
+        unsafe { mlxsys::mlx_array_data_uint8(a) as *const u8 }
+    }
+
+    /// Translate a control-flow body subgraph inline: bind its formal inputs to `inputs` (positional),
+    /// dispatch every body node through the registry (implicit inputs fall through to the enclosing
+    /// env), collect + return the arrays bound to the body's formal outputs, then restore the env.
+    /// Faithful port of the C++ `TranslationContext::RunSubgraph`.
+    pub fn run_subgraph(
+        &mut self,
+        sg: &SubgraphDesc,
+        inputs: &[mlxsys::mlx_array],
+    ) -> Result<Vec<mlxsys::mlx_array>, MlxError> {
+        if inputs.len() != sg.input_names.len() {
+            return Err(format!("MLX RunSubgraph: input arity mismatch for body '{}'", sg.attr_name));
+        }
+        // Names this body binds (formal inputs + every produced output); snapshot shadowed outer ones.
+        let mut body_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for nm in &sg.input_names {
+            if !nm.is_empty() {
+                body_names.insert(nm.clone());
+            }
+        }
+        for node in &sg.nodes {
+            for o in &node.outputs {
+                if !o.name.is_empty() {
+                    body_names.insert(o.name.clone());
+                }
+            }
+        }
+        let mut saved: HashMap<String, mlxsys::mlx_array> = HashMap::new();
+        for nm in &body_names {
+            if let Some(&a) = self.env.get(nm) {
+                saved.insert(nm.clone(), a);
+            }
+        }
+        // Bind formal inputs, then translate the body in topological order.
+        for (i, nm) in sg.input_names.iter().enumerate() {
+            if !nm.is_empty() {
+                self.env.insert(nm.clone(), inputs[i]);
+            }
+        }
+        for node in &sg.nodes {
+            crate::registry::translate(self, node)?;
+        }
+        // Collect the body's formal outputs (before restoring the env).
+        let mut outs = Vec::with_capacity(sg.output_names.len());
+        for on in &sg.output_names {
+            match self.env.get(on) {
+                Some(&a) => outs.push(a),
+                None => {
+                    return Err(format!(
+                        "MLX RunSubgraph: body '{}' did not produce output {on}",
+                        sg.attr_name
+                    ))
+                }
+            }
+        }
+        // Restore the enclosing scope.
+        for nm in &body_names {
+            self.env.remove(nm);
+        }
+        for (k, v) in saved {
+            self.env.insert(k, v);
+        }
+        Ok(outs)
     }
 
     /// Translate every node, cast+collect boundary outputs, one `mlx_eval`, copy each output back
