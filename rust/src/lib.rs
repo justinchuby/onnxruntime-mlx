@@ -7,8 +7,12 @@
 //! Scope: claims `Add` (fp32) and runs it through `mlx_add`. The existing
 //! `tests/ops` pytest harness is the oracle (`test_binary_fp32[Add-...]`).
 
+mod engine;
 mod ep;
 mod factory;
+mod mlx;
+mod ops;
+mod registry;
 mod sys;
 
 use std::ffi::{c_char, CString};

@@ -73,3 +73,73 @@ language-agnostic pytest suite (ONNX models vs ORT-CPU reference):
    The spike keeps I/O on the CPU allocator, which was sufficient to prove the
    boundaries; the GPU-memory path is a known-simple follow-up.
 5. **pyo3 packaging** — abi3 + free-threaded (abi3t) wheels, replacing nanobind.
+
+## Update: foundation + wave-1 (engine generalized)
+
+The single-Add spike has been generalized into a real engine + registry that
+ports the first wave of ops. This is no longer a single hardcoded op.
+
+### Module structure
+
+- `src/mlx.rs` — **RAII layer.** Safe `Stream`, `Array`, `VectorArray` wrappers
+  over `sys::mlx`, each with `impl Drop` calling the matching `mlx_*_free`. All
+  ownership of mlx refs lives here; op handlers never free manually. This is
+  where the 0-leak result comes from. Raw bindgen stays in `sys::mlx`.
+- `src/engine.rs` — **Engine core.** `NodeDesc` (op_type/domain/since_version +
+  int/float/array/string attrs + input/output tensor names), the `Plan` (one per
+  fused subgraph), and `TranslationContext` which owns a `name -> mlx_array`
+  environment plus an `arena: Vec<Array>` (freed at run end) and a persistent
+  `cache` for constants. Provides `resolve`/`bind`/`keep` and the eager
+  `execute`/`finish_boundary`/`copy_out`. `mlx_dtype_from_onnx` maps ONNX element
+  types to `mlx_dtype` (fp32/fp16/bf16/int32/int64/… ) for the copy path.
+- `src/registry.rs` — **Registry.** `(domain, op_type) -> { handler, claim
+  predicate }`, an `OnceLock` singleton wired by `register_builtin_ops`. `claim`
+  and `translate` are the single source of truth so *claimed == translatable*.
+  `NodeView` is the claim-time FFI wrapper (reads inputs/outputs/attrs off the
+  `OrtNode` before compile). Includes claim helpers (`is_mlx_float`,
+  `suffix_broadcast`, …).
+- `src/ops/elementwise.rs`, `src/ops/math.rs` — **Wave-1 handlers.** Each op is
+  handler + claim predicate + registry entry.
+- `src/ep.rs` — **Generalized boundary.** `GetCapability` claims nodes via the
+  registry then groups them into maximal convex connected subgraphs with a
+  faithful port of `BuildConvexClusters` (union-find + reachability bitsets,
+  prevents the cycles ORT rejects). `Compile` extracts each node's `NodeDesc`
+  (attrs via `Node_GetAttributes`/`ReadOpAttr`, tensor names via
+  `Node_GetInputs`/`GetOutputs`) and builds one `Plan` per subgraph. `Compute`
+  (RunPlan port) resolves subgraph inputs from the `KernelContext`, runs each
+  node's handler in topo order, does a single `mlx_eval` at the boundary, then
+  writes each output via `KernelContext_GetOutput` + a unified-memory memcpy.
+
+### Wave-1 ops (all pass through the Rust EP)
+
+`Add, Sub, Mul, Div, Neg, Abs, Sqrt, Exp, Log, Relu, Sigmoid, Tanh` (+ `Softmax`
+last-axis and `Cast`). fp32 required; the copy path also handles
+fp16/bf16/int32/int64.
+
+### Results
+
+- `cargo build --release` — clean.
+- `pytest tests/ops/test_mlx_ops.py -k "binary_fp32 or sigmoid_fp32 or
+  softmax_fp32"` — **5 passed**, all through MLX (verified by `[rust-mlx-ep]`
+  GetCapability/Compute stderr). Full `test_mlx_ops.py` — 31 passed; math ops
+  (`Relu/Tanh/Neg/Abs/Sqrt/Exp/Log/Div`) — 21 passed, 18 through MLX.
+- **Leak check** — 500-session Add stress loop under
+  `MallocStackLogging=1 leaks --atExit` → **0 leaks / 0 total leaked bytes**
+  (`rust/stress_add.py`).
+
+### What the next wave needs from the engine
+
+- **Initializer / constant handling** — `Src::Initializer` + the `constant`-flag
+  cache path exist but are only lightly exercised; reductions/norm/matmul/quant
+  need weights resolved once and kept in the persistent `Plan.cache`.
+- **Reading constant host bytes** (a `RawHost` accessor) — ops like
+  `Slice/Trilu/OneHot/Reshape` read integer/shape operands on the host, not as
+  mlx arrays.
+- **Multi-output nodes** — the plan/output binding currently assumes the common
+  1-output case; TopK/Split/attention need N outputs bound and copied.
+- **Subgraph / control-flow attrs** — `SubgraphDesc` (If/Scan/Loop bodies) is not
+  yet ported; the convex-cluster singleton special-case for control-flow ops was
+  intentionally omitted in wave-1.
+- **Reductions & shape/data-movement helpers** — axis normalization, keepdims,
+  and gather/concat/reshape wiring in `TranslationContext`.
+- **Compiled-decode fast-path** (`mlx_compile`) — omitted; a later perf item.
