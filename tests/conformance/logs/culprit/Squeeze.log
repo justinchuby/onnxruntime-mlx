@@ -1,0 +1,2780 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+hypothesis profile 'onnx-tests-with-verbose-verbosity' -> deadline=None, max_examples=25, verbosity=Verbosity.verbose
+rootdir: /Users/justinc/Documents/GitHub/onnx-tests
+configfile: pyproject.toml
+plugins: xdist-3.8.0, hypothesis-6.155.7
+collected 1198 items / 1185 deselected / 13 selected
+
+tests/test_manipulation_functions.py Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(100, dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(36, dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([210, 204, 251,  55, 154], dtype=uint8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[100],
+          [ 57],
+          [193],
+          [235],
+          [193]],
+  
+         [[193],
+          [179],
+          [193],
+          [193],
+          [193]],
+  
+         [[193],
+          [193],
+          [193],
+          [ 99],
+          [213]],
+  
+         [[228],
+          [250],
+          [ 16],
+          [ 52],
+          [193]]], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 80, 209]]], dtype=uint8),
+  'axes': array([1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 23, 187,  27], dtype=uint8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([191, 100, 191, 191], dtype=uint8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[126, 126],
+          [242, 253],
+          [126, 126]],
+  
+         [[126, 231],
+          [126, 126],
+          [126, 126]],
+  
+         [[126, 126],
+          [126, 126],
+          [126, 126]]], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[126, 126],
+          [242, 253],
+          [126, 126]],
+  
+         [[126, 231],
+          [126, 126],
+          [126, 126]],
+  
+         [[126, 126],
+          [126, 126],
+          [126, 126]]], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[242, 242],
+          [242,   0],
+          [242, 242]],
+  
+         [[242, 242],
+          [242, 242],
+          [242, 242]],
+  
+         [[242, 242],
+          [242, 242],
+          [242, 242]]], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[242, 242,   0],
+         [  0, 242, 242],
+         [242, 242, 242]], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[242, 242,   0],
+         [  0, 242, 242],
+         [242, 242, 242]], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [0, 0, 0],
+         [0, 0, 0]], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [3, 0, 0],
+         [0, 0, 0]], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(203, dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([153,  90], dtype=uint8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  0, 153], dtype=uint8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  2, 153], dtype=uint8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=uint8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=uint8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=uint8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(100, dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(192, dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([14074, 11845, 55633,   293,  2884], dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[  100],
+          [  305],
+          [ 8434],
+          [32194],
+          [ 8434]],
+  
+         [[ 8434],
+          [ 5629],
+          [ 8434],
+          [ 8434],
+          [ 8434]],
+  
+         [[ 8434],
+          [ 8434],
+          [ 8434],
+          [  767],
+          [15786]],
+  
+         [[25016],
+          [53671],
+          [   86],
+          [  275],
+          [ 8434]]], dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[  503, 13616]]], dtype=uint16),
+  'axes': array([1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 126, 7051,  146], dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([8133,  100, 8133, 8133], dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 1455,  1455],
+          [40666, 58945],
+          [ 1455,  1455]],
+  
+         [[ 1455, 27478],
+          [ 1455,  1455],
+          [ 1455,  1455]],
+  
+         [[ 1455,  1455],
+          [ 1455,  1455],
+          [ 1455,  1455]]], dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 1455,  1455],
+          [40666, 58945],
+          [ 1455,  1455]],
+  
+         [[ 1455, 27478],
+          [ 1455,  1455],
+          [ 1455,  1455]],
+  
+         [[ 1455,  1455],
+          [ 1455,  1455],
+          [ 1455,  1455]]], dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[40666, 40666],
+          [40666,     0],
+          [40666, 40666]],
+  
+         [[40666, 40666],
+          [40666, 40666],
+          [40666, 40666]],
+  
+         [[40666, 40666],
+          [40666, 40666],
+          [40666, 40666]]], dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[40666, 40666,     0],
+         [    0, 40666, 40666],
+         [40666, 40666, 40666]], dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[40666, 40666,     0],
+         [    0, 40666, 40666],
+         [40666, 40666, 40666]], dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [0, 0, 0],
+         [0, 0, 0]], dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [3, 0, 0],
+         [0, 0, 0]], dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(11371, dtype=uint16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2811,  624], dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([   0, 2811], dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([   2, 2811], dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=uint16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(100, dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(329, dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([   5479064,    3124536, 1726869953,        643,      66438],
+        dtype=uint32), 'axes': None}, attribute_kwargs={}, spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[       100],
+          [       693],
+          [   1107875],
+          [ 125025497],
+          [   1107875]],
+  
+         [[   1107875],
+          [    356897],
+          [   1107875],
+          [   1107875],
+          [   1107875]],
+  
+         [[   1107875],
+          [   1107875],
+          [   1107875],
+          [      3886],
+          [   8081590]],
+  
+         [[  44108078],
+          [1426766356],
+          [       143],
+          [       575],
+          [   1107875]]], dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[   1733, 4909672]]], dtype=uint32),
+  'axes': array([1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([   210, 662724,    243], dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([996356,    100, 996356, 996356], dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[     14347,      14347],
+          [ 358141569, 2363702267],
+          [     14347,      14347]],
+  
+         [[     14347,   64320299],
+          [     14347,      14347],
+          [     14347,      14347]],
+  
+         [[     14347,      14347],
+          [     14347,      14347],
+          [     14347,      14347]]], dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[     14347,      14347],
+          [ 358141569, 2363702267],
+          [     14347,      14347]],
+  
+         [[     14347,   64320299],
+          [     14347,      14347],
+          [     14347,      14347]],
+  
+         [[     14347,      14347],
+          [     14347,      14347],
+          [     14347,      14347]]], dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[358141569, 358141569],
+          [358141569,         0],
+          [358141569, 358141569]],
+  
+         [[358141569, 358141569],
+          [358141569, 358141569],
+          [358141569, 358141569]],
+  
+         [[358141569, 358141569],
+          [358141569, 358141569],
+          [358141569, 358141569]]], dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[358141569, 358141569,         0],
+         [        0, 358141569, 358141569],
+         [358141569, 358141569, 358141569]], dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[358141569, 358141569,         0],
+         [        0, 358141569, 358141569],
+         [358141569, 358141569, 358141569]], dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [0, 0, 0],
+         [0, 0, 0]], dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [3, 0, 0],
+         [0, 0, 0]], dtype=uint32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(2745472, dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([62533,  2604], dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([    0, 62533], dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([    2, 62533], dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=uint32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(100, dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(413, dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([        854099185,         277049106, 75393809920114672,
+                       931,            433622], dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[              100],
+          [             1021],
+          [         40181141],
+          [    2106502663060],
+          [         40181141]],
+  
+         [[         40181141],
+          [          5832888],
+          [         40181141],
+          [         40181141],
+          [         40181141]],
+  
+         [[         40181141],
+          [         40181141],
+          [         40181141],
+          [             8865],
+          [       1934072515]],
+  
+         [[     108572355354],
+          [28170221105331696],
+          [              168],
+          [              813],
+          [         40181141]]], dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[     3176, 682087892]]], dtype=uint64),
+  'axes': array([1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([     247, 16399053,      289], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([33292548,      100, 33292548, 33292548], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[             49879,              49879],
+          [    73351007632017, 426207158487063808],
+          [             49879,              49879]],
+  
+         [[             49879,       301533373949],
+          [             49879,              49879],
+          [             49879,              49879]],
+  
+         [[             49879,              49879],
+          [             49879,              49879],
+          [             49879,              49879]]], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[             49879,              49879],
+          [    73351007632017, 426207158487063808],
+          [             49879,              49879]],
+  
+         [[             49879,       301533373949],
+          [             49879,              49879],
+          [             49879,              49879]],
+  
+         [[             49879,              49879],
+          [             49879,              49879],
+          [             49879,              49879]]], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[73351007632017, 73351007632017],
+          [73351007632017,              0],
+          [73351007632017, 73351007632017]],
+  
+         [[73351007632017, 73351007632017],
+          [73351007632017, 73351007632017],
+          [73351007632017, 73351007632017]],
+  
+         [[73351007632017, 73351007632017],
+          [73351007632017, 73351007632017],
+          [73351007632017, 73351007632017]]], dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[73351007632017, 73351007632017,              0],
+         [             0, 73351007632017, 73351007632017],
+         [73351007632017, 73351007632017, 73351007632017]], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[73351007632017, 73351007632017,              0],
+         [             0, 73351007632017, 73351007632017],
+         [73351007632017, 73351007632017, 73351007632017]], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [0, 0, 0],
+         [0, 0, 0]], dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [3, 0, 0],
+         [0, 0, 0]], dtype=uint64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(215604492, dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([396781,   5310], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([     0, 396781], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([     2, 396781], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=uint64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(100, dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-92, dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 82,  76, 123, -73,  26], dtype=int8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 100],
+          [ -71],
+          [  65],
+          [ 107],
+          [  65]],
+  
+         [[  65],
+          [  51],
+          [  65],
+          [  65],
+          [  65]],
+  
+         [[  65],
+          [  65],
+          [  65],
+          [ -29],
+          [  85]],
+  
+         [[ 100],
+          [ 122],
+          [-112],
+          [ -76],
+          [  65]]], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[-48,  81]]], dtype=int8),
+  'axes': array([1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-105,   59, -101], dtype=int8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 63, 100,  63,  63], dtype=int8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ -2,  -2],
+          [114, 125],
+          [ -2,  -2]],
+  
+         [[ -2, 103],
+          [ -2,  -2],
+          [ -2,  -2]],
+  
+         [[ -2,  -2],
+          [ -2,  -2],
+          [ -2,  -2]]], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ -2,  -2],
+          [114, 125],
+          [ -2,  -2]],
+  
+         [[ -2, 103],
+          [ -2,  -2],
+          [ -2,  -2]],
+  
+         [[ -2,  -2],
+          [ -2,  -2],
+          [ -2,  -2]]], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[114, 114],
+          [114,   0],
+          [114, 114]],
+  
+         [[114, 114],
+          [114, 114],
+          [114, 114]],
+  
+         [[114, 114],
+          [114, 114],
+          [114, 114]]], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[114, 114,   0],
+         [  0, 114, 114],
+         [114, 114, 114]], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[114, 114,   0],
+         [  0, 114, 114],
+         [114, 114, 114]], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [0, 0, 0],
+         [0, 0, 0]], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [3, 0, 0],
+         [0, 0, 0]], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(75, dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 25, -38], dtype=int8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 0, 25], dtype=int8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 2, 25], dtype=int8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=int8), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=int8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=int8),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(100, dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-4281, dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 2730,  2094, 24833, -1764,   255], dtype=int16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[   100],
+          [ -1609],
+          [  1250],
+          [ 10077],
+          [  1250]],
+  
+         [[  1250],
+          [   682],
+          [  1250],
+          [  1250],
+          [  1250]],
+  
+         [[  1250],
+          [  1250],
+          [  1250],
+          [  -278],
+          [  3260]],
+  
+         [[  6722],
+          [ 23379],
+          [-12418],
+          [ -2025],
+          [  1250]]], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[-589, 2594]]], dtype=int16),
+  'axes': array([1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-8168,   955, -6669], dtype=int16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([1184,  100, 1184, 1184], dtype=int16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[  -11,   -11],
+          [14749, 27375],
+          [  -11,   -11]],
+  
+         [[  -11,  7809],
+          [  -11,   -11],
+          [  -11,   -11]],
+  
+         [[  -11,   -11],
+          [  -11,   -11],
+          [  -11,   -11]]], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[  -11,   -11],
+          [14749, 27375],
+          [  -11,   -11]],
+  
+         [[  -11,  7809],
+          [  -11,   -11],
+          [  -11,   -11]],
+  
+         [[  -11,   -11],
+          [  -11,   -11],
+          [  -11,   -11]]], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[14749, 14749],
+          [14749,     0],
+          [14749, 14749]],
+  
+         [[14749, 14749],
+          [14749, 14749],
+          [14749, 14749]],
+  
+         [[14749, 14749],
+          [14749, 14749],
+          [14749, 14749]]], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[14749, 14749,     0],
+         [    0, 14749, 14749],
+         [14749, 14749, 14749]], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[14749, 14749,     0],
+         [    0, 14749, 14749],
+         [14749, 14749, 14749]], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [0, 0, 0],
+         [0, 0, 0]], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [3, 0, 0],
+         [0, 0, 0]], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(1968, dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 245, -398], dtype=int16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  0, 245], dtype=int16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  2, 245], dtype=int16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=int16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=int16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=int16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(100, dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-403111, dtype=int32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([   112200,     55882, 428633083,    -36234,       566], dtype=int32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[      100],
+          [   -28929],
+          [    15842],
+          [  7214303],
+          [    15842]],
+  
+         [[    15842],
+          [     4109],
+          [    15842],
+          [    15842],
+          [    15842]],
+  
+         [[    15842],
+          [    15842],
+          [    15842],
+          [     -672],
+          [   183044]],
+  
+         [[  1689617],
+          [310372124],
+          [-16477719],
+          [   -51283],
+          [    15842]]], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[-3006, 97826]]], dtype=int32),
+  'axes': array([1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-3322373,     8565, -1644744], dtype=int32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([13947,   100, 13947, 13947], dtype=int32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[      -20,       -20],
+          [ 34105628, 736676963],
+          [      -20,       -20]],
+  
+         [[      -20,   2832799],
+          [      -20,       -20],
+          [      -20,       -20]],
+  
+         [[      -20,       -20],
+          [      -20,       -20],
+          [      -20,       -20]]], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[      -20,       -20],
+          [ 34105628, 736676963],
+          [      -20,       -20]],
+  
+         [[      -20,   2832799],
+          [      -20,       -20],
+          [      -20,       -20]],
+  
+         [[      -20,       -20],
+          [      -20,       -20],
+          [      -20,       -20]]], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[34105628, 34105628],
+          [34105628,        0],
+          [34105628, 34105628]],
+  
+         [[34105628, 34105628],
+          [34105628, 34105628],
+          [34105628, 34105628]],
+  
+         [[34105628, 34105628],
+          [34105628, 34105628],
+          [34105628, 34105628]]], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[34105628, 34105628,        0],
+         [       0, 34105628, 34105628],
+         [34105628, 34105628, 34105628]], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[34105628, 34105628,        0],
+         [       0, 34105628, 34105628],
+         [34105628, 34105628, 34105628]], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [0, 0, 0],
+         [0, 0, 0]], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [3, 0, 0],
+         [0, 0, 0]], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(47669, dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  527, -1352], dtype=int32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  0, 527], dtype=int32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  2, 527], dtype=int32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2], dtype=int32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=int32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=int32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int64), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(100), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-9257072), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([        1140070,          392316, 999196080824500,         -206730,
+                     819]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[            100],
+          [        -149105],
+          [          63422],
+          [     2672101620],
+          [          63422]],
+  
+         [[          63422],
+          [          10184],
+          [          63422],
+          [          63422],
+          [          63422]],
+  
+         [[          63422],
+          [          63422],
+          [          63422],
+          [          -1013],
+          [        2484013]],
+  
+         [[      126672100],
+          [245243453663643],
+          [   -19307901072],
+          [        -345078],
+          [          63422]]]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ -6767, 920835]]]),
+  'axes': array([1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-494334304,      27187, -120214006]),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([53104,   100, 53104, 53104]),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[              -24,               -24],
+          [     133366096864, 13698229901859190],
+          [              -24,               -24]],
+  
+         [[              -24,         355555846],
+          [              -24,               -24],
+          [              -24,               -24]],
+  
+         [[              -24,               -24],
+          [              -24,               -24],
+          [              -24,               -24]]]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[              -24,               -24],
+          [     133366096864, 13698229901859190],
+          [              -24,               -24]],
+  
+         [[              -24,         355555846],
+          [              -24,               -24],
+          [              -24,               -24]],
+  
+         [[              -24,               -24],
+          [              -24,               -24],
+          [              -24,               -24]]]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[133366096864, 133366096864],
+          [133366096864,            0],
+          [133366096864, 133366096864]],
+  
+         [[133366096864, 133366096864],
+          [133366096864, 133366096864],
+          [133366096864, 133366096864]],
+  
+         [[133366096864, 133366096864],
+          [133366096864, 133366096864],
+          [133366096864, 133366096864]]]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[133366096864, 133366096864,            0],
+         [           0, 133366096864, 133366096864],
+         [133366096864, 133366096864, 133366096864]]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[133366096864, 133366096864,            0],
+         [           0, 133366096864, 133366096864],
+         [133366096864, 133366096864, 133366096864]]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [0, 0, 0],
+         [0, 0, 0]]), 'axes': None}, attribute_kwargs={}, spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[0, 0, 0],
+         [3, 0, 0],
+         [0, 0, 0]]), 'axes': None}, attribute_kwargs={}, spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(309554), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  750, -2429]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  0, 750]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  2, 750]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2, 2]), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=int64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 4, 5, 0), dtype=int64),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=float16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.], dtype=float16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.], dtype=float16),
+  'axes': array([0])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 0.e+00,  1.e+00, -0.e+00,  1.e-07,  0.e+00], dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(5, 0, 3, 3), dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 0), dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 0, 0, 3), dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(2, 0, 3, 0), dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-0.], dtype=float16),
+  'axes': array([-1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.], dtype=float16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 2, 2, 5), dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 2, 2, 2), dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 2, 2, 2), dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 2, 0, 2), dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 2, 0, 0), dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-0.], dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-0.], dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-0., dtype=float16), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([1.5, 0.1], dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.1, 0.1], dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.1, 0. ], dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0., 0.], dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0., 0.], dtype=float16),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=float32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(6.323757e+16, dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([1.4176679e+15, 1.0000000e+00, 5.0000000e-01], dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 1), dtype=float32),
+  'axes': array([-1])},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 4), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-0., dtype=float32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-6.1035156e-05, -4.2196538e+16, -1.9000000e+00, -5.3105377e+16,
+         -4.2196538e+16], dtype=float32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([6.204453e+16], dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(5.261466e+16, dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[-4.7724800e+16, -5.6579692e+16,            nan,  1.1098308e+16,
+           5.8715102e+16],
+         [ 1.1098308e+16, -6.0929948e+16, -2.9794551e+16, -4.6560022e+16,
+           6.0000002e-01],
+         [ 3.9620085e+16,  1.1098308e+16, -3.0105008e+16, -0.0000000e+00,
+           2.5049675e+16],
+         [ 1.0679205e+16, -3.4904267e+16,  1.1098308e+16,  7.0464683e+15,
+           1.1098308e+16],
+         [-0.0000000e+00, -0.0000000e+00,  0.0000000e+00,  1.1098308e+16,
+           1.1098308e+16]], dtype=float32), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-4.77248e+16, dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(5, 2, 0, 3), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(5, 3, 0, 3), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(3, 3, 0, 3), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(3, 3, 0, 3), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(3, 3, 0, 0), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 3, 0, 0), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 0, 0, 0), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(1.8446743e+19, dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(2, 0), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 0), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 5, 2, 3), dtype=float32),
+  'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0.), 'axes': None},
+ attribute_kwargs={},
+ spox_fun=squeeze)
+MLX error: float64 is not supported on the GPU at /private/tmp/mlx-c-20260708-16897-ls7m4o/mlx-c-0.6.0/mlx/c/ops.cpp:3504

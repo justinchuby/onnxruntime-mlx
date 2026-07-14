@@ -1,0 +1,1457 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+hypothesis profile 'onnx-tests-with-verbose-verbosity' -> deadline=None, max_examples=25, verbosity=Verbosity.verbose
+rootdir: /Users/justinc/Documents/GitHub/onnx-tests
+configfile: pyproject.toml
+plugins: xdist-3.8.0, hypothesis-6.155.7
+collected 1198 items / 1185 deselected / 13 selected
+
+tests/test_manipulation_functions.py Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[207, 207, 207, 207, 141]],
+  
+          [[229, 207, 207, 207, 207]],
+  
+          [[207, 207, 207, 207, 207]]],
+  
+  
+         [[[207, 207, 207, 207, 247]],
+  
+          [[207, 207, 207, 126, 207]],
+  
+          [[207, 207, 207, 207, 207]]],
+  
+  
+         [[[207, 207, 207, 207, 156]],
+  
+          [[207, 207, 207, 207, 207]],
+  
+          [[207, 207, 207, 111, 207]]],
+  
+  
+         [[[207, 207, 207, 113, 207]],
+  
+          [[207, 207, 207, 207, 207]],
+  
+          [[207, 207, 140, 207, 207]]]], dtype=uint8),
+  'indices': array([-1,  0, -4])},
+ attribute_kwargs={'axis': 3},
+ spox_fun=gather)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[126,  29, 199,  76,  29],
+          [ 55,  96, 126, 100,  56]]], dtype=uint8),
+  'indices': array([[-2,  0,  1,  0, -2],
+         [ 0,  0,  0,  0, -2],
+         [-2,  0,  1,  0,  0]], dtype=int32)},
+ attribute_kwargs={'axis': -2},
+ spox_fun=gather)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+F
+
+=================================== FAILURES ===================================
+__________________________ test_Gather_13[v17-uint8] ___________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:76: in test_fun
+    state = data.draw(strategy_factory(dtype, op))
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+E           Falsifying example: test_fun(
+E               op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E               dtype=dtype('uint8'),
+E               data=data(...),
+E           )
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+---------------------------------- Hypothesis ----------------------------------
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[207, 207, 207, 207, 141]],
+  
+          [[229, 207, 207, 207, 207]],
+  
+          [[207, 207, 207, 207, 207]]],
+  
+  
+         [[[207, 207, 207, 207, 247]],
+  
+          [[207, 207, 207, 126, 207]],
+  
+          [[207, 207, 207, 207, 207]]],
+  
+  
+         [[[207, 207, 207, 207, 156]],
+  
+          [[207, 207, 207, 207, 207]],
+  
+          [[207, 207, 207, 111, 207]]],
+  
+  
+         [[[207, 207, 207, 113, 207]],
+  
+          [[207, 207, 207, 207, 207]],
+  
+          [[207, 207, 140, 207, 207]]]], dtype=uint8),
+  'indices': array([-1,  0, -4])},
+ attribute_kwargs={'axis': 3},
+ spox_fun=gather)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[126,  29, 199,  76,  29],
+          [ 55,  96, 126, 100,  56]]], dtype=uint8),
+  'indices': array([[-2,  0,  1,  0, -2],
+         [ 0,  0,  0,  0, -2],
+         [-2,  0,  1,  0,  0]], dtype=int32)},
+ attribute_kwargs={'axis': -2},
+ spox_fun=gather)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+data = data(...)
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint8')
+
+    @given(data=st.data())
+    @pytest.mark.parametrize(
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+    def test_fun(data: st.DataObject, op, dtype):
+>       state = data.draw(strategy_factory(dtype, op))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/utils.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:2394: in draw
+    result = self.conjecture_data.draw(strategy, observe_as=f"generate:{desc}")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1218: in draw
+    v = unwrapped.do_draw(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/core.py:1996: in do_draw
+    return self.definition(data.draw, *self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnx_tests/manipulation_functions.py:353: in gather
+    indices = draw(
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/conjecture/data.py:1187: in draw
+    strategy.validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/strategies.py:526: in validate
+    self.do_validate()
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:146: in do_validate
+    w = self.wrapped_strategy
+        ^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:113: in wrapped_strategy
+    k: unwrap_strategies(v) for k, v in self.__kwargs.items()
+       ^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:45: in unwrap_strategies
+    result = unwrap_strategies(s.wrapped_strategy)
+                               ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/lazy.py:116: in wrapped_strategy
+    base = self.function(*self.__args, **self.__kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/strategies/_internal/numbers.py:126: in integers
+    check_valid_interval(min_value, max_value, "min_value", "max_value")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+lower_bound = 0, upper_bound = -1, lower_name = 'min_value'
+upper_name = 'max_value'
+
+    @check_function
+    def check_valid_interval(lower_bound, upper_bound, lower_name, upper_name):
+        """Checks that lower_bound and upper_bound are either unspecified, or they
+        define a valid interval on the number line.
+    
+        Otherwise raises InvalidArgument.
+        """
+        if lower_bound is None or upper_bound is None:
+            return
+        if upper_bound < lower_bound:
+>           raise InvalidArgument(
+                f"Cannot have {upper_name}={upper_bound!r} < {lower_name}={lower_bound!r}"
+            )
+E           hypothesis.errors.InvalidArgument: Cannot have max_value=-1 < min_value=0
+E           while generating 'Draw 1' from gather(dtype=dtype('uint8'), op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>)
+
+.pixi/envs/default/lib/python3.14/site-packages/hypothesis/internal/validation.py:118: InvalidArgument
+=========================== short test summary info ============================
+FAILED tests/test_manipulation_functions.py::test_Gather_13[v17-uint8] - hypo...
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+====================== 1 failed, 1185 deselected in 1.25s ======================

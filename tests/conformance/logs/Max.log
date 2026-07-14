@@ -1,0 +1,324 @@
+.F...F.....                                                              [100%]
+=================================== FAILURES ===================================
+___________________________ test_Max_13[v17-uint16] ____________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint16')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x302196210>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('uint16'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data_0': [array([], dtype=uint16),
+E          array([0], dtype=uint16)]},
+E        attribute_kwargs={},
+E        spox_fun=max)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:529
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:03:43.712 python[7965:2474853] 2026-07-13 17:03:43.712111 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:43.825 python[7965:2474853] 2026-07-13 17:03:43.825400 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:43.848 python[7965:2474853] 2026-07-13 17:03:43.848408 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:43.878 python[7965:2474853] 2026-07-13 17:03:43.878292 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:43.901 python[7965:2474853] 2026-07-13 17:03:43.901190 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:43.925 python[7965:2474853] 2026-07-13 17:03:43.925432 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:43.950 python[7965:2474853] 2026-07-13 17:03:43.950180 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:43.972 python[7965:2474853] 2026-07-13 17:03:43.972910 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.234 python[7965:2474853] 2026-07-13 17:03:44.234657 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.256 python[7965:2474853] 2026-07-13 17:03:44.256503 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.299 python[7965:2474853] 2026-07-13 17:03:44.299861 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.324 python[7965:2474853] 2026-07-13 17:03:44.324885 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.465 python[7965:2474853] 2026-07-13 17:03:44.465677 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.558 python[7965:2474853] 2026-07-13 17:03:44.558152 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.594 python[7965:2474853] 2026-07-13 17:03:44.594058 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.617 python[7965:2474853] 2026-07-13 17:03:44.617112 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.639 python[7965:2474853] 2026-07-13 17:03:44.639498 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.674 python[7965:2474853] 2026-07-13 17:03:44.674234 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.695 python[7965:2474853] 2026-07-13 17:03:44.695810 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.730 python[7965:2474853] 2026-07-13 17:03:44.730839 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.753 python[7965:2474853] 2026-07-13 17:03:44.752997 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.788 python[7965:2474853] 2026-07-13 17:03:44.788519 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.822 python[7965:2474853] 2026-07-13 17:03:44.822873 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.857 python[7965:2474853] 2026-07-13 17:03:44.857147 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:44.891 python[7965:2474853] 2026-07-13 17:03:44.891207 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.062 python[7965:2474853] 2026-07-13 17:03:45.062475 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+____________________________ test_Max_13[v17-int16] ____________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('int16')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x302196210>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('int16'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data_0': [array([], dtype=int16),
+E          array([0], dtype=int16)]},
+E        attribute_kwargs={},
+E        spox_fun=max)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:529
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:03:45.400 python[7965:2474853] 2026-07-13 17:03:45.400240 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.482 python[7965:2474853] 2026-07-13 17:03:45.482230 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.505 python[7965:2474853] 2026-07-13 17:03:45.504996 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.533 python[7965:2474853] 2026-07-13 17:03:45.533619 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.556 python[7965:2474853] 2026-07-13 17:03:45.556967 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.580 python[7965:2474853] 2026-07-13 17:03:45.580183 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.603 python[7965:2474853] 2026-07-13 17:03:45.603284 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.626 python[7965:2474853] 2026-07-13 17:03:45.626050 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.893 python[7965:2474853] 2026-07-13 17:03:45.893387 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.917 python[7965:2474853] 2026-07-13 17:03:45.917365 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.958 python[7965:2474853] 2026-07-13 17:03:45.958208 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:45.984 python[7965:2474853] 2026-07-13 17:03:45.984146 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.102 python[7965:2474853] 2026-07-13 17:03:46.102672 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.192 python[7965:2474853] 2026-07-13 17:03:46.192109 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.225 python[7965:2474853] 2026-07-13 17:03:46.225550 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.246 python[7965:2474853] 2026-07-13 17:03:46.246892 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.268 python[7965:2474853] 2026-07-13 17:03:46.268549 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.302 python[7965:2474853] 2026-07-13 17:03:46.302695 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.324 python[7965:2474853] 2026-07-13 17:03:46.324499 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.357 python[7965:2474853] 2026-07-13 17:03:46.357823 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.380 python[7965:2474853] 2026-07-13 17:03:46.380948 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.414 python[7965:2474853] 2026-07-13 17:03:46.414941 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.448 python[7965:2474853] 2026-07-13 17:03:46.448801 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.482 python[7965:2474853] 2026-07-13 17:03:46.482310 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.568 python[7965:2474853] 2026-07-13 17:03:46.568752 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+2026-07-13 17:03:46.738 python[7965:2474853] 2026-07-13 17:03:46.738278 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Max node with name 'Max_0' is not set.
+=========================== short test summary info ============================
+FAILED tests/test_statistical.py::test_Max_13[v17-uint16] - onnxruntime.capi....
+FAILED tests/test_statistical.py::test_Max_13[v17-int16] - onnxruntime.capi.o...
+2 failed, 9 passed, 1187 deselected in 4.25s

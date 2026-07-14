@@ -1,0 +1,280 @@
+...FF..                                                                  [100%]
+=================================== FAILURES ===================================
+___________________________ test_Relu_14[v17-int16] ____________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('int16')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x161e81220>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('int16'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs=[array([], dtype=int16)],
+E        attribute_kwargs={},
+E        spox_fun=relu)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:03:54.526 python[8046:2478244] 2026-07-13 17:03:54.526533 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.580 python[8046:2478244] 2026-07-13 17:03:54.580596 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.601 python[8046:2478244] 2026-07-13 17:03:54.601804 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.622 python[8046:2478244] 2026-07-13 17:03:54.622449 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.650 python[8046:2478244] 2026-07-13 17:03:54.650071 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.670 python[8046:2478244] 2026-07-13 17:03:54.670754 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.691 python[8046:2478244] 2026-07-13 17:03:54.691521 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.716 python[8046:2478244] 2026-07-13 17:03:54.716089 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+___________________________ test_Relu_14[v17-int64] ____________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('int64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x161e83980>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('int64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs=[array([], dtype=int64)],
+E        attribute_kwargs={},
+E        spox_fun=relu)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:03:54.754 python[8046:2478244] 2026-07-13 17:03:54.754349 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.775 python[8046:2478244] 2026-07-13 17:03:54.775937 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.797 python[8046:2478244] 2026-07-13 17:03:54.797306 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.818 python[8046:2478244] 2026-07-13 17:03:54.818955 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.846 python[8046:2478244] 2026-07-13 17:03:54.846965 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.868 python[8046:2478244] 2026-07-13 17:03:54.868423 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.888 python[8046:2478244] 2026-07-13 17:03:54.888828 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+2026-07-13 17:03:54.912 python[8046:2478244] 2026-07-13 17:03:54.912350 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Relu node with name 'Relu_0' is not set.
+=========================== short test summary info ============================
+FAILED tests/test_elementwise.py::test_Relu_14[v17-int16] - onnxruntime.capi....
+FAILED tests/test_elementwise.py::test_Relu_14[v17-int64] - onnxruntime.capi....
+2 failed, 5 passed, 1191 deselected in 1.41s

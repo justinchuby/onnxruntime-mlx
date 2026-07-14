@@ -1,0 +1,924 @@
+.FFFFF......F                                                            [100%]
+=================================== FAILURES ===================================
+__________________________ test_Where_16[v17-uint16] ___________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint16')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x15a2458b0>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('uint16'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'condition': array([False]),
+E         'X': array([0, 0], dtype=uint16),
+E         'Y': array(0, dtype=uint16)},
+E        attribute_kwargs={},
+E        spox_fun=where)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:529
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:28.119 python[8381:2490930] 2026-07-13 17:04:28.119327 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.173 python[8381:2490930] 2026-07-13 17:04:28.173283 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.196 python[8381:2490930] 2026-07-13 17:04:28.196104 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.248 python[8381:2490930] 2026-07-13 17:04:28.248715 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.275 python[8381:2490930] 2026-07-13 17:04:28.275913 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.297 python[8381:2490930] 2026-07-13 17:04:28.297945 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.319 python[8381:2490930] 2026-07-13 17:04:28.319602 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.490 python[8381:2490930] 2026-07-13 17:04:28.490870 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.535 python[8381:2490930] 2026-07-13 17:04:28.535678 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.658 python[8381:2490930] 2026-07-13 17:04:28.658083 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+__________________________ test_Where_16[v17-uint32] ___________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x15a2455e0>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('uint32'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'condition': array([False]),
+E         'X': array([0, 0], dtype=uint32),
+E         'Y': array(0, dtype=uint32)},
+E        attribute_kwargs={},
+E        spox_fun=where)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:529
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:28.733 python[8381:2490930] 2026-07-13 17:04:28.733903 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.757 python[8381:2490930] 2026-07-13 17:04:28.757084 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.779 python[8381:2490930] 2026-07-13 17:04:28.779668 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.832 python[8381:2490930] 2026-07-13 17:04:28.832684 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.861 python[8381:2490930] 2026-07-13 17:04:28.861173 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.883 python[8381:2490930] 2026-07-13 17:04:28.883486 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:28.906 python[8381:2490930] 2026-07-13 17:04:28.906232 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.083 python[8381:2490930] 2026-07-13 17:04:29.083666 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.130 python[8381:2490930] 2026-07-13 17:04:29.130036 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.251 python[8381:2490930] 2026-07-13 17:04:29.251562 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+__________________________ test_Where_16[v17-uint64] ___________________________
+  + Exception Group Traceback (most recent call last):
+  |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 72, in test_fun
+  |     @pytest.mark.parametrize(
+  |                ^^^^^^^^^^^^
+  |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/hypothesis/core.py", line 2274, in wrapped_test
+  |     raise the_error_hypothesis_found
+  | ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 79, in test_fun
+    |     candidate = run_candidate(model)
+    |   File "/Users/justinc/Documents/GitHub/onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py", line 138, in run_mlx
+    |     sess = ort.InferenceSession(
+    |         model.SerializeToString(),
+    |         sess_options=opt,
+    |         providers=[_EP_NAME, "CPUExecutionProvider"],
+    |     )
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 528, in __init__
+    |     self._create_inference_session(providers, provider_options, disabled_optimizers)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 634, in _create_inference_session
+    |     sess.initialize_session(providers, provider_options, disabled_optimizers)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+    | 
+    | Falsifying example: test_fun(
+    |     op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    |     dtype=dtype('uint64'),
+    |     data=data(...),
+    | )
+    | Draw 1: TestCaseDraw(inputs={'condition': array([False]),
+    |   'X': array([0, 0], dtype=uint64),
+    |   'Y': array(0, dtype=uint64)},
+    |  attribute_kwargs={},
+    |  spox_fun=where)
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 320, in run
+    |     return self._sess.run(output_names, input_feed, run_options)
+    |            ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | onnxruntime.capi.onnxruntime_pybind11_state.EPFail: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+    | 
+    | During handling of the above exception, another exception occurred:
+    | 
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 79, in test_fun
+    |     candidate = run_candidate(model)
+    |   File "/Users/justinc/Documents/GitHub/onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py", line 144, in run_mlx
+    |     result = {k: v for k, v in zip(output_names, sess.run(None, {}))}
+    |                                                  ~~~~~~~~^^^^^^^^^^
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 325, in run
+    |     self.set_providers(self._fallback_providers)
+    |     ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 275, in set_providers
+    |     self._reset_session(providers, provider_options)
+    |     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 668, in _reset_session
+    |     self._create_inference_session(providers, provider_options)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 634, in _create_inference_session
+    |     sess.initialize_session(providers, provider_options, disabled_optimizers)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | onnxruntime.capi.onnxruntime_pybind11_state.NotImplemented: [ONNXRuntimeError] : 9 : NOT_IMPLEMENTED : Could not find an implementation for Where(16) node with name 'Where_0'
+    | Falsifying example: test_fun(
+    |     op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    |     dtype=dtype('uint64'),
+    |     data=data(...),
+    | )
+    | Draw 1: TestCaseDraw(inputs={'condition': array(False),
+    |   'X': array(0, dtype=uint64),
+    |   'Y': array(0, dtype=uint64)},
+    |  attribute_kwargs={},
+    |  spox_fun=where)
+    +------------------------------------
+----------------------------- Captured stdout call -----------------------------
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:29.290 python[8381:2490930] 2026-07-13 17:04:29.290194 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.325 python[8381:2490930] 2026-07-13 17:04:29.325915 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.348 python[8381:2490930] 2026-07-13 17:04:29.348103 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.370 python[8381:2490930] 2026-07-13 17:04:29.370033 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.393 python[8381:2490930] 2026-07-13 17:04:29.393386 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.427 python[8381:2490930] 2026-07-13 17:04:29.427417 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.461 python[8381:2490930] 2026-07-13 17:04:29.461602 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.495 python[8381:2490930] 2026-07-13 17:04:29.495061 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.527 python[8381:2490930] 2026-07-13 17:04:29.527662 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.560 python[8381:2490930] 2026-07-13 17:04:29.560254 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.594 python[8381:2490930] 2026-07-13 17:04:29.594618 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.627 python[8381:2490930] 2026-07-13 17:04:29.627940 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.656 python[8381:2490930] 2026-07-13 17:04:29.656461 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.691 python[8381:2490930] 2026-07-13 17:04:29.691172 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.712 python[8381:2490930] 2026-07-13 17:04:29.712536 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.733 python[8381:2490930] 2026-07-13 17:04:29.733579 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:29.757 python[8381:2490930] 2026-07-13 17:04:29.757403 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.792 python[8381:2490930] 2026-07-13 17:04:29.792931 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.863 python[8381:2490930] 2026-07-13 17:04:29.863342 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.898 python[8381:2490930] 2026-07-13 17:04:29.898483 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:29.995 python[8381:2490930] 2026-07-13 17:04:29.995303 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.031 python[8381:2490930] 2026-07-13 17:04:30.031595 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.066 python[8381:2490930] 2026-07-13 17:04:30.066944 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.100 python[8381:2490930] 2026-07-13 17:04:30.100217 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.134 python[8381:2490930] 2026-07-13 17:04:30.134560 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:30.156 python[8381:2490930] 2026-07-13 17:04:30.156599 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.191 python[8381:2490930] 2026-07-13 17:04:30.191091 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.225 python[8381:2490930] 2026-07-13 17:04:30.225682 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.260 python[8381:2490930] 2026-07-13 17:04:30.260561 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.293 python[8381:2490930] 2026-07-13 17:04:30.293296 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:30.316 python[8381:2490930] 2026-07-13 17:04:30.316248 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.350 python[8381:2490930] 2026-07-13 17:04:30.350528 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.383 python[8381:2490930] 2026-07-13 17:04:30.383712 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.419 python[8381:2490930] 2026-07-13 17:04:30.419533 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.455 python[8381:2490930] 2026-07-13 17:04:30.455164 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.489 python[8381:2490930] 2026-07-13 17:04:30.489466 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.525 python[8381:2490930] 2026-07-13 17:04:30.525587 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.564 python[8381:2490930] 2026-07-13 17:04:30.564591 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.600 python[8381:2490930] 2026-07-13 17:04:30.600952 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.658 python[8381:2490930] 2026-07-13 17:04:30.658632 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+2026-07-13 17:04:30.695 python[8381:2490930] 2026-07-13 17:04:30.695474 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:30.714 python[8381:2490930] 2026-07-13 17:04:30.714824 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_1007744695259494238_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_1007744695259494238_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for Where_0_output
+___________________________ test_Where_16[v17-int8] ____________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('int8')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x16213e990>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('int8'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'condition': array([False]),
+E         'X': array([0, 0], dtype=int8),
+E         'Y': array(0, dtype=int8)},
+E        attribute_kwargs={},
+E        spox_fun=where)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:529
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:30.755 python[8381:2490930] 2026-07-13 17:04:30.755724 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:30.776 python[8381:2490930] 2026-07-13 17:04:30.776500 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:30.798 python[8381:2490930] 2026-07-13 17:04:30.798159 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:30.851 python[8381:2490930] 2026-07-13 17:04:30.851479 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:30.878 python[8381:2490930] 2026-07-13 17:04:30.878950 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:30.900 python[8381:2490930] 2026-07-13 17:04:30.900477 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:30.921 python[8381:2490930] 2026-07-13 17:04:30.921523 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.089 python[8381:2490930] 2026-07-13 17:04:31.089056 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.131 python[8381:2490930] 2026-07-13 17:04:31.131545 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.265 python[8381:2490930] 2026-07-13 17:04:31.265953 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+___________________________ test_Where_16[v17-int16] ___________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('int16')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x15e83e210>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('int16'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'condition': array([False]),
+E         'X': array([0, 0], dtype=int16),
+E         'Y': array(0, dtype=int16)},
+E        attribute_kwargs={},
+E        spox_fun=where)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:529
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:31.310 python[8381:2490930] 2026-07-13 17:04:31.310581 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.384 python[8381:2490930] 2026-07-13 17:04:31.384289 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.405 python[8381:2490930] 2026-07-13 17:04:31.405419 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.456 python[8381:2490930] 2026-07-13 17:04:31.456525 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.483 python[8381:2490930] 2026-07-13 17:04:31.483864 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.504 python[8381:2490930] 2026-07-13 17:04:31.504152 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.525 python[8381:2490930] 2026-07-13 17:04:31.525565 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.687 python[8381:2490930] 2026-07-13 17:04:31.687275 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.733 python[8381:2490930] 2026-07-13 17:04:31.733643 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:31.850 python[8381:2490930] 2026-07-13 17:04:31.849986 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+___________________________ test_Where_16[v17-bool] ____________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('bool')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x15e83d310>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('bool'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'condition': array([False]),
+E         'X': array([False, False]),
+E         'Y': array(False)},
+E        attribute_kwargs={},
+E        spox_fun=where)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:529
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:32.393 python[8381:2490930] 2026-07-13 17:04:32.393003 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.414 python[8381:2490930] 2026-07-13 17:04:32.414686 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.434 python[8381:2490930] 2026-07-13 17:04:32.434714 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.454 python[8381:2490930] 2026-07-13 17:04:32.454911 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.506 python[8381:2490930] 2026-07-13 17:04:32.506231 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.526 python[8381:2490930] 2026-07-13 17:04:32.526793 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.546 python[8381:2490930] 2026-07-13 17:04:32.546932 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.567 python[8381:2490930] 2026-07-13 17:04:32.567230 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.588 python[8381:2490930] 2026-07-13 17:04:32.588088 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.610 python[8381:2490930] 2026-07-13 17:04:32.610538 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.631 python[8381:2490930] 2026-07-13 17:04:32.630996 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.651 python[8381:2490930] 2026-07-13 17:04:32.651349 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.671 python[8381:2490930] 2026-07-13 17:04:32.671522 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.693 python[8381:2490930] 2026-07-13 17:04:32.693709 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.714 python[8381:2490930] 2026-07-13 17:04:32.714150 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.734 python[8381:2490930] 2026-07-13 17:04:32.734663 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.755 python[8381:2490930] 2026-07-13 17:04:32.755505 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.775 python[8381:2490930] 2026-07-13 17:04:32.775618 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.932 python[8381:2490930] 2026-07-13 17:04:32.932644 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:32.976 python[8381:2490930] 2026-07-13 17:04:32.976683 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+2026-07-13 17:04:33.086 python[8381:2490930] 2026-07-13 17:04:33.086632 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Where node with name 'Where_0' is not set.
+=========================== short test summary info ============================
+FAILED tests/test_searching.py::test_Where_16[v17-uint16] - onnxruntime.capi....
+FAILED tests/test_searching.py::test_Where_16[v17-uint32] - onnxruntime.capi....
+FAILED tests/test_searching.py::test_Where_16[v17-uint64] - ExceptionGroup: H...
+FAILED tests/test_searching.py::test_Where_16[v17-int8] - onnxruntime.capi.on...
+FAILED tests/test_searching.py::test_Where_16[v17-int16] - onnxruntime.capi.o...
+FAILED tests/test_searching.py::test_Where_16[v17-bool] - onnxruntime.capi.on...
+6 failed, 7 passed, 1185 deselected in 5.71s

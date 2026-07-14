@@ -1,0 +1,497 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+__________________________ test_Gelu_20[v20-float16] ___________________________
+
+self = <onnx.reference.reference_evaluator.ReferenceEvaluator object at 0x15d9ebce0>
+
+    def _init(self) -> None:
+        """Loads the implementation for every node in the graph."""
+        self.rt_inits_ = {}
+        self.rt_nodes_ = []
+        for init in self.inits_:
+            self.rt_inits_[init.name] = (
+                self.retrieve_external_data(init)
+                if onnx.external_data_helper.uses_external_data(init)
+                else onnx.numpy_helper.to_array(init)
+            )
+        run_params = {
+            "log": lambda pattern, *args: self._log(10, pattern, *args),
+            "opsets": self.opsets,
+            "verbose": self.verbose,
+            "new_ops": self.new_ops_,
+            "existing_functions": self.functions_.copy(),
+            "evaluator_cls": self.__class__,
+        }
+        if self.input_types_:
+            all_types = {i.name: i.type for i in self.onnx_graph_.input}
+            if hasattr(self.proto_, "value_info"):
+                for shape_type in self.proto_.value_info:
+                    all_types[shape_type.name] = shape_type.type
+            self.all_types_ = all_types
+        else:
+            self.all_types_ = None
+    
+        for node in self.nodes_:
+            try:
+>               cl = self._load_impl(node)
+                     ^^^^^^^^^^^^^^^^^^^^^
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:424: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:479: in _load_impl
+    return load_op(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+domain = '', op_type = 'Gelu', version = 20, custom = None, node = None
+input_types = None, expand = False
+evaluator_cls = <class 'onnx.reference.reference_evaluator.ReferenceEvaluator'>
+
+    def load_op(
+        domain: str,
+        op_type: str,
+        version: None | int = None,
+        custom: Any = None,
+        node: None | NodeProto = None,
+        input_types: None | list[TypeProto] = None,
+        expand: bool = False,
+        evaluator_cls: type | None = None,
+    ) -> Any:
+        """Loads the implemented for a specified operator.
+    
+        Args:
+            domain: domain
+            op_type: operator type
+            version: requested version
+            custom: custom implementation (like a function)
+            node: used if no implementation was found and the operator
+                defines a function which is context dependent
+            input_types: used if no implementation was found and the
+                operator defines a function which is context dependent
+            expand: use the function implemented in the schema instead of
+                its reference implementation
+            evaluator_cls: evaluator to use
+    
+        Returns:
+            class
+        """
+        global _registered_operators  # noqa: PLW0603
+        schema = None
+        if _registered_operators is None:
+            _registered_operators = _build_registered_operators()  # type: ignore[assignment]
+        assert _registered_operators is not None
+        if custom is not None:
+            return lambda *args: OpFunction(*args, impl=custom)
+        if version is None:
+            version = onnx_opset_version()
+        if domain != "":
+            raise ValueError(f"Domain must be '' not {domain!r}.")
+        if op_type in _registered_operators and not expand:
+            found = True
+        else:
+            # maybe the operator can be replaced by a function
+            try:
+                schema = get_schema(op_type, version, domain)
+            except SchemaError:
+                raise NotImplementedError(
+                    f"No registered schema for operator {op_type!r} "
+                    f"and domain {domain!r}. Did you recompile the sources after updating the repository?"
+                ) from None
+            if schema.has_function:
+                body = schema.function_body
+                assert evaluator_cls is not None, (
+                    f"evaluator_cls must be specified to implement operator {op_type!r} from domain {domain!r}"
+                )
+                sess = evaluator_cls(body)
+                return lambda *args, sess=sess: OpFunction(*args, impl=sess)
+            if schema.has_context_dependent_function:
+                if node is None or input_types is None:
+>                   raise RuntimeContextError(
+                        f"No registered implementation for operator {op_type!r} "
+                        f"and domain {domain!r}, the operator has a context dependent function. "
+                        f"but argument node or input_types is not defined (input_types={input_types})."
+                    )
+E                   onnx.reference.op_run.RuntimeContextError: No registered implementation for operator 'Gelu' and domain '', the operator has a context dependent function. but argument node or input_types is not defined (input_types=None).
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/_op_list.py:558: RuntimeContextError
+
+The above exception was the direct cause of the following exception:
+
+op = <module 'spox.opset.ai.onnx.v20' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v20.py'>
+dtype = dtype('float16')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:80: in test_fun
+    expected = run_reference(model)
+               ^^^^^^^^^^^^^^^^^^^^
+onnx_tests/runtime_wrappers.py:33: in run_reference
+    sess = ReferenceEvaluator(model, optimized=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:305: in __init__
+    self._init()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnx.reference.reference_evaluator.ReferenceEvaluator object at 0x15d9ebce0>
+
+    def _init(self) -> None:
+        """Loads the implementation for every node in the graph."""
+        self.rt_inits_ = {}
+        self.rt_nodes_ = []
+        for init in self.inits_:
+            self.rt_inits_[init.name] = (
+                self.retrieve_external_data(init)
+                if onnx.external_data_helper.uses_external_data(init)
+                else onnx.numpy_helper.to_array(init)
+            )
+        run_params = {
+            "log": lambda pattern, *args: self._log(10, pattern, *args),
+            "opsets": self.opsets,
+            "verbose": self.verbose,
+            "new_ops": self.new_ops_,
+            "existing_functions": self.functions_.copy(),
+            "evaluator_cls": self.__class__,
+        }
+        if self.input_types_:
+            all_types = {i.name: i.type for i in self.onnx_graph_.input}
+            if hasattr(self.proto_, "value_info"):
+                for shape_type in self.proto_.value_info:
+                    all_types[shape_type.name] = shape_type.type
+            self.all_types_ = all_types
+        else:
+            self.all_types_ = None
+    
+        for node in self.nodes_:
+            try:
+                cl = self._load_impl(node)
+            except op_run.RuntimeContextError as e:
+                # A node has a context dependent implementation.
+                # Shape inference must be run to get the input types.
+                if self.all_types_:
+                    it = [self.get_result_types(i, exc=False) for i in node.input]
+                    if None in it:
+                        # One input does not exist. It must be done while executing the graph.
+                        def cl(*args, parent=self):
+                            return op_run.OpFunctionContextDependant(
+                                *args, parent=parent
+                            )
+                    else:
+                        cl = self._load_impl(node, it)
+                else:
+>                   raise op_run.RuntimeContextError(
+                        f"No implementation was found for node type {node.op_type!r} from domain {node.domain!r}. "
+                        f"If this node has a context dependent implementation, you should run function infer_shapes "
+                        f"before calling ReferenceEvaluator."
+                    ) from e
+E                   onnx.reference.op_run.RuntimeContextError: No implementation was found for node type 'Gelu' from domain ''. If this node has a context dependent implementation, you should run function infer_shapes before calling ReferenceEvaluator.
+E                   Falsifying example: test_fun(
+E                       op=<module 'spox.opset.ai.onnx.v20' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v20.py'>,
+E                       dtype=dtype('float16'),
+E                       data=data(...),
+E                   )
+E                   Draw 1: TestCaseDraw(inputs=[array([], dtype=float16)],
+E                    attribute_kwargs={'approximate': 'none'},
+E                    spox_fun=gelu)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:439: RuntimeContextError
+__________________________ test_Gelu_20[v20-float32] ___________________________
+
+self = <onnx.reference.reference_evaluator.ReferenceEvaluator object at 0x165bf60b0>
+
+    def _init(self) -> None:
+        """Loads the implementation for every node in the graph."""
+        self.rt_inits_ = {}
+        self.rt_nodes_ = []
+        for init in self.inits_:
+            self.rt_inits_[init.name] = (
+                self.retrieve_external_data(init)
+                if onnx.external_data_helper.uses_external_data(init)
+                else onnx.numpy_helper.to_array(init)
+            )
+        run_params = {
+            "log": lambda pattern, *args: self._log(10, pattern, *args),
+            "opsets": self.opsets,
+            "verbose": self.verbose,
+            "new_ops": self.new_ops_,
+            "existing_functions": self.functions_.copy(),
+            "evaluator_cls": self.__class__,
+        }
+        if self.input_types_:
+            all_types = {i.name: i.type for i in self.onnx_graph_.input}
+            if hasattr(self.proto_, "value_info"):
+                for shape_type in self.proto_.value_info:
+                    all_types[shape_type.name] = shape_type.type
+            self.all_types_ = all_types
+        else:
+            self.all_types_ = None
+    
+        for node in self.nodes_:
+            try:
+>               cl = self._load_impl(node)
+                     ^^^^^^^^^^^^^^^^^^^^^
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:424: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:479: in _load_impl
+    return load_op(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+domain = '', op_type = 'Gelu', version = 20, custom = None, node = None
+input_types = None, expand = False
+evaluator_cls = <class 'onnx.reference.reference_evaluator.ReferenceEvaluator'>
+
+    def load_op(
+        domain: str,
+        op_type: str,
+        version: None | int = None,
+        custom: Any = None,
+        node: None | NodeProto = None,
+        input_types: None | list[TypeProto] = None,
+        expand: bool = False,
+        evaluator_cls: type | None = None,
+    ) -> Any:
+        """Loads the implemented for a specified operator.
+    
+        Args:
+            domain: domain
+            op_type: operator type
+            version: requested version
+            custom: custom implementation (like a function)
+            node: used if no implementation was found and the operator
+                defines a function which is context dependent
+            input_types: used if no implementation was found and the
+                operator defines a function which is context dependent
+            expand: use the function implemented in the schema instead of
+                its reference implementation
+            evaluator_cls: evaluator to use
+    
+        Returns:
+            class
+        """
+        global _registered_operators  # noqa: PLW0603
+        schema = None
+        if _registered_operators is None:
+            _registered_operators = _build_registered_operators()  # type: ignore[assignment]
+        assert _registered_operators is not None
+        if custom is not None:
+            return lambda *args: OpFunction(*args, impl=custom)
+        if version is None:
+            version = onnx_opset_version()
+        if domain != "":
+            raise ValueError(f"Domain must be '' not {domain!r}.")
+        if op_type in _registered_operators and not expand:
+            found = True
+        else:
+            # maybe the operator can be replaced by a function
+            try:
+                schema = get_schema(op_type, version, domain)
+            except SchemaError:
+                raise NotImplementedError(
+                    f"No registered schema for operator {op_type!r} "
+                    f"and domain {domain!r}. Did you recompile the sources after updating the repository?"
+                ) from None
+            if schema.has_function:
+                body = schema.function_body
+                assert evaluator_cls is not None, (
+                    f"evaluator_cls must be specified to implement operator {op_type!r} from domain {domain!r}"
+                )
+                sess = evaluator_cls(body)
+                return lambda *args, sess=sess: OpFunction(*args, impl=sess)
+            if schema.has_context_dependent_function:
+                if node is None or input_types is None:
+>                   raise RuntimeContextError(
+                        f"No registered implementation for operator {op_type!r} "
+                        f"and domain {domain!r}, the operator has a context dependent function. "
+                        f"but argument node or input_types is not defined (input_types={input_types})."
+                    )
+E                   onnx.reference.op_run.RuntimeContextError: No registered implementation for operator 'Gelu' and domain '', the operator has a context dependent function. but argument node or input_types is not defined (input_types=None).
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/_op_list.py:558: RuntimeContextError
+
+The above exception was the direct cause of the following exception:
+
+op = <module 'spox.opset.ai.onnx.v20' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v20.py'>
+dtype = dtype('float32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:80: in test_fun
+    expected = run_reference(model)
+               ^^^^^^^^^^^^^^^^^^^^
+onnx_tests/runtime_wrappers.py:33: in run_reference
+    sess = ReferenceEvaluator(model, optimized=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:305: in __init__
+    self._init()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnx.reference.reference_evaluator.ReferenceEvaluator object at 0x165bf60b0>
+
+    def _init(self) -> None:
+        """Loads the implementation for every node in the graph."""
+        self.rt_inits_ = {}
+        self.rt_nodes_ = []
+        for init in self.inits_:
+            self.rt_inits_[init.name] = (
+                self.retrieve_external_data(init)
+                if onnx.external_data_helper.uses_external_data(init)
+                else onnx.numpy_helper.to_array(init)
+            )
+        run_params = {
+            "log": lambda pattern, *args: self._log(10, pattern, *args),
+            "opsets": self.opsets,
+            "verbose": self.verbose,
+            "new_ops": self.new_ops_,
+            "existing_functions": self.functions_.copy(),
+            "evaluator_cls": self.__class__,
+        }
+        if self.input_types_:
+            all_types = {i.name: i.type for i in self.onnx_graph_.input}
+            if hasattr(self.proto_, "value_info"):
+                for shape_type in self.proto_.value_info:
+                    all_types[shape_type.name] = shape_type.type
+            self.all_types_ = all_types
+        else:
+            self.all_types_ = None
+    
+        for node in self.nodes_:
+            try:
+                cl = self._load_impl(node)
+            except op_run.RuntimeContextError as e:
+                # A node has a context dependent implementation.
+                # Shape inference must be run to get the input types.
+                if self.all_types_:
+                    it = [self.get_result_types(i, exc=False) for i in node.input]
+                    if None in it:
+                        # One input does not exist. It must be done while executing the graph.
+                        def cl(*args, parent=self):
+                            return op_run.OpFunctionContextDependant(
+                                *args, parent=parent
+                            )
+                    else:
+                        cl = self._load_impl(node, it)
+                else:
+>                   raise op_run.RuntimeContextError(
+                        f"No implementation was found for node type {node.op_type!r} from domain {node.domain!r}. "
+                        f"If this node has a context dependent implementation, you should run function infer_shapes "
+                        f"before calling ReferenceEvaluator."
+                    ) from e
+E                   onnx.reference.op_run.RuntimeContextError: No implementation was found for node type 'Gelu' from domain ''. If this node has a context dependent implementation, you should run function infer_shapes before calling ReferenceEvaluator.
+E                   Falsifying example: test_fun(
+E                       op=<module 'spox.opset.ai.onnx.v20' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v20.py'>,
+E                       dtype=dtype('float32'),
+E                       data=data(...),
+E                   )
+E                   Draw 1: TestCaseDraw(inputs=[array([], dtype=float32)],
+E                    attribute_kwargs={'approximate': 'none'},
+E                    spox_fun=gelu)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:439: RuntimeContextError
+__________________________ test_Gelu_20[v20-float64] ___________________________
+  + Exception Group Traceback (most recent call last):
+  |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 72, in test_fun
+  |     @pytest.mark.parametrize(
+  |                ^^^^^^^^^^^^
+  |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/hypothesis/core.py", line 2274, in wrapped_test
+  |     raise the_error_hypothesis_found
+  | ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py", line 424, in _init
+    |     cl = self._load_impl(node)
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py", line 479, in _load_impl
+    |     return load_op(
+    |         node.domain,
+    |     ...<3 lines>...
+    |         evaluator_cls=self.__class__,
+    |     )
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/_op_list.py", line 558, in load_op
+    |     raise RuntimeContextError(
+    |     ...<3 lines>...
+    |     )
+    | onnx.reference.op_run.RuntimeContextError: No registered implementation for operator 'Gelu' and domain '', the operator has a context dependent function. but argument node or input_types is not defined (input_types=None).
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 80, in test_fun
+    |     expected = run_reference(model)
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/onnx_tests/runtime_wrappers.py", line 33, in run_reference
+    |     sess = ReferenceEvaluator(model, optimized=False)
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py", line 305, in __init__
+    |     self._init()
+    |     ~~~~~~~~~~^^
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py", line 439, in _init
+    |     raise op_run.RuntimeContextError(
+    |     ...<3 lines>...
+    |     ) from e
+    | onnx.reference.op_run.RuntimeContextError: No implementation was found for node type 'Gelu' from domain ''. If this node has a context dependent implementation, you should run function infer_shapes before calling ReferenceEvaluator.
+    | Falsifying example: test_fun(
+    |     op=<module 'spox.opset.ai.onnx.v20' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v20.py'>,
+    |     dtype=dtype('float64'),
+    |     data=data(...),
+    | )
+    | Draw 1: TestCaseDraw(inputs=[array([], dtype=float64)],
+    |  attribute_kwargs={'approximate': 'tanh'},
+    |  spox_fun=gelu)
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 79, in test_fun
+    |     candidate = run_candidate(model)
+    |   File "/Users/justinc/Documents/GitHub/onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py", line 138, in run_mlx
+    |     sess = ort.InferenceSession(
+    |         model.SerializeToString(),
+    |         sess_options=opt,
+    |         providers=[_EP_NAME, "CPUExecutionProvider"],
+    |     )
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 528, in __init__
+    |     self._create_inference_session(providers, provider_options, disabled_optimizers)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 634, in _create_inference_session
+    |     sess.initialize_session(providers, provider_options, disabled_optimizers)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+    | 
+    | Falsifying example: test_fun(
+    |     op=<module 'spox.opset.ai.onnx.v20' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v20.py'>,
+    |     dtype=dtype('float64'),
+    |     data=data(...),
+    | )
+    | Draw 1: TestCaseDraw(inputs=[array([], dtype=float64)],
+    |  attribute_kwargs={'approximate': 'none'},
+    |  spox_fun=gelu)
+    +------------------------------------
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:03:56.745 python[8066:2478906] 2026-07-13 17:03:56.745941 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:56.840 python[8066:2478906] 2026-07-13 17:03:56.840249 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:56.861 python[8066:2478906] 2026-07-13 17:03:56.861088 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:56.884 python[8066:2478906] 2026-07-13 17:03:56.884721 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:56.907 python[8066:2478906] 2026-07-13 17:03:56.907718 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:56.928 python[8066:2478906] 2026-07-13 17:03:56.928358 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:56.948 python[8066:2478906] 2026-07-13 17:03:56.948857 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:56.970 python[8066:2478906] 2026-07-13 17:03:56.970846 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:57.016 python[8066:2478906] 2026-07-13 17:03:57.016868 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:57.065 python[8066:2478906] 2026-07-13 17:03:57.065686 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:57.087 python[8066:2478906] 2026-07-13 17:03:57.087852 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:57.108 python[8066:2478906] 2026-07-13 17:03:57.108120 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:57.130 python[8066:2478906] 2026-07-13 17:03:57.130334 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:57.175 python[8066:2478906] 2026-07-13 17:03:57.175512 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:57.247 python[8066:2478906] 2026-07-13 17:03:57.247139 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:57.269 python[8066:2478906] 2026-07-13 17:03:57.269609 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+2026-07-13 17:03:57.365 python[8066:2478906] 2026-07-13 17:03:57.365733 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Erf node with name '' is not set.
+=========================== short test summary info ============================
+FAILED tests/test_elementwise.py::test_Gelu_20[v20-float16] - onnx.reference....
+FAILED tests/test_elementwise.py::test_Gelu_20[v20-float32] - onnx.reference....
+FAILED tests/test_elementwise.py::test_Gelu_20[v20-float64] - ExceptionGroup:...
+3 failed, 1195 deselected in 1.72s

@@ -1,0 +1,92 @@
+name: conformance (onnx-tests)
+
+# Opt-in ONLY. Fuzz-conformance of the MLX EP against the ONNX standard using
+# cbourjau/onnx-tests. This is deliberately NOT wired into the required CI
+# (ci.yml): it depends on pixi + network + a full native build and is too
+# heavy/flaky to gate PRs. Trigger it by hand from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      max_examples:
+        description: "Hypothesis max_examples per test (bounded fuzzing)"
+        default: "20"
+        required: false
+      seed:
+        description: "Hypothesis seed"
+        default: "0"
+        required: false
+      ops:
+        description: "Optional space-separated op subset (blank = full claimed set)"
+        default: ""
+        required: false
+
+# Apple Silicon only: the MLX EP requires Metal + mlx-c (macos-14 runners are arm64).
+jobs:
+  conformance:
+    name: onnx-tests vs MLX EP (macOS arm64)
+    runs-on: macos-14
+    env:
+      ORT_VERSION: "1.27.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mlx-c (hard dependency)
+        run: brew install mlx-c
+
+      - name: Provision ONNX Runtime ${{ env.ORT_VERSION }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz" \
+            | tar xz
+          echo "ORT_HOME=$PWD/onnxruntime-osx-arm64-${ORT_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Configure + build the EP
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -G "Unix Makefiles" \
+            -DORT_HOME="$ORT_HOME" \
+            -DORT_MLX_BUILD_E2E=OFF
+          cmake --build build -j3
+          test -f build/libonnxruntime_mlx_ep.dylib
+
+      - name: Install pixi
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+
+      - name: Clone + install onnx-tests (sibling), pin onnxruntime 1.27
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/cbourjau/onnx-tests ../onnx-tests
+          (cd ../onnx-tests && pixi run postinstall)
+          # The EP needs ORT_API_VERSION 27; the pixi env ships an older ort.
+          (cd ../onnx-tests && pixi run python -m pip install "onnxruntime==${ORT_VERSION}")
+
+      - name: Run bounded conformance subset
+        # Never fail the workflow on EP crashes/failures — this is a fuzzing
+        # report, captured as an artifact for triage.
+        continue-on-error: true
+        env:
+          ONNX_TESTS_DIR: ${{ github.workspace }}/../onnx-tests
+          MLX_EP_LIB: ${{ github.workspace }}/build/libonnxruntime_mlx_ep.dylib
+          ORT_LIB_DIR: ${{ env.ORT_HOME }}/lib
+          MAX_EXAMPLES: ${{ github.event.inputs.max_examples }}
+          SEED: ${{ github.event.inputs.seed }}
+          OPS: ${{ github.event.inputs.ops }}
+        run: |
+          cd tests/conformance
+          ./run_conformance.sh || true
+          echo "### onnx-tests conformance (MLX EP)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat results.csv >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results
+          path: |
+            tests/conformance/results.csv
+            tests/conformance/logs/
+          if-no-files-found: warn

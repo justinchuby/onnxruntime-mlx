@@ -1,0 +1,23 @@
+...........                                                              [100%]
+=============================== warnings summary ===============================
+tests/test_elementwise.py: 21 warnings
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_div.py:22: RuntimeWarning: invalid value encountered in divide
+    return np.divide(x, y)
+
+tests/test_elementwise.py::test_Div_14[v17-float16]
+tests/test_elementwise.py::test_Div_14[v17-float16]
+tests/test_elementwise.py::test_Div_14[v17-float16]
+tests/test_elementwise.py::test_Div_14[v17-float32]
+tests/test_elementwise.py::test_Div_14[v17-float32]
+tests/test_elementwise.py::test_Div_14[v17-float32]
+tests/test_elementwise.py::test_Div_14[v17-float32]
+tests/test_elementwise.py::test_Div_14[v17-float32]
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_div.py:22: RuntimeWarning: divide by zero encountered in divide
+    return np.divide(x, y)
+
+tests/test_elementwise.py::test_Div_14[v17-float64]
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_div.py:22: RuntimeWarning: overflow encountered in divide
+    return np.divide(x, y)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+11 passed, 1187 deselected, 30 warnings in 1.52s

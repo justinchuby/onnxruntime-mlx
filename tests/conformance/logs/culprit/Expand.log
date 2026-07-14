@@ -1,0 +1,27 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+hypothesis profile 'onnx-tests-with-verbose-verbosity' -> deadline=None, max_examples=25, verbosity=Verbosity.verbose
+rootdir: /Users/justinc/Documents/GitHub/onnx-tests
+configfile: pyproject.toml
+plugins: xdist-3.8.0, hypothesis-6.155.7
+collected 1198 items / 1185 deselected / 13 selected
+
+tests/test_manipulation_functions.py Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array(0, dtype=uint8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={},
+ spox_fun=expand)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=uint8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={},
+ spox_fun=expand)
+MLX error: Cannot broadcast array of shape (0) into shape (1). at /private/tmp/mlx-c-20260708-16897-ls7m4o/mlx-c-0.6.0/mlx/c/ops.cpp:629

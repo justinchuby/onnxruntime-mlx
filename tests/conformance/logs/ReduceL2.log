@@ -1,0 +1,418 @@
+FFFF...                                                                  [100%]
+=================================== FAILURES ===================================
+_________________________ test_ReduceL2_18[v18-uint32] _________________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('uint32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:94: in test_fun
+    h.assert_allclose(cand, exp, err_msg=err_msg)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = array(346, dtype=uint32), desired = array(65536, dtype=uint32)
+err_msg = "output `0` of `ReduceL2` did not meet expectation\n  inputs: `{'data': array([29309, 29309, 29309, 29309, 29309], dtype=uint32), 'axes': array([], dtype=int64)}`\n  attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`"
+
+    def assert_allclose(
+        actual: np.ndarray, desired: np.ndarray, /, *, err_msg: str | None = None
+    ):
+        """Like `numpy.testing.assert_allclose` but takes dtype into account for relative
+        tolerance."""
+        if actual.dtype != desired.dtype:
+            raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+        kwargs = {}
+        if actual.dtype == np.float16:
+            kwargs = {"rtol": 1e-3}
+        elif actual.dtype == np.float32:
+            kwargs = {"rtol": 1e-5}
+        elif actual.dtype == np.float64:
+            kwargs = {"rtol": 1e-7}
+    
+>       np.testing.assert_allclose(actual, desired, **kwargs, err_msg=err_msg)  # type: ignore
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: 
+E       Not equal to tolerance rtol=1e-07, atol=0
+E       output `0` of `ReduceL2` did not meet expectation
+E         inputs: `{'data': array([29309, 29309, 29309, 29309, 29309], dtype=uint32), 'axes': array([], dtype=int64)}`
+E         attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`
+E       Mismatched elements: 1 / 1 (100%)
+E        ACTUAL: array(346, dtype=uint32)
+E        DESIRED: array(65536, dtype=uint32)
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('uint32'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([29309, 29309, 29309, 29309, 29309], dtype=uint32),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_l2)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:114
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:612
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:640
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/testing/_private/utils.py:253
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/testing/_private/utils.py:909
+E               (and 3 more with settings.verbosity >= verbose)
+
+onnx_tests/helpers.py:129: AssertionError
+_________________________ test_ReduceL2_18[v18-uint64] _________________________
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x13c6074d0>
+output_names = ['res'], input_feed = {}, run_options = None
+
+    def run(self, output_names, input_feed, run_options=None) -> Sequence[np.ndarray | SparseTensor | list | dict]:
+        """
+        Compute the predictions.
+    
+        :param output_names: name of the outputs
+        :param input_feed: dictionary ``{ input_name: input_value }``
+        :param run_options: See :class:`onnxruntime.RunOptions`.
+        :return: list of results, every result is either a numpy array,
+            a sparse tensor, a list or a dictionary.
+    
+        ::
+    
+            sess.run([output_name], {input_name: x})
+        """
+        self._validate_input(list(input_feed.keys()))
+        if not output_names:
+            output_names = [output.name for output in self._outputs_meta]
+        try:
+>           return self._sess.run(output_names, input_feed, run_options)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           onnxruntime.capi.onnxruntime_pybind11_state.EPFail: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:320: EPFail
+
+During handling of the above exception, another exception occurred:
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('uint64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:144: in run_mlx
+    result = {k: v for k, v in zip(output_names, sess.run(None, {}))}
+                                                 ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:325: in run
+    self.set_providers(self._fallback_providers)
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:275: in set_providers
+    self._reset_session(providers, provider_options)
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:668: in _reset_session
+    self._create_inference_session(providers, provider_options)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x13c6074d0>
+providers = ['CPUExecutionProvider'], provider_options = [{}]
+disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.NotImplemented: [ONNXRuntimeError] : 9 : NOT_IMPLEMENTED : Could not find an implementation for ReduceSum(13) node with name ''
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('uint64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=uint64),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_l2)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: NotImplemented
+----------------------------- Captured stdout call -----------------------------
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:05:19.678 python[8614:2510823] 2026-07-13 17:05:19.678256 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:19.713 python[8614:2510823] 2026-07-13 17:05:19.713840 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:19.793 python[8614:2510823] 2026-07-13 17:05:19.793329 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:19.826 python[8614:2510823] 2026-07-13 17:05:19.826706 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:19.861 python[8614:2510823] 2026-07-13 17:05:19.861916 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:19.895 python[8614:2510823] 2026-07-13 17:05:19.895363 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:19.929 python[8614:2510823] 2026-07-13 17:05:19.929118 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:19.962 python[8614:2510823] 2026-07-13 17:05:19.962073 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:19.994 python[8614:2510823] 2026-07-13 17:05:19.994225 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:20.027 python[8614:2510823] 2026-07-13 17:05:20.027200 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:20.060 python[8614:2510823] 2026-07-13 17:05:20.060180 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+2026-07-13 17:05:20.099 python[8614:2510823] 2026-07-13 17:05:20.099327 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_16800242272730965280_1 node. Name:'MLXExecutionProvider_MLXExecutionProvider_16800242272730965280_1_1' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for _inlfunc_ReduceL2_sum_square
+_________________________ test_ReduceL2_18[v18-int32] __________________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('int32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:94: in test_fun
+    h.assert_allclose(cand, exp, err_msg=err_msg)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = array(46341, dtype=int32), desired = array(0, dtype=int32)
+err_msg = "output `0` of `ReduceL2` did not meet expectation\n  inputs: `{'data': array([46341], dtype=int32), 'axes': array([], dtype=int64)}`\n  attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`"
+
+    def assert_allclose(
+        actual: np.ndarray, desired: np.ndarray, /, *, err_msg: str | None = None
+    ):
+        """Like `numpy.testing.assert_allclose` but takes dtype into account for relative
+        tolerance."""
+        if actual.dtype != desired.dtype:
+            raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+        kwargs = {}
+        if actual.dtype == np.float16:
+            kwargs = {"rtol": 1e-3}
+        elif actual.dtype == np.float32:
+            kwargs = {"rtol": 1e-5}
+        elif actual.dtype == np.float64:
+            kwargs = {"rtol": 1e-7}
+    
+>       np.testing.assert_allclose(actual, desired, **kwargs, err_msg=err_msg)  # type: ignore
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: 
+E       Not equal to tolerance rtol=1e-07, atol=0
+E       output `0` of `ReduceL2` did not meet expectation
+E         inputs: `{'data': array([46341], dtype=int32), 'axes': array([], dtype=int64)}`
+E         attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`
+E       Mismatched elements: 1 / 1 (100%)
+E       Max absolute difference among violations: 46341
+E       Max relative difference among violations: inf
+E        ACTUAL: array(46341, dtype=int32)
+E        DESIRED: array(0, dtype=int32)
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('int32'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([46341], dtype=int32),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_l2)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:114
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:550
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:612
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:640
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:990
+E               (and 12 more with settings.verbosity >= verbose)
+
+onnx_tests/helpers.py:129: AssertionError
+_________________________ test_ReduceL2_18[v18-int64] __________________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('int64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:94: in test_fun
+    h.assert_allclose(cand, exp, err_msg=err_msg)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = array(3037000500, dtype=int64), desired = array(0)
+err_msg = "output `0` of `ReduceL2` did not meet expectation\n  inputs: `{'data': array([3037000500]), 'axes': array([], dtype=int64)}`\n  attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`"
+
+    def assert_allclose(
+        actual: np.ndarray, desired: np.ndarray, /, *, err_msg: str | None = None
+    ):
+        """Like `numpy.testing.assert_allclose` but takes dtype into account for relative
+        tolerance."""
+        if actual.dtype != desired.dtype:
+            raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+        kwargs = {}
+        if actual.dtype == np.float16:
+            kwargs = {"rtol": 1e-3}
+        elif actual.dtype == np.float32:
+            kwargs = {"rtol": 1e-5}
+        elif actual.dtype == np.float64:
+            kwargs = {"rtol": 1e-7}
+    
+>       np.testing.assert_allclose(actual, desired, **kwargs, err_msg=err_msg)  # type: ignore
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: 
+E       Not equal to tolerance rtol=1e-07, atol=0
+E       output `0` of `ReduceL2` did not meet expectation
+E         inputs: `{'data': array([3037000500]), 'axes': array([], dtype=int64)}`
+E         attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`
+E       Mismatched elements: 1 / 1 (100%)
+E       Max absolute difference among violations: 3037000500
+E       Max relative difference among violations: inf
+E        ACTUAL: array(3037000500, dtype=int64)
+E        DESIRED: array(0)
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('int64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([3037000500]),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_l2)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:114
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:550
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:612
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:640
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:990
+E               (and 12 more with settings.verbosity >= verbose)
+
+onnx_tests/helpers.py:129: AssertionError
+=============================== warnings summary ===============================
+tests/test_statistical.py: 67 warnings
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_l2.py:28: RuntimeWarning: invalid value encountered in sqrt
+    res = np.sqrt(np.sum(np.square(data), axis=axes, keepdims=keepdims)).astype(
+
+tests/test_statistical.py: 67 warnings
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_l2.py:28: RuntimeWarning: invalid value encountered in cast
+    res = np.sqrt(np.sum(np.square(data), axis=axes, keepdims=keepdims)).astype(
+
+tests/test_statistical.py: 10 warnings
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/fromnumeric.py:83: RuntimeWarning: overflow encountered in reduce
+    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_statistical.py::test_ReduceL2_18[v18-uint32] - AssertionErr...
+FAILED tests/test_statistical.py::test_ReduceL2_18[v18-uint64] - onnxruntime....
+FAILED tests/test_statistical.py::test_ReduceL2_18[v18-int32] - AssertionError: 
+FAILED tests/test_statistical.py::test_ReduceL2_18[v18-int64] - AssertionError: 
+4 failed, 3 passed, 1191 deselected, 144 warnings in 4.35s

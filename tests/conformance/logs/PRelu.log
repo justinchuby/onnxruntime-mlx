@@ -1,0 +1,358 @@
+.F..F..                                                                  [100%]
+=================================== FAILURES ===================================
+__________________________ test_PRelu_16[v17-float32] __________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('float32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:94: in test_fun
+    h.assert_allclose(cand, exp, err_msg=err_msg)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = array(0., dtype=float32), desired = array(nan, dtype=float32)
+err_msg = 'output `0` of `PRelu` did not meet expectation\n  inputs: `[array(0., dtype=float32), array(nan, dtype=float32)]`\n  attributes: `{}`'
+
+    def assert_allclose(
+        actual: np.ndarray, desired: np.ndarray, /, *, err_msg: str | None = None
+    ):
+        """Like `numpy.testing.assert_allclose` but takes dtype into account for relative
+        tolerance."""
+        if actual.dtype != desired.dtype:
+            raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+        kwargs = {}
+        if actual.dtype == np.float16:
+            kwargs = {"rtol": 1e-3}
+        elif actual.dtype == np.float32:
+            kwargs = {"rtol": 1e-5}
+        elif actual.dtype == np.float64:
+            kwargs = {"rtol": 1e-7}
+    
+>       np.testing.assert_allclose(actual, desired, **kwargs, err_msg=err_msg)  # type: ignore
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: 
+E       Not equal to tolerance rtol=1e-05, atol=0
+E       output `0` of `PRelu` did not meet expectation
+E         inputs: `[array(0., dtype=float32), array(nan, dtype=float32)]`
+E         attributes: `{}`
+E       nan location mismatch:
+E        ACTUAL: array(0., dtype=float32)
+E        DESIRED: array(nan, dtype=float32)
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('float32'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs=[array(0., dtype=float32),
+E         array(nan, dtype=float32)],
+E        attribute_kwargs={},
+E        spox_fun=prelu)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:114
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:640
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/testing/_private/utils.py:253
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/testing/_private/utils.py:789
+
+onnx_tests/helpers.py:129: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:13.882 python[8261:2482621] 2026-07-13 17:04:13.882630 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {} does not match actual shape of {1,1} for output res
+2026-07-13 17:04:13.891 python[8261:2482621] 2026-07-13 17:04:13.891555 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {3} does not match actual shape of {1,2,3} for output res
+2026-07-13 17:04:13.895 python[8261:2482621] 2026-07-13 17:04:13.894990 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {4} does not match actual shape of {2,3,4} for output res
+2026-07-13 17:04:13.900 python[8261:2482621] 2026-07-13 17:04:13.900261 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {} does not match actual shape of {0,1} for output res
+2026-07-13 17:04:13.904 python[8261:2482621] 2026-07-13 17:04:13.904925 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {4} does not match actual shape of {5,5,4} for output res
+2026-07-13 17:04:13.908 python[8261:2482621] 2026-07-13 17:04:13.908049 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {4} does not match actual shape of {5,5,4} for output res
+2026-07-13 17:04:13.911 python[8261:2482621] 2026-07-13 17:04:13.911411 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {4} does not match actual shape of {5,5,4} for output res
+2026-07-13 17:04:13.915 python[8261:2482621] 2026-07-13 17:04:13.915897 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {4} does not match actual shape of {5,5,4} for output res
+2026-07-13 17:04:13.919 python[8261:2482621] 2026-07-13 17:04:13.919586 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {4} does not match actual shape of {5,5,4} for output res
+2026-07-13 17:04:13.925 python[8261:2482621] 2026-07-13 17:04:13.925621 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,5} does not match actual shape of {2,7,1,5} for output res
+2026-07-13 17:04:13.968 python[8261:2482621] 2026-07-13 17:04:13.968528 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,5} does not match actual shape of {2,7,1,5} for output res
+2026-07-13 17:04:13.975 python[8261:2482621] 2026-07-13 17:04:13.975431 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,5} does not match actual shape of {2,7,1,5} for output res
+2026-07-13 17:04:13.988 python[8261:2482621] 2026-07-13 17:04:13.988888 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,5} does not match actual shape of {7,7,1,5} for output res
+2026-07-13 17:04:14.007 python[8261:2482621] 2026-07-13 17:04:14.007648 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,5} does not match actual shape of {7,7,1,5} for output res
+2026-07-13 17:04:14.026 python[8261:2482621] 2026-07-13 17:04:14.025978 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,5} does not match actual shape of {7,7,1,5} for output res
+2026-07-13 17:04:14.044 python[8261:2482621] 2026-07-13 17:04:14.044242 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,5} does not match actual shape of {7,7,1,5} for output res
+2026-07-13 17:04:14.087 python[8261:2482621] 2026-07-13 17:04:14.087034 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,5} does not match actual shape of {7,7,1,5} for output res
+2026-07-13 17:04:14.111 python[8261:2482621] 2026-07-13 17:04:14.111737 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {0} does not match actual shape of {1,1,0} for output res
+2026-07-13 17:04:14.116 python[8261:2482621] 2026-07-13 17:04:14.116800 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {0} does not match actual shape of {2,1,0} for output res
+2026-07-13 17:04:14.123 python[8261:2482621] 2026-07-13 17:04:14.123003 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {0} does not match actual shape of {1,1,0} for output res
+2026-07-13 17:04:14.127 python[8261:2482621] 2026-07-13 17:04:14.127902 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,0} does not match actual shape of {1,1,0,0} for output res
+2026-07-13 17:04:14.132 python[8261:2482621] 2026-07-13 17:04:14.132618 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,0} does not match actual shape of {3,1,2,0} for output res
+2026-07-13 17:04:14.138 python[8261:2482621] 2026-07-13 17:04:14.138357 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,0} does not match actual shape of {2,3,1,0} for output res
+2026-07-13 17:04:14.154 python[8261:2482621] 2026-07-13 17:04:14.154725 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,1} does not match actual shape of {1,2} for output res
+2026-07-13 17:04:14.171 python[8261:2482621] 2026-07-13 17:04:14.171629 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,2} does not match actual shape of {1,1,1,2} for output res
+2026-07-13 17:04:14.195 python[8261:2482621] 2026-07-13 17:04:14.195039 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,3} does not match actual shape of {1,1,1,3} for output res
+2026-07-13 17:04:14.209 python[8261:2482621] 2026-07-13 17:04:14.209300 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,3} does not match actual shape of {1,1,0,3} for output res
+2026-07-13 17:04:14.214 python[8261:2482621] 2026-07-13 17:04:14.214796 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.226 python[8261:2482621] 2026-07-13 17:04:14.226157 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,0,4} for output res
+2026-07-13 17:04:14.240 python[8261:2482621] 2026-07-13 17:04:14.240778 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,4} for output res
+2026-07-13 17:04:14.247 python[8261:2482621] 2026-07-13 17:04:14.247245 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.258 python[8261:2482621] 2026-07-13 17:04:14.258536 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,0,1,4} for output res
+2026-07-13 17:04:14.264 python[8261:2482621] 2026-07-13 17:04:14.264749 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {4,0,1,4} for output res
+2026-07-13 17:04:14.270 python[8261:2482621] 2026-07-13 17:04:14.270926 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {0,1,4} for output res
+2026-07-13 17:04:14.277 python[8261:2482621] 2026-07-13 17:04:14.277615 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {2,0,1,4} for output res
+2026-07-13 17:04:14.283 python[8261:2482621] 2026-07-13 17:04:14.283601 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {0,1,1,4} for output res
+2026-07-13 17:04:14.289 python[8261:2482621] 2026-07-13 17:04:14.289151 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {0,1,1,4} for output res
+2026-07-13 17:04:14.294 python[8261:2482621] 2026-07-13 17:04:14.294599 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,4} for output res
+2026-07-13 17:04:14.300 python[8261:2482621] 2026-07-13 17:04:14.300099 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,4} for output res
+2026-07-13 17:04:14.306 python[8261:2482621] 2026-07-13 17:04:14.305999 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.312 python[8261:2482621] 2026-07-13 17:04:14.311993 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.318 python[8261:2482621] 2026-07-13 17:04:14.318672 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.323 python[8261:2482621] 2026-07-13 17:04:14.323896 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.328 python[8261:2482621] 2026-07-13 17:04:14.328826 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.335 python[8261:2482621] 2026-07-13 17:04:14.335461 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.341 python[8261:2482621] 2026-07-13 17:04:14.341002 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.346 python[8261:2482621] 2026-07-13 17:04:14.346932 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.352 python[8261:2482621] 2026-07-13 17:04:14.352231 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.357 python[8261:2482621] 2026-07-13 17:04:14.357628 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.364 python[8261:2482621] 2026-07-13 17:04:14.363985 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.370 python[8261:2482621] 2026-07-13 17:04:14.370359 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.376 python[8261:2482621] 2026-07-13 17:04:14.376327 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.383 python[8261:2482621] 2026-07-13 17:04:14.383470 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.389 python[8261:2482621] 2026-07-13 17:04:14.389695 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.401 python[8261:2482621] 2026-07-13 17:04:14.401228 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.408 python[8261:2482621] 2026-07-13 17:04:14.408178 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.419 python[8261:2482621] 2026-07-13 17:04:14.419765 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.426 python[8261:2482621] 2026-07-13 17:04:14.426808 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.438 python[8261:2482621] 2026-07-13 17:04:14.438548 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.445 python[8261:2482621] 2026-07-13 17:04:14.445025 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,1,4} for output res
+2026-07-13 17:04:14.454 python[8261:2482621] 2026-07-13 17:04:14.454685 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {0,1,1,4} for output res
+2026-07-13 17:04:14.461 python[8261:2482621] 2026-07-13 17:04:14.461570 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,0,1,4} for output res
+2026-07-13 17:04:14.467 python[8261:2482621] 2026-07-13 17:04:14.467451 [W:onnxruntime:, execution_frame.cc:913 VerifyOutputSizes] Expected shape from model of {1,4} does not match actual shape of {1,1,0,4} for output res
+__________________________ test_PRelu_16[v17-uint64] ___________________________
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x147aed8b0>
+output_names = ['res'], input_feed = {}, run_options = None
+
+    def run(self, output_names, input_feed, run_options=None) -> Sequence[np.ndarray | SparseTensor | list | dict]:
+        """
+        Compute the predictions.
+    
+        :param output_names: name of the outputs
+        :param input_feed: dictionary ``{ input_name: input_value }``
+        :param run_options: See :class:`onnxruntime.RunOptions`.
+        :return: list of results, every result is either a numpy array,
+            a sparse tensor, a list or a dictionary.
+    
+        ::
+    
+            sess.run([output_name], {input_name: x})
+        """
+        self._validate_input(list(input_feed.keys()))
+        if not output_names:
+            output_names = [output.name for output in self._outputs_meta]
+        try:
+>           return self._sess.run(output_names, input_feed, run_options)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           onnxruntime.capi.onnxruntime_pybind11_state.EPFail: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:320: EPFail
+
+During handling of the above exception, another exception occurred:
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('uint64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:144: in run_mlx
+    result = {k: v for k, v in zip(output_names, sess.run(None, {}))}
+                                                 ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:325: in run
+    self.set_providers(self._fallback_providers)
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:275: in set_providers
+    self._reset_session(providers, provider_options)
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:668: in _reset_session
+    self._create_inference_session(providers, provider_options)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x147aed8b0>
+providers = ['CPUExecutionProvider'], provider_options = [{}]
+disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.NotImplemented: [ONNXRuntimeError] : 9 : NOT_IMPLEMENTED : Could not find an implementation for Where(16) node with name ''
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('uint64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs=[array(0, dtype=uint64), array(0, dtype=uint64)],
+E        attribute_kwargs={},
+E        spox_fun=prelu)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: NotImplemented
+----------------------------- Captured stdout call -----------------------------
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:14.831 python[8261:2482621] 2026-07-13 17:04:14.831727 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:14.867 python[8261:2482621] 2026-07-13 17:04:14.867273 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.868 python[8261:2482621] 2026-07-13 17:04:14.868600 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:14.869 python[8261:2482621] 2026-07-13 17:04:14.869400 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.869 python[8261:2482621] 2026-07-13 17:04:14.869524 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'res' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.904 python[8261:2482621] 2026-07-13 17:04:14.904905 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.905 python[8261:2482621] 2026-07-13 17:04:14.905800 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:14.906 python[8261:2482621] 2026-07-13 17:04:14.906197 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.906 python[8261:2482621] 2026-07-13 17:04:14.906302 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'res' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.940 python[8261:2482621] 2026-07-13 17:04:14.940942 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.941 python[8261:2482621] 2026-07-13 17:04:14.941853 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:14.942 python[8261:2482621] 2026-07-13 17:04:14.942364 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.942 python[8261:2482621] 2026-07-13 17:04:14.942576 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'res' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.977 python[8261:2482621] 2026-07-13 17:04:14.977015 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.978 python[8261:2482621] 2026-07-13 17:04:14.978196 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:14.978 python[8261:2482621] 2026-07-13 17:04:14.978617 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:14.978 python[8261:2482621] 2026-07-13 17:04:14.978799 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'res' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.012 python[8261:2482621] 2026-07-13 17:04:15.012303 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.013 python[8261:2482621] 2026-07-13 17:04:15.013435 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:15.014 python[8261:2482621] 2026-07-13 17:04:15.014027 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.014 python[8261:2482621] 2026-07-13 17:04:15.014169 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'res' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.048 python[8261:2482621] 2026-07-13 17:04:15.048037 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.048 python[8261:2482621] 2026-07-13 17:04:15.048962 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:15.049 python[8261:2482621] 2026-07-13 17:04:15.049455 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.049 python[8261:2482621] 2026-07-13 17:04:15.049571 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'res' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.083 python[8261:2482621] 2026-07-13 17:04:15.083260 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.084 python[8261:2482621] 2026-07-13 17:04:15.084612 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:15.085 python[8261:2482621] 2026-07-13 17:04:15.085134 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.085 python[8261:2482621] 2026-07-13 17:04:15.085280 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'res' source:{1,5,3,3} target:{3,1}. Falling back to lenient merge.
+2026-07-13 17:04:15.118 python[8261:2482621] 2026-07-13 17:04:15.118445 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,2} target:{}. Falling back to lenient merge.
+2026-07-13 17:04:15.119 python[8261:2482621] 2026-07-13 17:04:15.119657 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:15.120 python[8261:2482621] 2026-07-13 17:04:15.120064 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,2} target:{}. Falling back to lenient merge.
+2026-07-13 17:04:15.120 python[8261:2482621] 2026-07-13 17:04:15.120204 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'res' source:{1,2} target:{}. Falling back to lenient merge.
+2026-07-13 17:04:15.153 python[8261:2482621] 2026-07-13 17:04:15.153704 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,2} target:{}. Falling back to lenient merge.
+2026-07-13 17:04:15.154 python[8261:2482621] 2026-07-13 17:04:15.154549 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:15.155 python[8261:2482621] 2026-07-13 17:04:15.155091 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'PRelu_0_Y' source:{1,2} target:{}. Falling back to lenient merge.
+2026-07-13 17:04:15.155 python[8261:2482621] 2026-07-13 17:04:15.155266 [W:onnxruntime:, graph.cc:122 MergeShapeInfo] Error merging shape info for output. 'res' source:{1,2} target:{}. Falling back to lenient merge.
+2026-07-13 17:04:15.190 python[8261:2482621] 2026-07-13 17:04:15.190553 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+2026-07-13 17:04:15.230 python[8261:2482621] 2026-07-13 17:04:15.230952 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_5408148588202301896_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_5408148588202301896_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for PRelu_0_Y
+=========================== short test summary info ============================
+FAILED tests/test_elementwise.py::test_PRelu_16[v17-float32] - AssertionError: 
+FAILED tests/test_elementwise.py::test_PRelu_16[v17-uint64] - onnxruntime.cap...
+2 failed, 5 passed, 1191 deselected in 2.34s

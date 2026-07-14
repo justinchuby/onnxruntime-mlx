@@ -1,0 +1,465 @@
+FFFF..F                                                                  [100%]
+=================================== FAILURES ===================================
+_______________________ test_ReduceLogSum_18[v18-uint32] _______________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('uint32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x1344736b0>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : 10 : INVALID_GRAPH : This is an invalid model. Type Error: Type 'tensor(uint32)' of input parameter (_inlfunc_ReduceLogSum_reduced_sum) of operator (Log) in node () is invalid.
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('uint32'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=uint32),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_log_sum)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: InvalidGraph
+_______________________ test_ReduceLogSum_18[v18-uint64] _______________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('uint64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x13474f200>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : 10 : INVALID_GRAPH : This is an invalid model. Type Error: Type 'tensor(uint64)' of input parameter (_inlfunc_ReduceLogSum_reduced_sum) of operator (Log) in node () is invalid.
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('uint64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=uint64),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_log_sum)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: InvalidGraph
+_______________________ test_ReduceLogSum_18[v18-int32] ________________________
+  + Exception Group Traceback (most recent call last):
+  |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 72, in test_fun
+  |     @pytest.mark.parametrize(
+  |                ^^^^^^^^^^^^
+  |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/hypothesis/core.py", line 2274, in wrapped_test
+  |     raise the_error_hypothesis_found
+  | ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/op_run.py", line 458, in run
+    |     res = self._run(*args, **kwargs)
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum.py", line 33, in _run
+    |     return (np.log(res, out=res),)
+    |             ~~~~~~^^^^^^^^^^^^^^
+    | numpy._core._exceptions._UFuncOutputCastingError: Cannot cast ufunc 'log' output from dtype('float64') to dtype('int64') with casting rule 'same_kind'
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 80, in test_fun
+    |     expected = run_reference(model)
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/onnx_tests/runtime_wrappers.py", line 34, in run_reference
+    |     result_list = sess.run(None, {})
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py", line 603, in run
+    |     outputs = node.run(*inputs, **linked_attributes)
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/op_run.py", line 460, in run
+    |     raise TypeError(
+    |     ...<3 lines>...
+    |     ) from e
+    | TypeError: Issues with types [<class 'numpy.ndarray'>, <class 'numpy.ndarray'>] and attributes ['keepdims', 'noop_with_empty_axes'] and linked attributes=[] (operator 'ReduceLogSum_18').
+    | Falsifying example: test_fun(
+    |     op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    |     dtype=dtype('int32'),
+    |     data=data(...),
+    | )
+    | Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=int32),
+    |   'axes': array([], dtype=int64)},
+    |  attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 1},
+    |  spox_fun=reduce_log_sum)
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 94, in test_fun
+    |     h.assert_allclose(cand, exp, err_msg=err_msg)
+    |     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/onnx_tests/helpers.py", line 120, in assert_allclose
+    |     raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+    | TypeError: dtypes do not match `int32` != `float64`
+    | Falsifying example: test_fun(
+    |     op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    |     dtype=dtype('int32'),
+    |     data=data(...),
+    | )
+    | Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=int32),
+    |   'axes': array([], dtype=int64)},
+    |  attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+    |  spox_fun=reduce_log_sum)
+    +------------------------------------
+_______________________ test_ReduceLogSum_18[v18-int64] ________________________
+  + Exception Group Traceback (most recent call last):
+  |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 72, in test_fun
+  |     @pytest.mark.parametrize(
+  |                ^^^^^^^^^^^^
+  |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/hypothesis/core.py", line 2274, in wrapped_test
+  |     raise the_error_hypothesis_found
+  | ExceptionGroup: Hypothesis found 2 distinct failures. (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/op_run.py", line 458, in run
+    |     res = self._run(*args, **kwargs)
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum.py", line 33, in _run
+    |     return (np.log(res, out=res),)
+    |             ~~~~~~^^^^^^^^^^^^^^
+    | numpy._core._exceptions._UFuncOutputCastingError: Cannot cast ufunc 'log' output from dtype('float64') to dtype('int64') with casting rule 'same_kind'
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 80, in test_fun
+    |     expected = run_reference(model)
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/onnx_tests/runtime_wrappers.py", line 34, in run_reference
+    |     result_list = sess.run(None, {})
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py", line 603, in run
+    |     outputs = node.run(*inputs, **linked_attributes)
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/op_run.py", line 460, in run
+    |     raise TypeError(
+    |     ...<3 lines>...
+    |     ) from e
+    | TypeError: Issues with types [<class 'numpy.ndarray'>, <class 'numpy.ndarray'>] and attributes ['keepdims', 'noop_with_empty_axes'] and linked attributes=[] (operator 'ReduceLogSum_18').
+    | Falsifying example: test_fun(
+    |     op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    |     dtype=dtype('int64'),
+    |     data=data(...),
+    | )
+    | Draw 1: TestCaseDraw(inputs={'data': array([0]),
+    |   'axes': array([], dtype=int64)},
+    |  attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 1},
+    |  spox_fun=reduce_log_sum)
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/tests/utils.py", line 94, in test_fun
+    |     h.assert_allclose(cand, exp, err_msg=err_msg)
+    |     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/justinc/Documents/GitHub/onnx-tests/onnx_tests/helpers.py", line 120, in assert_allclose
+    |     raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+    | TypeError: dtypes do not match `int64` != `float64`
+    | Falsifying example: test_fun(
+    |     op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    |     dtype=dtype('int64'),
+    |     data=data(...),
+    | )
+    | Draw 1: TestCaseDraw(inputs={'data': array([0]),
+    |   'axes': array([], dtype=int64)},
+    |  attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+    |  spox_fun=reduce_log_sum)
+    +------------------------------------
+______________________ test_ReduceLogSum_18[v18-float64] _______________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('float64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:94: in test_fun
+    h.assert_allclose(cand, exp, err_msg=err_msg)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = array(-inf), desired = array(0.69314718)
+err_msg = "output `0` of `ReduceLogSum` did not meet expectation\n  inputs: `{'data': array([[ 1.34078079e+154, -1.34078079e+154...000,  1.00000000e+000]]), 'axes': array([], dtype=int64)}`\n  attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`"
+
+    def assert_allclose(
+        actual: np.ndarray, desired: np.ndarray, /, *, err_msg: str | None = None
+    ):
+        """Like `numpy.testing.assert_allclose` but takes dtype into account for relative
+        tolerance."""
+        if actual.dtype != desired.dtype:
+            raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+        kwargs = {}
+        if actual.dtype == np.float16:
+            kwargs = {"rtol": 1e-3}
+        elif actual.dtype == np.float32:
+            kwargs = {"rtol": 1e-5}
+        elif actual.dtype == np.float64:
+            kwargs = {"rtol": 1e-7}
+    
+>       np.testing.assert_allclose(actual, desired, **kwargs, err_msg=err_msg)  # type: ignore
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: 
+E       Not equal to tolerance rtol=1e-07, atol=0
+E       output `0` of `ReduceLogSum` did not meet expectation
+E         inputs: `{'data': array([[ 1.34078079e+154, -1.34078079e+154],
+E              [ 1.00000000e+000,  1.00000000e+000]]), 'axes': array([], dtype=int64)}`
+E         attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`
+E       inf location mismatch:
+E        ACTUAL: array(-inf)
+E        DESIRED: array(0.693147)
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('float64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([[ 1.34078079e+154, -1.34078079e+154],
+E                [ 1.00000000e+000,  1.00000000e+000]]),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_log_sum)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:114
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:612
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:640
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:1034
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:1096
+E               (and 4 more with settings.verbosity >= verbose)
+
+onnx_tests/helpers.py:129: AssertionError
+=============================== warnings summary ===============================
+tests/test_statistical.py: 199 warnings
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum.py:34: RuntimeWarning: divide by zero encountered in log
+    return (np.log(res),)
+
+tests/test_statistical.py: 168 warnings
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum.py:34: RuntimeWarning: invalid value encountered in log
+    return (np.log(res),)
+
+tests/test_statistical.py: 41 warnings
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum.py:33: RuntimeWarning: divide by zero encountered in log
+    return (np.log(res, out=res),)
+
+tests/test_statistical.py: 18 warnings
+  /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum.py:33: RuntimeWarning: invalid value encountered in log
+    return (np.log(res, out=res),)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_statistical.py::test_ReduceLogSum_18[v18-uint32] - onnxrunt...
+FAILED tests/test_statistical.py::test_ReduceLogSum_18[v18-uint64] - onnxrunt...
+FAILED tests/test_statistical.py::test_ReduceLogSum_18[v18-int32] - Exception...
+FAILED tests/test_statistical.py::test_ReduceLogSum_18[v18-int64] - Exception...
+FAILED tests/test_statistical.py::test_ReduceLogSum_18[v18-float64] - Asserti...
+5 failed, 2 passed, 1191 deselected, 426 warnings in 8.39s

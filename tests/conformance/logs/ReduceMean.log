@@ -1,0 +1,497 @@
+FFFF..F                                                                  [100%]
+=================================== FAILURES ===================================
+________________________ test_ReduceMean_18[v18-uint32] ________________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('uint32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x14c6c2c60>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('uint32'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=uint32),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_mean)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:47.102 python[8499:2496789] 2026-07-13 17:04:47.102831 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.152 python[8499:2496789] 2026-07-13 17:04:47.152627 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.175 python[8499:2496789] 2026-07-13 17:04:47.175020 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.198 python[8499:2496789] 2026-07-13 17:04:47.198630 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.221 python[8499:2496789] 2026-07-13 17:04:47.221343 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.243 python[8499:2496789] 2026-07-13 17:04:47.243393 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.265 python[8499:2496789] 2026-07-13 17:04:47.265356 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.287 python[8499:2496789] 2026-07-13 17:04:47.287940 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.310 python[8499:2496789] 2026-07-13 17:04:47.310109 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.331 python[8499:2496789] 2026-07-13 17:04:47.331119 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.352 python[8499:2496789] 2026-07-13 17:04:47.352758 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.380 python[8499:2496789] 2026-07-13 17:04:47.380895 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+________________________ test_ReduceMean_18[v18-uint64] ________________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('uint64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x14feb9c70>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('uint64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=uint64),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_mean)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:47.418 python[8499:2496789] 2026-07-13 17:04:47.418937 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.441 python[8499:2496789] 2026-07-13 17:04:47.441322 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.463 python[8499:2496789] 2026-07-13 17:04:47.463403 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.485 python[8499:2496789] 2026-07-13 17:04:47.485073 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.507 python[8499:2496789] 2026-07-13 17:04:47.507727 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.540 python[8499:2496789] 2026-07-13 17:04:47.540237 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.574 python[8499:2496789] 2026-07-13 17:04:47.574227 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.596 python[8499:2496789] 2026-07-13 17:04:47.596463 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.622 python[8499:2496789] 2026-07-13 17:04:47.622241 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.646 python[8499:2496789] 2026-07-13 17:04:47.646693 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.673 python[8499:2496789] 2026-07-13 17:04:47.673854 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+2026-07-13 17:04:47.706 python[8499:2496789] 2026-07-13 17:04:47.706787 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for ReduceMean node with name 'ReduceMean_0' is not set.
+________________________ test_ReduceMean_18[v18-int32] _________________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('int32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:94: in test_fun
+    h.assert_allclose(cand, exp, err_msg=err_msg)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = array(357913942, dtype=int32), desired = array(-357913940, dtype=int32)
+err_msg = "output `0` of `ReduceMean` did not meet expectation\n  inputs: `{'data': array([357913942, 357913942, 357913942, 3579...42],\n      dtype=int32), 'axes': array([], dtype=int64)}`\n  attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`"
+
+    def assert_allclose(
+        actual: np.ndarray, desired: np.ndarray, /, *, err_msg: str | None = None
+    ):
+        """Like `numpy.testing.assert_allclose` but takes dtype into account for relative
+        tolerance."""
+        if actual.dtype != desired.dtype:
+            raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+        kwargs = {}
+        if actual.dtype == np.float16:
+            kwargs = {"rtol": 1e-3}
+        elif actual.dtype == np.float32:
+            kwargs = {"rtol": 1e-5}
+        elif actual.dtype == np.float64:
+            kwargs = {"rtol": 1e-7}
+    
+>       np.testing.assert_allclose(actual, desired, **kwargs, err_msg=err_msg)  # type: ignore
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: 
+E       Not equal to tolerance rtol=1e-07, atol=0
+E       output `0` of `ReduceMean` did not meet expectation
+E         inputs: `{'data': array([357913942, 357913942, 357913942, 357913942, 357913942, 357913942],
+E             dtype=int32), 'axes': array([], dtype=int64)}`
+E         attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`
+E       Mismatched elements: 1 / 1 (100%)
+E       Max absolute difference among violations: 715827882
+E       Max relative difference among violations: 2.00000001
+E        ACTUAL: array(357913942, dtype=int32)
+E        DESIRED: array(-357913940, dtype=int32)
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('int32'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([357913942, 357913942, 357913942, 357913942, 357913942, 357913942],
+E               dtype=int32), 'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_mean)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:114
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:550
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:612
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:640
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:990
+E               (and 12 more with settings.verbosity >= verbose)
+
+onnx_tests/helpers.py:129: AssertionError
+________________________ test_ReduceMean_18[v18-int64] _________________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('int64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:94: in test_fun
+    h.assert_allclose(cand, exp, err_msg=err_msg)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = array(1537228672809129216, dtype=int64)
+desired = array(-1537228672809129216)
+err_msg = "output `0` of `ReduceMean` did not meet expectation\n  inputs: `{'data': array([1537228672809129302, 1537228672809129...2, 1537228672809129302]), 'axes': array([], dtype=int64)}`\n  attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`"
+
+    def assert_allclose(
+        actual: np.ndarray, desired: np.ndarray, /, *, err_msg: str | None = None
+    ):
+        """Like `numpy.testing.assert_allclose` but takes dtype into account for relative
+        tolerance."""
+        if actual.dtype != desired.dtype:
+            raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+        kwargs = {}
+        if actual.dtype == np.float16:
+            kwargs = {"rtol": 1e-3}
+        elif actual.dtype == np.float32:
+            kwargs = {"rtol": 1e-5}
+        elif actual.dtype == np.float64:
+            kwargs = {"rtol": 1e-7}
+    
+>       np.testing.assert_allclose(actual, desired, **kwargs, err_msg=err_msg)  # type: ignore
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: 
+E       Not equal to tolerance rtol=1e-07, atol=0
+E       output `0` of `ReduceMean` did not meet expectation
+E         inputs: `{'data': array([1537228672809129302, 1537228672809129302, 1537228672809129302,
+E              1537228672809129302, 1537228672809129302, 1537228672809129302]), 'axes': array([], dtype=int64)}`
+E         attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`
+E       Mismatched elements: 1 / 1 (100%)
+E       Max absolute difference among violations: 3074457345618258432
+E       Max relative difference among violations: 2.
+E        ACTUAL: array(1537228672809129216, dtype=int64)
+E        DESIRED: array(-1537228672809129216)
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('int64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([1537228672809129302, 1537228672809129302, 1537228672809129302,
+E                1537228672809129302, 1537228672809129302, 1537228672809129302]),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_mean)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:114
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:550
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:612
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:640
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:990
+E               (and 12 more with settings.verbosity >= verbose)
+
+onnx_tests/helpers.py:129: AssertionError
+_______________________ test_ReduceMean_18[v18-float64] ________________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('float64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:94: in test_fun
+    h.assert_allclose(cand, exp, err_msg=err_msg)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = array(0.), desired = array(0.5)
+err_msg = "output `0` of `ReduceMean` did not meet expectation\n  inputs: `{'data': array([[ 1.34078079e+154, -1.34078079e+154],...000,  1.00000000e+000]]), 'axes': array([], dtype=int64)}`\n  attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`"
+
+    def assert_allclose(
+        actual: np.ndarray, desired: np.ndarray, /, *, err_msg: str | None = None
+    ):
+        """Like `numpy.testing.assert_allclose` but takes dtype into account for relative
+        tolerance."""
+        if actual.dtype != desired.dtype:
+            raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+        kwargs = {}
+        if actual.dtype == np.float16:
+            kwargs = {"rtol": 1e-3}
+        elif actual.dtype == np.float32:
+            kwargs = {"rtol": 1e-5}
+        elif actual.dtype == np.float64:
+            kwargs = {"rtol": 1e-7}
+    
+>       np.testing.assert_allclose(actual, desired, **kwargs, err_msg=err_msg)  # type: ignore
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: 
+E       Not equal to tolerance rtol=1e-07, atol=0
+E       output `0` of `ReduceMean` did not meet expectation
+E         inputs: `{'data': array([[ 1.34078079e+154, -1.34078079e+154],
+E              [ 1.00000000e+000,  1.00000000e+000]]), 'axes': array([], dtype=int64)}`
+E         attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`
+E       Mismatched elements: 1 / 1 (100%)
+E       Max absolute difference among violations: 0.5
+E       Max relative difference among violations: 1.
+E        ACTUAL: array(0.)
+E        DESIRED: array(0.5)
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('float64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([[ 1.34078079e+154, -1.34078079e+154],
+E                [ 1.00000000e+000,  1.00000000e+000]]),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_mean)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:114
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:612
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:640
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/numeric.py:167
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/testing/_private/utils.py:253
+E               (and 8 more with settings.verbosity >= verbose)
+
+onnx_tests/helpers.py:129: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_statistical.py::test_ReduceMean_18[v18-uint32] - onnxruntim...
+FAILED tests/test_statistical.py::test_ReduceMean_18[v18-uint64] - onnxruntim...
+FAILED tests/test_statistical.py::test_ReduceMean_18[v18-int32] - AssertionEr...
+FAILED tests/test_statistical.py::test_ReduceMean_18[v18-int64] - AssertionEr...
+FAILED tests/test_statistical.py::test_ReduceMean_18[v18-float64] - Assertion...
+5 failed, 2 passed, 1191 deselected in 9.69s

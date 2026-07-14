@@ -1,0 +1,3293 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+hypothesis profile 'onnx-tests-with-verbose-verbosity' -> deadline=None, max_examples=25, verbosity=Verbosity.verbose
+rootdir: /Users/justinc/Documents/GitHub/onnx-tests
+configfile: pyproject.toml
+plugins: xdist-3.8.0, hypothesis-6.155.7
+collected 1198 items / 1185 deselected / 13 selected
+
+tests/test_manipulation_functions.py Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=uint8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0, 0], dtype=uint8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([193, 147, 180], dtype=uint8),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[239, 239, 239, 239, 239],
+         [239, 239, 239, 254, 187],
+         [239,  37, 239, 239, 100]], dtype=uint8), 'repeats': array([0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([ 79,  11, 114,   0,  64], dtype=uint8),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[183, 185],
+         [183, 183],
+         [183, 183],
+         [183, 183],
+         [183, 183]], dtype=uint8), 'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ 86, 122],
+         [  4, 100]], dtype=uint8), 'repeats': array([0, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 5, 0), dtype=uint8),
+  'repeats': array([3, 1, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([10, 96], dtype=uint8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([100, 156, 230,  37], dtype=uint8),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([100, 156, 230,  37], dtype=uint8),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=uint8),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=uint8),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ 89,  62,   1],
+         [254, 180, 239],
+         [196,  88, 109],
+         [132, 180, 209]], dtype=uint8), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ 89,  62,   1],
+         [254, 180, 239],
+         [196,  88, 109],
+         [132, 180, 209]], dtype=uint8), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=uint8),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0, 0), dtype=uint8),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]],
+  
+          [[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]],
+  
+          [[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]]],
+  
+  
+         [[[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]],
+  
+          [[ 0,  0,  0,  0,  0],
+           [ 0, 20,  0,  0,  0]],
+  
+          [[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]]],
+  
+  
+         [[[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]],
+  
+          [[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]],
+  
+          [[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]]],
+  
+  
+         [[[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]],
+  
+          [[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]],
+  
+          [[ 0,  0,  0,  0,  0],
+           [ 0,  0,  0,  0,  0]]]], dtype=uint8),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]]], dtype=uint8), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 2, 5), dtype=uint8),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 2, 5), dtype=uint8),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=uint16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0, 0], dtype=uint16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([8615, 2422, 5874], dtype=uint16),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[36888, 36888, 36888, 36888, 36888],
+         [36888, 36888, 36888, 65534,  7102],
+         [36888,   197, 36888, 36888, 65535]], dtype=uint16),
+  'repeats': array([0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([ 494,   61, 1073,    2,  354], dtype=uint16),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[6406, 6800],
+         [6406, 6406],
+         [6406, 6406],
+         [6406, 6406],
+         [6406, 6406]], dtype=uint16), 'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ 575, 1308],
+         [  25,  100]], dtype=uint16), 'repeats': array([0, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 5, 0), dtype=uint16),
+  'repeats': array([3, 1, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([ 56, 721], dtype=uint16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([  100,  3034, 27043,   200], dtype=uint16),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([  100,  3034, 27043,   200], dtype=uint16),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=uint16),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=uint16),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[  607,   339,     9],
+         [61337,  5916, 36027],
+         [ 9290,   595,   955],
+         [ 1686,  5916, 13846]], dtype=uint16), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[  607,   339,     9],
+         [61337,  5916, 36027],
+         [ 9290,   595,   955],
+         [ 1686,  5916, 13846]], dtype=uint16), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=uint16),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0, 0), dtype=uint16),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]],
+  
+          [[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]],
+  
+          [[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]]],
+  
+  
+         [[[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]],
+  
+          [[  5,   5,   5,   5,   5],
+           [  5, 109,   5,   5,   5]],
+  
+          [[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]]],
+  
+  
+         [[[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]],
+  
+          [[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]],
+  
+          [[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]]],
+  
+  
+         [[[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]],
+  
+          [[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]],
+  
+          [[  5,   5,   5,   5,   5],
+           [  5,   5,   5,   5,   5]]]], dtype=uint16),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]]], dtype=uint16), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 2, 5), dtype=uint16),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 2, 5), dtype=uint16),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=uint32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0, 0], dtype=uint32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([1179355,   44235,  400316], dtype=uint32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ 228247705,  228247705,  228247705,  228247705,  228247705],
+         [ 228247705,  228247705,  228247705, 4294967294,     676065],
+         [ 228247705,        340,  228247705,  228247705,    1048575]],
+        dtype=uint32), 'repeats': array([0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([1675,  102, 7596,    3,  905], dtype=uint32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[507262, 598694],
+         [507262, 507262],
+         [507262, 507262],
+         [507262, 507262],
+         [507262, 507262]], dtype=uint32), 'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ 2225, 11451],
+         [   41,   100]], dtype=uint32), 'repeats': array([0, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 5, 0), dtype=uint32),
+  'repeats': array([3, 1, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([  94, 3446], dtype=uint32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([     100,    74924, 60276560,      346], dtype=uint32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([     100,    74924, 60276560,      346], dtype=uint32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=uint32),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=uint32),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[      2469,        839,         16],
+         [2947640702,     408249,  205174584],
+         [   1475315,       2379,       6007],
+         [     19686,     408249,    5188915]], dtype=uint32),
+  'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[      2469,        839,         16],
+         [2947640702,     408249,  205174584],
+         [   1475315,       2379,       6007],
+         [     19686,     408249,    5188915]], dtype=uint32),
+  'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=uint32),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0, 0), dtype=uint32),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]],
+  
+          [[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]],
+  
+          [[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]]],
+  
+  
+         [[[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]],
+  
+          [[  8,   8,   8,   8,   8],
+           [  8, 182,   8,   8,   8]],
+  
+          [[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]]],
+  
+  
+         [[[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]],
+  
+          [[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]],
+  
+          [[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]]],
+  
+  
+         [[[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]],
+  
+          [[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]],
+  
+          [[  8,   8,   8,   8,   8],
+           [  8,   8,   8,   8,   8]]]], dtype=uint32),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]]], dtype=uint32), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 2, 5), dtype=uint32),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 2, 5), dtype=uint32),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=uint64),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0, 0], dtype=uint64),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint64),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([44925164,   240231,  7041010], dtype=uint64),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[      14794454992525,       14794454992525,       14794454992525,
+                14794454992525,       14794454992525],
+         [      14794454992525,       14794454992525,       14794454992525,
+          18446744073709551614,             16967773],
+         [      14794454992525,                  431,       14794454992525,
+                14794454992525,             39916800]], dtype=uint64),
+  'repeats': array([0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([ 3042,   120, 21268,     4,  1417], dtype=uint64),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[10432507, 13794033],
+         [10432507, 10432507],
+         [10432507, 10432507],
+         [10432507, 10432507],
+         [10432507, 10432507]], dtype=uint64), 'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ 4350, 36771],
+         [   49,   100]], dtype=uint64), 'repeats': array([0, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 5, 0), dtype=uint64),
+  'repeats': array([3, 1, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([ 111, 7595], dtype=uint64),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([         100,       517638, 251927733973,          441],
+        dtype=uint64), 'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([         100,       517638, 251927733973,          441],
+        dtype=uint64), 'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=uint64),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=uint64),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[               4962,                1290,                  18],
+         [1585432037704924416,             7272344,      10322544298831],
+         [           67319853,                4734,               15616],
+         [              76916,             7272344,           763735721]],
+        dtype=uint64), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[               4962,                1290,                  18],
+         [1585432037704924416,             7272344,      10322544298831],
+         [           67319853,                4734,               15616],
+         [              76916,             7272344,           763735721]],
+        dtype=uint64), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=uint64),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0, 0), dtype=uint64),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]],
+  
+          [[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]],
+  
+          [[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]]],
+  
+  
+         [[[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]],
+  
+          [[  9,   9,   9,   9,   9],
+           [  9, 215,   9,   9,   9]],
+  
+          [[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]]],
+  
+  
+         [[[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]],
+  
+          [[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]],
+  
+          [[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]]],
+  
+  
+         [[[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]],
+  
+          [[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]],
+  
+          [[  9,   9,   9,   9,   9],
+           [  9,   9,   9,   9,   9]]]], dtype=uint64),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]]], dtype=uint64), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 2, 5), dtype=uint64),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 2, 5), dtype=uint64),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint64),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint64),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint64),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=int8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0, 0], dtype=int8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([65, 19, 52], dtype=int8),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[111, 111, 111, 111, 111],
+         [111, 111, 111, 126,  59],
+         [111, -91, 111, 111, 100]], dtype=int8), 'repeats': array([0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([ -49, -117,  -14, -128,  -64], dtype=int8),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[55, 57],
+         [55, 55],
+         [55, 55],
+         [55, 55],
+         [55, 55]], dtype=int8), 'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ -42,   -6],
+         [-124,  100]], dtype=int8), 'repeats': array([0, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 5, 0), dtype=int8),
+  'repeats': array([3, 1, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([-118,  -32], dtype=int8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([100,  28, 102, -91], dtype=int8),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([100,  28, 102, -91], dtype=int8),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=int8),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=int8),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ -39,  -66, -127],
+         [ 126,   52,  111],
+         [  68,  -40,  -19],
+         [   4,   52,   81]], dtype=int8), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[ -39,  -66, -127],
+         [ 126,   52,  111],
+         [  68,  -40,  -19],
+         [   4,   52,   81]], dtype=int8), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=int8),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0, 0), dtype=int8),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]],
+  
+          [[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]],
+  
+          [[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]]],
+  
+  
+         [[[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]],
+  
+          [[-128, -128, -128, -128, -128],
+           [-128, -108, -128, -128, -128]],
+  
+          [[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]]],
+  
+  
+         [[[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]],
+  
+          [[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]],
+  
+          [[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]]],
+  
+  
+         [[[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]],
+  
+          [[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]],
+  
+          [[-128, -128, -128, -128, -128],
+           [-128, -128, -128, -128, -128]]]], dtype=int8),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]]], dtype=int8), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 2, 5), dtype=int8),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 2, 5), dtype=int8),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int8),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=int16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0, 0], dtype=int16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([1291,  188,  727], dtype=int16),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[12571, 12571, 12571, 12571, 12571],
+         [12571, 12571, 12571, 32766,   965],
+         [12571, -4075, 12571, 12571,   100]], dtype=int16),
+  'repeats': array([0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([  -609, -16195,   -136, -31977,  -1176], dtype=int16),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[827, 905],
+         [827, 827],
+         [827, 827],
+         [827, 827],
+         [827, 827]], dtype=int16), 'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[  -461,    -55],
+         [-24437,    100]], dtype=int16), 'repeats': array([0, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 5, 0), dtype=int16),
+  'repeats': array([3, 1, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([-17083,   -309], dtype=int16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([  100,   274,  7612, -3972], dtype=int16),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([  100,   274,  7612, -3972], dtype=int16),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=int16),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=int16),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[  -418,  -1285, -29219],
+         [ 29281,    735,  12096],
+         [  1447,   -433,   -184],
+         [    47,    735,   2662]], dtype=int16), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[  -418,  -1285, -29219],
+         [ 29281,    735,  12096],
+         [  1447,   -433,   -184],
+         [    47,    735,   2662]], dtype=int16), 'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=int16),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0, 0), dtype=int16),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]],
+  
+          [[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]],
+  
+          [[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]]],
+  
+  
+         [[[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]],
+  
+          [[-30864, -30864, -30864, -30864, -30864],
+           [-30864,  -9690, -30864, -30864, -30864]],
+  
+          [[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]]],
+  
+  
+         [[[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]],
+  
+          [[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]],
+  
+          [[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]]],
+  
+  
+         [[[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]],
+  
+          [[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]],
+  
+          [[-30864, -30864, -30864, -30864, -30864],
+           [-30864, -30864, -30864, -30864, -30864]]]], dtype=int16),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]]], dtype=int16), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 2, 5), dtype=int16),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 2, 5), dtype=int16),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=int32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0, 0], dtype=int32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([17080,   350,  4707], dtype=int32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[  17332356,   17332356,   17332356,   17332356,   17332356],
+         [  17332356,   17332356,   17332356, 2147483646,       8771],
+         [  17332356,    -348105,   17332356,   17332356,   -2097151]],
+        dtype=int32), 'repeats': array([0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([      -3230,   -51666724,        -242, -1845892326,      -13747],
+        dtype=int32), 'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[6232, 7589],
+         [6232, 6232],
+         [6232, 6232],
+         [6232, 6232],
+         [6232, 6232]], dtype=int32), 'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[     -1820,        -97],
+         [-392918915,        100]], dtype=int32), 'repeats': array([0, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 5, 0), dtype=int32),
+  'repeats': array([3, 1, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([-65963443,      -823], dtype=int32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([    100,     653, 2589952, -322867], dtype=int32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([    100,     653, 2589952, -322867], dtype=int32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=int32),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=int32),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[      -1493,      -16881, -1073501732],
+         [ 1087225548,        4817,    14807725],
+         [      22376,       -1601,        -340],
+         [         84,        4817,      104820]], dtype=int32),
+  'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[      -1493,      -16881, -1073501732],
+         [ 1087225548,        4817,    14807725],
+         [      22376,       -1601,        -340],
+         [         84,        4817,      104820]], dtype=int32),
+  'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=int32),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0, 0), dtype=int32),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]],
+  
+          [[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]],
+  
+          [[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]]],
+  
+  
+         [[[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]],
+  
+          [[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558,    -6219276, -1487477558, -1487477558,
+            -1487477558]],
+  
+          [[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]]],
+  
+  
+         [[[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]],
+  
+          [[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]],
+  
+          [[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]]],
+  
+  
+         [[[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]],
+  
+          [[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]],
+  
+          [[-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558],
+           [-1487477558, -1487477558, -1487477558, -1487477558,
+            -1487477558]]]], dtype=int32), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]]], dtype=int32), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 2, 5), dtype=int32),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 2, 5), dtype=int32),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=int32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=int64),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0, 0]),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0]), 'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([70466,   454, 12185]),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[        21946003904,         21946003904,         21946003904,
+                  21946003904,         21946003904],
+         [        21946003904,         21946003904,         21946003904,
+          9223372036854775806,               28079],
+         [        21946003904,            -7206123,         21946003904,
+                  21946003904,      -4398046511104]]),
+  'repeats': array([0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([               -7431,        -443044644685,                 -291,
+         -3193572504759994368,               -52052]), 'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[17707, 23078],
+         [17707, 17707],
+         [17707, 17707],
+         [17707, 17707],
+         [17707, 17707]]), 'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[           -3544,             -116],
+         [-677223575464031,              100]]), 'repeats': array([0, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 5, 0), dtype=int64),
+  'repeats': array([3, 1, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([-932485210460,         -1302]),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([      100,       976, 296130998,  -6344247]),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([      100,       976, 296130998,  -6344247]),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=int64),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=int64),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[              -2754,              -69317, -107009016739534256],
+         [ 115144549670751968,               12566,         14771509637],
+         [             103207,               -3011,                -438],
+         [                100,               12566,             1025172]]),
+  'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[              -2754,              -69317, -107009016739534256],
+         [ 115144549670751968,               12566,         14771509637],
+         [             103207,               -3011,                -438],
+         [                100,               12566,             1025172]]),
+  'repeats': array([0, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0), dtype=int64),
+  'repeats': array([0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0, 0), dtype=int64),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]],
+  
+          [[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]],
+  
+          [[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]]],
+  
+  
+         [[[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]],
+  
+          [[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400,         -1912261168,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]],
+  
+          [[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]]],
+  
+  
+         [[[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]],
+  
+          [[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]],
+  
+          [[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]]],
+  
+  
+         [[[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]],
+  
+          [[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]],
+  
+          [[-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400],
+           [-769900789974566400, -769900789974566400,
+            -769900789974566400, -769900789974566400,
+            -769900789974566400]]]]), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]],
+  
+  
+         [[[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]],
+  
+          [[0, 0, 0, 0, 0],
+           [0, 0, 0, 0, 0]]]]), 'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 2, 5), dtype=int64),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 2, 5), dtype=int64),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0]), 'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0]), 'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0]), 'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=float16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0., 0., 0., 0.], dtype=float16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0., 0., 0., 0., 0.], dtype=float16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 0, 5), dtype=float16),
+  'repeats': array([1, 1, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 1), dtype=float16),
+  'repeats': array([1, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 4), dtype=float16),
+  'repeats': array([1, 0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(3, 0, 2, 0), dtype=float16),
+  'repeats': array([2, 1, 3, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=float16),
+  'repeats': array([2, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([ 0.6, -0. ,  0.6,  1.1,  0. ], dtype=float16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0), dtype=float16),
+  'repeats': array([3, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 4, 5, 0), dtype=float16),
+  'repeats': array([2, 0, 2, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 4, 5, 0), dtype=float16),
+  'repeats': array([2, 0, 2, 3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 5), dtype=float16),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 5), dtype=float16),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 0), dtype=float16),
+  'repeats': array([0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 0, 0, 0), dtype=float16),
+  'repeats': array([0, 0, 0, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=float16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 2, 0, 5), dtype=float16),
+  'repeats': array([2, 3, 3, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 2, 0, 5), dtype=float16),
+  'repeats': array([2, 0, 3, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 2, 0, 5), dtype=float16),
+  'repeats': array([2, 0, 3, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(5, 2, 0, 2), dtype=float16),
+  'repeats': array([2, 0, 3, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0., 0.], dtype=float16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([1., 2., 0.], dtype=float16),
+  'repeats': array([1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([1., 2., 2.], dtype=float16),
+  'repeats': array([1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([1., 0., 2.], dtype=float16),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=float32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0., 0., 0., 0.], dtype=float32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0., 0., 0., 0., 0.], dtype=float32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([1.4176679e+15, 1.4176679e+15, 1.4176679e+15, 1.4176679e+15,
+         1.4176679e+15], dtype=float32), 'repeats': array([3])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(1, 0), dtype=float32),
+  'repeats': array([2, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[3.8170044e+16, 3.8170044e+16, 3.8170044e+16],
+         [3.8170044e+16, 3.8170044e+16, 3.8170044e+16]], dtype=float32),
+  'repeats': array([0, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(0, 3, 5, 5), dtype=float32),
+  'repeats': array([3, 1, 0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  0.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  4.8680834e+16,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]]],
+  
+  
+         [[[ 1.8446743e+19,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.6485801e+16,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [-2.6500105e+16,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]]],
+  
+  
+         [[[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00, -0.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  0.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00, -3.1823541e+16],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]]],
+  
+  
+         [[[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [           nan,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [-4.7926737e+16,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]]],
+  
+  
+         [[[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]],
+  
+          [[ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00],
+           [ 2.0000000e+00,  2.0000000e+00,  2.0000000e+00]]]],
+        dtype=float32), 'repeats': array([2, 3, 3, 2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([-0.0000000e+00, -3.6395295e+16,  9.9999997e-06], dtype=float32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16]],
+  
+         [[-5.6292706e+16, -1.8446743e+19, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16]],
+  
+         [[-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16,  2.0000000e+00, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16, -5.6292706e+16, -5.6292706e+16,  2.5601456e+16]],
+  
+         [[-5.6292706e+16, -1.8156689e+16, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16]],
+  
+         [[-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16],
+          [-5.6292706e+16, -5.6292706e+16, -5.6292706e+16, -5.6292706e+16]]],
+        dtype=float32), 'repeats': array([0, 0, 1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([2., 2.], dtype=float32),
+  'repeats': array([1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([2., 2.], dtype=float32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0., 0.], dtype=float32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0., 0.], dtype=float32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(2, 4, 0), dtype=float32),
+  'repeats': array([0, 1, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(2, 4, 0), dtype=float32),
+  'repeats': array([0, 2, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(2, 4, 0), dtype=float32),
+  'repeats': array([0, 2, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(2, 4, 0), dtype=float32),
+  'repeats': array([0, 2, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(1, 4, 0), dtype=float32),
+  'repeats': array([0, 2, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(1, 4, 0), dtype=float32),
+  'repeats': array([0, 2, 0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=float32),
+  'repeats': array([1])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=float32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0.], dtype=float32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0.], dtype=float32),
+  'repeats': array([2])},
+ attribute_kwargs={},
+ spox_fun=tile)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0.], dtype=float32),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=float64),
+  'repeats': array([0])},
+ attribute_kwargs={},
+ spox_fun=tile)
+MLX error: float64 is not supported on the GPU at /private/tmp/mlx-c-20260708-16897-ls7m4o/mlx-c-0.6.0/mlx/c/ops.cpp:3816

@@ -1,0 +1,271 @@
+FFFFF..                                                                  [100%]
+=================================== FAILURES ===================================
+_____________________ test_ReduceLogSumExp_18[v18-uint32] ______________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('uint32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:80: in test_fun
+    expected = run_reference(model)
+               ^^^^^^^^^^^^^^^^^^^^
+onnx_tests/runtime_wrappers.py:34: in run_reference
+    result_list = sess.run(None, {})
+                  ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:603: in run
+    outputs = node.run(*inputs, **linked_attributes)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/op_run.py:458: in run
+    res = self._run(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum_exp.py:43: in _run
+    return compute_log_sum_exp(data, axes, keepdims)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+data = array([0], dtype=uint32), axes = None, keepdims = False
+
+    def compute_log_sum_exp(data, axes, keepdims):
+        data_max = data.copy()
+        ind = np.isinf(data_max)
+>       data_max[ind] = -np.inf
+        ^^^^^^^^^^^^^
+E       OverflowError: cannot convert float infinity to integer
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('uint32'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=uint32),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_log_sum_exp)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum_exp.py:14: OverflowError
+_____________________ test_ReduceLogSumExp_18[v18-uint64] ______________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('uint64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:80: in test_fun
+    expected = run_reference(model)
+               ^^^^^^^^^^^^^^^^^^^^
+onnx_tests/runtime_wrappers.py:34: in run_reference
+    result_list = sess.run(None, {})
+                  ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:603: in run
+    outputs = node.run(*inputs, **linked_attributes)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/op_run.py:458: in run
+    res = self._run(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum_exp.py:43: in _run
+    return compute_log_sum_exp(data, axes, keepdims)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+data = array([0], dtype=uint64), axes = None, keepdims = False
+
+    def compute_log_sum_exp(data, axes, keepdims):
+        data_max = data.copy()
+        ind = np.isinf(data_max)
+>       data_max[ind] = -np.inf
+        ^^^^^^^^^^^^^
+E       OverflowError: cannot convert float infinity to integer
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('uint64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=uint64),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_log_sum_exp)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum_exp.py:14: OverflowError
+______________________ test_ReduceLogSumExp_18[v18-int32] ______________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('int32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:80: in test_fun
+    expected = run_reference(model)
+               ^^^^^^^^^^^^^^^^^^^^
+onnx_tests/runtime_wrappers.py:34: in run_reference
+    result_list = sess.run(None, {})
+                  ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:603: in run
+    outputs = node.run(*inputs, **linked_attributes)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/op_run.py:458: in run
+    res = self._run(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum_exp.py:43: in _run
+    return compute_log_sum_exp(data, axes, keepdims)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+data = array([0], dtype=int32), axes = None, keepdims = False
+
+    def compute_log_sum_exp(data, axes, keepdims):
+        data_max = data.copy()
+        ind = np.isinf(data_max)
+>       data_max[ind] = -np.inf
+        ^^^^^^^^^^^^^
+E       OverflowError: cannot convert float infinity to integer
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('int32'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=int32),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_log_sum_exp)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum_exp.py:14: OverflowError
+______________________ test_ReduceLogSumExp_18[v18-int64] ______________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('int64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:80: in test_fun
+    expected = run_reference(model)
+               ^^^^^^^^^^^^^^^^^^^^
+onnx_tests/runtime_wrappers.py:34: in run_reference
+    result_list = sess.run(None, {})
+                  ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/reference_evaluator.py:603: in run
+    outputs = node.run(*inputs, **linked_attributes)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/op_run.py:458: in run
+    res = self._run(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum_exp.py:43: in _run
+    return compute_log_sum_exp(data, axes, keepdims)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+data = array([0]), axes = None, keepdims = False
+
+    def compute_log_sum_exp(data, axes, keepdims):
+        data_max = data.copy()
+        ind = np.isinf(data_max)
+>       data_max[ind] = -np.inf
+        ^^^^^^^^^^^^^
+E       OverflowError: cannot convert float infinity to integer
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('int64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0]),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_log_sum_exp)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnx/reference/ops/op_reduce_log_sum_exp.py:14: OverflowError
+_____________________ test_ReduceLogSumExp_18[v18-float16] _____________________
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('float16')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:94: in test_fun
+    h.assert_allclose(cand, exp, err_msg=err_msg)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+actual = array(0.127, dtype=float16), desired = array(0.1273, dtype=float16)
+err_msg = "output `0` of `ReduceLogSumExp` did not meet expectation\n  inputs: `{'data': array([-2.,  0.], dtype=float16), 'axes': array([], dtype=int64)}`\n  attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`"
+
+    def assert_allclose(
+        actual: np.ndarray, desired: np.ndarray, /, *, err_msg: str | None = None
+    ):
+        """Like `numpy.testing.assert_allclose` but takes dtype into account for relative
+        tolerance."""
+        if actual.dtype != desired.dtype:
+            raise TypeError(f"dtypes do not match `{actual.dtype}` != `{desired.dtype}`")
+        kwargs = {}
+        if actual.dtype == np.float16:
+            kwargs = {"rtol": 1e-3}
+        elif actual.dtype == np.float32:
+            kwargs = {"rtol": 1e-5}
+        elif actual.dtype == np.float64:
+            kwargs = {"rtol": 1e-7}
+    
+>       np.testing.assert_allclose(actual, desired, **kwargs, err_msg=err_msg)  # type: ignore
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: 
+E       Not equal to tolerance rtol=0.001, atol=0
+E       output `0` of `ReduceLogSumExp` did not meet expectation
+E         inputs: `{'data': array([-2.,  0.], dtype=float16), 'axes': array([], dtype=int64)}`
+E         attributes: `{'keepdims': 0, 'noop_with_empty_axes': 0}`
+E       Mismatched elements: 1 / 1 (100%)
+E       Max absolute difference among violations: 0.0003662
+E       Max relative difference among violations: 0.002876
+E        ACTUAL: array(0.127, dtype=float16)
+E        DESIRED: array(0.1273, dtype=float16)
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('float16'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([-2.,  0.], dtype=float16),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_log_sum_exp)
+E       Explanation:
+E           These lines were always and only run by failing examples:
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:114
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:612
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/arrayprint.py:640
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/_core/numeric.py:167
+E               /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/numpy/testing/_private/utils.py:253
+E               (and 9 more with settings.verbosity >= verbose)
+
+onnx_tests/helpers.py:129: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_statistical.py::test_ReduceLogSumExp_18[v18-uint32] - Overf...
+FAILED tests/test_statistical.py::test_ReduceLogSumExp_18[v18-uint64] - Overf...
+FAILED tests/test_statistical.py::test_ReduceLogSumExp_18[v18-int32] - Overfl...
+FAILED tests/test_statistical.py::test_ReduceLogSumExp_18[v18-int64] - Overfl...
+FAILED tests/test_statistical.py::test_ReduceLogSumExp_18[v18-float16] - Asse...
+5 failed, 2 passed, 1191 deselected in 2.30s

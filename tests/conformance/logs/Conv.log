@@ -1,0 +1,385 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+__________________________ test_Conv_11[v17-float16] ___________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('float16')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:144: in run_mlx
+    result = {k: v for k, v in zip(output_names, sess.run(None, {}))}
+                                                 ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x120edaa80>
+output_names = ['res'], input_feed = {}, run_options = None
+
+    def run(self, output_names, input_feed, run_options=None) -> Sequence[np.ndarray | SparseTensor | list | dict]:
+        """
+        Compute the predictions.
+    
+        :param output_names: name of the outputs
+        :param input_feed: dictionary ``{ input_name: input_value }``
+        :param run_options: See :class:`onnxruntime.RunOptions`.
+        :return: list of results, every result is either a numpy array,
+            a sparse tensor, a list or a dictionary.
+    
+        ::
+    
+            sess.run([output_name], {input_name: x})
+        """
+        self._validate_input(list(input_feed.keys()))
+        if not output_names:
+            output_names = [output.name for output in self._outputs_meta]
+        try:
+>           return self._sess.run(output_names, input_feed, run_options)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+E           Falsifying example: test_fun(
+E               op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E               dtype=dtype('float16'),
+E               data=data(...),
+E           )
+E           Draw 1: TestCaseDraw(inputs={'X': array([[[[0., 0.],
+E                      [0., 0.]]]], dtype=float16),
+E             'W': array([[[[0.]]]], dtype=float16),
+E             'B': None},
+E            attribute_kwargs={'dilations': (
+E                 1,  # or any other generated value
+E                 2,
+E             ), 'strides': (
+E                 1,  # or any other generated value
+E                 1,  # or any other generated value
+E             ), 'pads': None, 'auto_pad': 'SAME_UPPER', 'kernel_shape': (1,
+E              1), 'group': 1},
+E            spox_fun=conv)
+E           Explanation:
+E               These lines were always and only run by failing examples:
+E                   /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:321
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:320: InvalidArgument
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:06:30.150 python[9048:2544358] 2026-07-13 17:06:30.150469 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.200 python[9048:2544358] 2026-07-13 17:06:30.200467 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.220 python[9048:2544358] 2026-07-13 17:06:30.220603 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.304 python[9048:2544358] 2026-07-13 17:06:30.304347 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.350 python[9048:2544358] 2026-07-13 17:06:30.349998 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.369 python[9048:2544358] 2026-07-13 17:06:30.369348 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.388 python[9048:2544358] 2026-07-13 17:06:30.388212 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.405 python[9048:2544358] 2026-07-13 17:06:30.405235 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.422 python[9048:2544358] 2026-07-13 17:06:30.422473 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.439 python[9048:2544358] 2026-07-13 17:06:30.439661 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.456 python[9048:2544358] 2026-07-13 17:06:30.456764 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.474 python[9048:2544358] 2026-07-13 17:06:30.474900 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.492 python[9048:2544358] 2026-07-13 17:06:30.492287 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.509 python[9048:2544358] 2026-07-13 17:06:30.509101 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.526 python[9048:2544358] 2026-07-13 17:06:30.526389 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.544 python[9048:2544358] 2026-07-13 17:06:30.543979 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.560 python[9048:2544358] 2026-07-13 17:06:30.560930 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.577 python[9048:2544358] 2026-07-13 17:06:30.577807 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.595 python[9048:2544358] 2026-07-13 17:06:30.595063 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.613 python[9048:2544358] 2026-07-13 17:06:30.613336 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.630 python[9048:2544358] 2026-07-13 17:06:30.630293 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.647 python[9048:2544358] 2026-07-13 17:06:30.647923 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.672 python[9048:2544358] 2026-07-13 17:06:30.672102 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.692 python[9048:2544358] 2026-07-13 17:06:30.692094 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.768 python[9048:2544358] 2026-07-13 17:06:30.768582 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.854 python[9048:2544358] 2026-07-13 17:06:30.854000 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.875 python[9048:2544358] 2026-07-13 17:06:30.875311 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.895 python[9048:2544358] 2026-07-13 17:06:30.895040 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.911 python[9048:2544358] 2026-07-13 17:06:30.911568 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.928 python[9048:2544358] 2026-07-13 17:06:30.928313 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.945 python[9048:2544358] 2026-07-13 17:06:30.945501 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.965 python[9048:2544358] 2026-07-13 17:06:30.965562 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.982 python[9048:2544358] 2026-07-13 17:06:30.982963 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:30.999 python[9048:2544358] 2026-07-13 17:06:30.999473 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.044 python[9048:2544358] 2026-07-13 17:06:31.044054 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.063 python[9048:2544358] 2026-07-13 17:06:31.063673 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.307 python[9048:2544358] 2026-07-13 17:06:31.307334 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+__________________________ test_Conv_11[v17-float32] ___________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('float32')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:144: in run_mlx
+    result = {k: v for k, v in zip(output_names, sess.run(None, {}))}
+                                                 ^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x11e7d9a90>
+output_names = ['res'], input_feed = {}, run_options = None
+
+    def run(self, output_names, input_feed, run_options=None) -> Sequence[np.ndarray | SparseTensor | list | dict]:
+        """
+        Compute the predictions.
+    
+        :param output_names: name of the outputs
+        :param input_feed: dictionary ``{ input_name: input_value }``
+        :param run_options: See :class:`onnxruntime.RunOptions`.
+        :return: list of results, every result is either a numpy array,
+            a sparse tensor, a list or a dictionary.
+    
+        ::
+    
+            sess.run([output_name], {input_name: x})
+        """
+        self._validate_input(list(input_feed.keys()))
+        if not output_names:
+            output_names = [output.name for output in self._outputs_meta]
+        try:
+>           return self._sess.run(output_names, input_feed, run_options)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+E           Falsifying example: test_fun(
+E               op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E               dtype=dtype('float32'),
+E               data=data(...),
+E           )
+E           Draw 1: TestCaseDraw(inputs={'X': array([[[[0., 0.],
+E                      [0., 0.]]]], dtype=float32),
+E             'W': array([[[[0.]]]], dtype=float32),
+E             'B': None},
+E            attribute_kwargs={'dilations': (
+E                 1,  # or any other generated value
+E                 2,
+E             ), 'strides': (
+E                 1,  # or any other generated value
+E                 1,  # or any other generated value
+E             ), 'pads': None, 'auto_pad': 'SAME_UPPER', 'kernel_shape': (1,
+E              1), 'group': 1},
+E            spox_fun=conv)
+E           Explanation:
+E               These lines were always and only run by failing examples:
+E                   /Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:321
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:320: InvalidArgument
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:06:31.356 python[9048:2544358] 2026-07-13 17:06:31.356557 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.374 python[9048:2544358] 2026-07-13 17:06:31.374565 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.391 python[9048:2544358] 2026-07-13 17:06:31.391277 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.414 python[9048:2544358] 2026-07-13 17:06:31.414435 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.434 python[9048:2544358] 2026-07-13 17:06:31.434782 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.452 python[9048:2544358] 2026-07-13 17:06:31.452535 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.469 python[9048:2544358] 2026-07-13 17:06:31.469132 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.485 python[9048:2544358] 2026-07-13 17:06:31.485143 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.518 python[9048:2544358] 2026-07-13 17:06:31.518307 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.536 python[9048:2544358] 2026-07-13 17:06:31.536009 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.554 python[9048:2544358] 2026-07-13 17:06:31.554037 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.572 python[9048:2544358] 2026-07-13 17:06:31.572076 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.589 python[9048:2544358] 2026-07-13 17:06:31.589862 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.607 python[9048:2544358] 2026-07-13 17:06:31.607767 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.624 python[9048:2544358] 2026-07-13 17:06:31.624352 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.650 python[9048:2544358] 2026-07-13 17:06:31.650947 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.667 python[9048:2544358] 2026-07-13 17:06:31.667716 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.742 python[9048:2544358] 2026-07-13 17:06:31.742425 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.823 python[9048:2544358] 2026-07-13 17:06:31.823582 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.844 python[9048:2544358] 2026-07-13 17:06:31.844579 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.864 python[9048:2544358] 2026-07-13 17:06:31.864338 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.881 python[9048:2544358] 2026-07-13 17:06:31.881130 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.897 python[9048:2544358] 2026-07-13 17:06:31.897301 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.913 python[9048:2544358] 2026-07-13 17:06:31.913828 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.933 python[9048:2544358] 2026-07-13 17:06:31.933048 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.949 python[9048:2544358] 2026-07-13 17:06:31.949182 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.966 python[9048:2544358] 2026-07-13 17:06:31.966516 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:31.983 python[9048:2544358] 2026-07-13 17:06:31.983523 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:32.003 python[9048:2544358] 2026-07-13 17:06:32.003179 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+2026-07-13 17:06:32.308 python[9048:2544358] 2026-07-13 17:06:32.308690 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running Conv node. Name:'Conv_0' Status Message: Dilation not supported for AutoPadType::SAME_UPPER or AutoPadType::SAME_LOWER.
+__________________________ test_Conv_11[v17-float64] ___________________________
+
+op = <module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>
+dtype = dtype('float64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:138: in run_mlx
+    sess = ort.InferenceSession(
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:528: in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x11e7d9d60>
+providers = ['MLXExecutionProvider', 'CPUExecutionProvider']
+provider_options = [{}, {}], disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+E       
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v17' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v17.py'>,
+E           dtype=dtype('float64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'X': array([[[[0., 0.],
+E                  [0., 0.]]]]), 'W': array([[[[0.]]]]), 'B': None},
+E        attribute_kwargs={'dilations': (
+E             1,  # or any other generated value
+E             1,  # or any other generated value
+E         ), 'strides': (
+E             1,  # or any other generated value
+E             1,  # or any other generated value
+E         ), 'pads': None, 'auto_pad': 'SAME_UPPER', 'kernel_shape': (1,
+E          1), 'group': 1},
+E        spox_fun=conv)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: Fail
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:06:32.337 python[9048:2544358] 2026-07-13 17:06:32.337543 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.361 python[9048:2544358] 2026-07-13 17:06:32.361256 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.382 python[9048:2544358] 2026-07-13 17:06:32.382648 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.404 python[9048:2544358] 2026-07-13 17:06:32.404954 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.427 python[9048:2544358] 2026-07-13 17:06:32.427595 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.449 python[9048:2544358] 2026-07-13 17:06:32.449900 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.471 python[9048:2544358] 2026-07-13 17:06:32.471747 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.492 python[9048:2544358] 2026-07-13 17:06:32.492710 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.515 python[9048:2544358] 2026-07-13 17:06:32.515738 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.537 python[9048:2544358] 2026-07-13 17:06:32.537698 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.558 python[9048:2544358] 2026-07-13 17:06:32.558156 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.581 python[9048:2544358] 2026-07-13 17:06:32.581637 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.602 python[9048:2544358] 2026-07-13 17:06:32.602730 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.624 python[9048:2544358] 2026-07-13 17:06:32.624900 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.646 python[9048:2544358] 2026-07-13 17:06:32.646385 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.667 python[9048:2544358] 2026-07-13 17:06:32.667219 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.688 python[9048:2544358] 2026-07-13 17:06:32.688357 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.710 python[9048:2544358] 2026-07-13 17:06:32.710380 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.732 python[9048:2544358] 2026-07-13 17:06:32.732364 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.754 python[9048:2544358] 2026-07-13 17:06:32.753993 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.776 python[9048:2544358] 2026-07-13 17:06:32.776039 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.799 python[9048:2544358] 2026-07-13 17:06:32.799692 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.834 python[9048:2544358] 2026-07-13 17:06:32.834637 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.858 python[9048:2544358] 2026-07-13 17:06:32.858201 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.894 python[9048:2544358] 2026-07-13 17:06:32.894262 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.919 python[9048:2544358] 2026-07-13 17:06:32.919537 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.940 python[9048:2544358] 2026-07-13 17:06:32.940293 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.961 python[9048:2544358] 2026-07-13 17:06:32.961825 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:32.983 python[9048:2544358] 2026-07-13 17:06:32.983927 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:33.008 python[9048:2544358] 2026-07-13 17:06:33.008193 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:33.028 python[9048:2544358] 2026-07-13 17:06:33.028937 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:33.050 python[9048:2544358] 2026-07-13 17:06:33.050570 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:33.072 python[9048:2544358] 2026-07-13 17:06:33.072269 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:33.097 python[9048:2544358] 2026-07-13 17:06:33.097152 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:33.121 python[9048:2544358] 2026-07-13 17:06:33.121848 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+2026-07-13 17:06:33.531 python[9048:2544358] 2026-07-13 17:06:33.531303 [E:onnxruntime:, inference_session.cc:2805 operator()] Exception during initialization: /Users/cloudtest/vss/_work/1/s/onnxruntime/core/optimizer/transformer_memcpy.cc:254 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node &) const !node_provider_type.empty() was false. Provider type for Conv node with name 'Conv_0' is not set.
+=========================== short test summary info ============================
+FAILED tests/test_conv.py::test_Conv_11[v17-float16] - onnxruntime.capi.onnxr...
+FAILED tests/test_conv.py::test_Conv_11[v17-float32] - onnxruntime.capi.onnxr...
+FAILED tests/test_conv.py::test_Conv_11[v17-float64] - onnxruntime.capi.onnxr...
+3 failed, 1195 deselected in 4.04s

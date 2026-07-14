@@ -1,0 +1,406 @@
+.F........F........                                                      [100%]
+=================================== FAILURES ===================================
+________________________ test_ReduceMax_18[v18-uint64] _________________________
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x1621d7a70>
+output_names = ['res'], input_feed = {}, run_options = None
+
+    def run(self, output_names, input_feed, run_options=None) -> Sequence[np.ndarray | SparseTensor | list | dict]:
+        """
+        Compute the predictions.
+    
+        :param output_names: name of the outputs
+        :param input_feed: dictionary ``{ input_name: input_value }``
+        :param run_options: See :class:`onnxruntime.RunOptions`.
+        :return: list of results, every result is either a numpy array,
+            a sparse tensor, a list or a dictionary.
+    
+        ::
+    
+            sess.run([output_name], {input_name: x})
+        """
+        self._validate_input(list(input_feed.keys()))
+        if not output_names:
+            output_names = [output.name for output in self._outputs_meta]
+        try:
+>           return self._sess.run(output_names, input_feed, run_options)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           onnxruntime.capi.onnxruntime_pybind11_state.EPFail: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:320: EPFail
+
+During handling of the above exception, another exception occurred:
+
+op = <module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>
+dtype = dtype('uint64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:144: in run_mlx
+    result = {k: v for k, v in zip(output_names, sess.run(None, {}))}
+                                                 ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:325: in run
+    self.set_providers(self._fallback_providers)
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:275: in set_providers
+    self._reset_session(providers, provider_options)
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:668: in _reset_session
+    self._create_inference_session(providers, provider_options)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x1621d7a70>
+providers = ['CPUExecutionProvider'], provider_options = [{}]
+disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.NotImplemented: [ONNXRuntimeError] : 9 : NOT_IMPLEMENTED : Could not find an implementation for ReduceMax(18) node with name 'ReduceMax_0'
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+E           dtype=dtype('uint64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=uint64),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_max)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: NotImplemented
+----------------------------- Captured stdout call -----------------------------
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:57.790 python[8524:2501169] 2026-07-13 17:04:57.790419 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:57.860 python[8524:2501169] 2026-07-13 17:04:57.860513 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:57.895 python[8524:2501169] 2026-07-13 17:04:57.895568 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:57.930 python[8524:2501169] 2026-07-13 17:04:57.930664 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:57.964 python[8524:2501169] 2026-07-13 17:04:57.964930 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:57.998 python[8524:2501169] 2026-07-13 17:04:57.998774 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:58.032 python[8524:2501169] 2026-07-13 17:04:58.032691 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:58.066 python[8524:2501169] 2026-07-13 17:04:58.066860 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:58.101 python[8524:2501169] 2026-07-13 17:04:58.101353 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:58.134 python[8524:2501169] 2026-07-13 17:04:58.134607 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:58.167 python[8524:2501169] 2026-07-13 17:04:58.167911 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:58.206 python[8524:2501169] 2026-07-13 17:04:58.206914 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+________________________ test_ReduceMax_20[v20-uint64] _________________________
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x1621d7020>
+output_names = ['res'], input_feed = {}, run_options = None
+
+    def run(self, output_names, input_feed, run_options=None) -> Sequence[np.ndarray | SparseTensor | list | dict]:
+        """
+        Compute the predictions.
+    
+        :param output_names: name of the outputs
+        :param input_feed: dictionary ``{ input_name: input_value }``
+        :param run_options: See :class:`onnxruntime.RunOptions`.
+        :return: list of results, every result is either a numpy array,
+            a sparse tensor, a list or a dictionary.
+    
+        ::
+    
+            sess.run([output_name], {input_name: x})
+        """
+        self._validate_input(list(input_feed.keys()))
+        if not output_names:
+            output_names = [output.name for output in self._outputs_meta]
+        try:
+>           return self._sess.run(output_names, input_feed, run_options)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           onnxruntime.capi.onnxruntime_pybind11_state.EPFail: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:320: EPFail
+
+During handling of the above exception, another exception occurred:
+
+op = <module 'spox.opset.ai.onnx.v20' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v20.py'>
+dtype = dtype('uint64')
+
+    @given(data=st.data())
+>   @pytest.mark.parametrize(
+               ^^^^^^^^^^^^
+        "op,dtype", dtype_params(op_name, version, type_var=type_var), ids=format
+    )
+
+tests/utils.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/utils.py:79: in test_fun
+    candidate = run_candidate(model)
+                ^^^^^^^^^^^^^^^^^^^^
+../onnxruntime-mlx-conf/tests/conformance/mlx_runtime_wrapper.py:144: in run_mlx
+    result = {k: v for k, v in zip(output_names, sess.run(None, {}))}
+                                                 ^^^^^^^^^^^^^^^^^^
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:325: in run
+    self.set_providers(self._fallback_providers)
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:275: in set_providers
+    self._reset_session(providers, provider_options)
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:668: in _reset_session
+    self._create_inference_session(providers, provider_options)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <onnxruntime.capi.onnxruntime_inference_collection.InferenceSession object at 0x1621d7020>
+providers = ['CPUExecutionProvider'], provider_options = [{}]
+disabled_optimizers = set()
+
+    def _create_inference_session(self, providers, provider_options, disabled_optimizers=None):
+        available_providers = C.get_available_providers()
+    
+        # Validate that TensorrtExecutionProvider and NvTensorRTRTXExecutionProvider are not both specified
+        if providers:
+            has_tensorrt = any(
+                provider == "TensorrtExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                for provider in providers
+            )
+            has_tensorrt_rtx = any(
+                provider == "NvTensorRTRTXExecutionProvider"
+                or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                for provider in providers
+            )
+            if has_tensorrt and has_tensorrt_rtx:
+                raise ValueError(
+                    "Cannot enable both 'TensorrtExecutionProvider' and 'NvTensorRTRTXExecutionProvider' "
+                    "in the same session."
+                )
+        # Tensorrt and TensorRT RTX can fall back to CUDA if it's explicitly assigned. All others fall back to CPU.
+        if "NvTensorRTRTXExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "NvTensorRTRTXExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "NvTensorRTRTXExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        elif "TensorrtExecutionProvider" in available_providers:
+            if (
+                providers
+                and any(
+                    provider == "CUDAExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "CUDAExecutionProvider")
+                    for provider in providers
+                )
+                and any(
+                    provider == "TensorrtExecutionProvider"
+                    or (isinstance(provider, tuple) and provider[0] == "TensorrtExecutionProvider")
+                    for provider in providers
+                )
+            ):
+                self._fallback_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            else:
+                self._fallback_providers = ["CPUExecutionProvider"]
+        else:
+            self._fallback_providers = ["CPUExecutionProvider"]
+    
+        # validate providers and provider_options before other initialization
+        providers, provider_options = check_and_normalize_provider_args(
+            providers, provider_options, available_providers
+        )
+    
+        # Print a warning if user passed providers to InferenceSession() but the SessionOptions instance
+        # already has provider information (e.g., via add_provider_for_devices()). The providers specified
+        # here will take precedence.
+        if self._sess_options is not None and (providers or provider_options) and self._sess_options.has_providers():
+            warnings.warn(
+                "Specified 'providers'/'provider_options' when creating InferenceSession but SessionOptions has "
+                "already been configured with providers. InferenceSession will only use the providers "
+                "passed to InferenceSession()."
+            )
+    
+        session_options = self._sess_options if self._sess_options else C.get_default_session_options()
+    
+        self._register_ep_custom_ops(session_options, providers, provider_options, available_providers)
+    
+        if self._model_path:
+            sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
+        else:
+            sess = C.InferenceSession(session_options, self._model_bytes, False, self._read_config_from_model)
+    
+        if disabled_optimizers is None:
+            disabled_optimizers = set()
+        elif not isinstance(disabled_optimizers, set):
+            # convert to set. assumes iterable
+            disabled_optimizers = set(disabled_optimizers)
+    
+        # initialize the C++ InferenceSession
+>       sess.initialize_session(providers, provider_options, disabled_optimizers)
+E       onnxruntime.capi.onnxruntime_pybind11_state.NotImplemented: [ONNXRuntimeError] : 9 : NOT_IMPLEMENTED : Could not find an implementation for ReduceMax(20) node with name 'ReduceMax_0'
+E       Falsifying example: test_fun(
+E           op=<module 'spox.opset.ai.onnx.v20' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v20.py'>,
+E           dtype=dtype('uint64'),
+E           data=data(...),
+E       )
+E       Draw 1: TestCaseDraw(inputs={'data': array([0], dtype=uint64),
+E         'axes': array([], dtype=int64)},
+E        attribute_kwargs={'keepdims': 0, 'noop_with_empty_axes': 0},
+E        spox_fun=reduce_max)
+
+.pixi/envs/default/lib/python3.14/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py:634: NotImplemented
+----------------------------- Captured stdout call -----------------------------
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+EP Error: [ONNXRuntimeError] : 11 : EP_FAIL : Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced using ['MLXExecutionProvider', 'CPUExecutionProvider']
+Falling back to ['CPUExecutionProvider'] and retrying.
+----------------------------- Captured stderr call -----------------------------
+2026-07-13 17:04:58.963 python[8524:2501169] 2026-07-13 17:04:58.963184 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:58.998 python[8524:2501169] 2026-07-13 17:04:58.998755 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.033 python[8524:2501169] 2026-07-13 17:04:59.033546 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.069 python[8524:2501169] 2026-07-13 17:04:59.068975 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.105 python[8524:2501169] 2026-07-13 17:04:59.104964 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.139 python[8524:2501169] 2026-07-13 17:04:59.139554 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.222 python[8524:2501169] 2026-07-13 17:04:59.222823 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.261 python[8524:2501169] 2026-07-13 17:04:59.261507 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.296 python[8524:2501169] 2026-07-13 17:04:59.296494 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.330 python[8524:2501169] 2026-07-13 17:04:59.330339 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.365 python[8524:2501169] 2026-07-13 17:04:59.365172 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+2026-07-13 17:04:59.404 python[8524:2501169] 2026-07-13 17:04:59.404035 [E:onnxruntime:, sequential_executor.cc:620 ExecuteKernel] Non-zero status code returned while running MLXExecutionProvider_15404773792251323432_0 node. Name:'MLXExecutionProvider_MLXExecutionProvider_15404773792251323432_0_0' Status Message: MetalEP MLX subgraph failed: MLX: unsupported boundary output dtype for ReduceMax_0_reduced
+=========================== short test summary info ============================
+FAILED tests/test_statistical.py::test_ReduceMax_18[v18-uint64] - onnxruntime...
+FAILED tests/test_statistical.py::test_ReduceMax_20[v20-uint64] - onnxruntime...
+2 failed, 17 passed, 1179 deselected in 3.12s

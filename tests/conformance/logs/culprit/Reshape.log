@@ -1,0 +1,3332 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+hypothesis profile 'onnx-tests-with-verbose-verbosity' -> deadline=None, max_examples=25, verbosity=Verbosity.verbose
+rootdir: /Users/justinc/Documents/GitHub/onnx-tests
+configfile: pyproject.toml
+plugins: xdist-3.8.0, hypothesis-6.155.7
+collected 1198 items / 1185 deselected / 13 selected
+
+tests/test_manipulation_functions.py Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint8),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0, 0, 0, 0], dtype=uint8),
+  'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([255], dtype=uint8),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[210, 214, 214, 214, 214, 255, 214, 214, 156, 179, 212, 176]],
+        dtype=uint8), 'shape': array([-1,  3,  4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(160, dtype=uint8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([145,  94, 111], dtype=uint8),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([42, 29, 29, 29, 29, 29, 29, 29, 29, 29, 29, 31, 29, 29, 29, 56, 29,
+         29, 29, 56], dtype=uint8), 'shape': array([ 5, -1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 2, 0, 1), dtype=uint8),
+  'shape': array([1, 4, 2, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(154, dtype=uint8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 0, 4, 4), dtype=uint8),
+  'shape': array([0, 4, 4, 4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=uint8),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=uint8),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(18, 0), dtype=uint8),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint8),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[ 23,  23],
+           [ 23, 155],
+           [ 23, 100],
+           [161,  23],
+           [ 23,  23]]],
+  
+  
+         [[[ 23,  29],
+           [ 23,  23],
+           [ 23,  23],
+           [ 63,  23],
+           [ 23,  23]]],
+  
+  
+         [[[ 23, 112],
+           [ 23,  23],
+           [ 23,  23],
+           [ 23,  23],
+           [ 23,  23]]],
+  
+  
+         [[[ 23,  23],
+           [ 23,  23],
+           [ 23,  23],
+           [ 23,  74],
+           [148,  23]]]], dtype=uint8), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[ 23,  23],
+           [ 23, 155],
+           [ 23, 100],
+           [148,  23],
+           [ 23,  23]]],
+  
+  
+         [[[ 23,  29],
+           [ 23,  23],
+           [ 23,  23],
+           [ 63,  23],
+           [ 23,  23]]],
+  
+  
+         [[[ 23, 112],
+           [ 23,  23],
+           [ 23,  23],
+           [ 23,  23],
+           [ 23,  23]]],
+  
+  
+         [[[ 23,  23],
+           [ 23,  23],
+           [ 23,  23],
+           [ 23,  74],
+           [148,  23]]]], dtype=uint8), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]]], dtype=uint8), 'shape': array([-1,  8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=uint8), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=uint8), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(2, dtype=uint8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([244, 250,  55,  80,  31], dtype=uint8),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([244, 250,  55,  55,  31], dtype=uint8),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  5, 250,  55,  55,  31], dtype=uint8),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0, 0, 0, 0], dtype=uint16),
+  'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([65535], dtype=uint16),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[14214, 15983, 15983, 15983, 15983, 65535, 15983, 15983,  3042,
+           5717, 14928,  5298]], dtype=uint16), 'shape': array([-1,  3,  4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(3421, dtype=uint16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2297,  678, 1011], dtype=uint16),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([224, 155, 155, 155, 155, 155, 155, 155, 155, 155, 155, 167, 155,
+         155, 155, 300, 155, 155, 155, 302], dtype=uint16),
+  'shape': array([ 5, -1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 2, 0, 1), dtype=uint16),
+  'shape': array([1, 4, 2, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(2892, dtype=uint16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 0, 4, 4), dtype=uint16),
+  'shape': array([0, 4, 4, 4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=uint16),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=uint16),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(18, 0), dtype=uint16),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint16),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[  124,   124],
+           [  124,  2950],
+           [  124, 65535],
+           [ 3512,   124],
+           [  124,   124]]],
+  
+  
+         [[[  124,   154],
+           [  124,   124],
+           [  124,   124],
+           [  349,   124],
+           [  124,   124]]],
+  
+  
+         [[[  124,  1047],
+           [  124,   124],
+           [  124,   124],
+           [  124,   124],
+           [  124,   124]]],
+  
+  
+         [[[  124,   124],
+           [  124,   124],
+           [  124,   124],
+           [  124,   441],
+           [ 2506,   124]]]], dtype=uint16), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[  124,   124],
+           [  124,  2950],
+           [  124, 65535],
+           [ 2506,   124],
+           [  124,   124]]],
+  
+  
+         [[[  124,   154],
+           [  124,   124],
+           [  124,   124],
+           [  349,   124],
+           [  124,   124]]],
+  
+  
+         [[[  124,  1047],
+           [  124,   124],
+           [  124,   124],
+           [  124,   124],
+           [  124,   124]]],
+  
+  
+         [[[  124,   124],
+           [  124,   124],
+           [  124,   124],
+           [  124,   441],
+           [ 2506,   124]]]], dtype=uint16), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]]], dtype=uint16), 'shape': array([-1,  8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=uint16), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=uint16), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(2, dtype=uint16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([43567, 53837,   297,   507,   166], dtype=uint16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([43567, 53837,   297,   297,   166], dtype=uint16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([    5, 53837,   297,   297,   166], dtype=uint16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint32),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0, 0, 0, 0], dtype=uint32),
+  'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([4294967295], dtype=uint32),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[   5663150,    8433860,    8433860,    8433860,    8433860,
+          4294967295,    8433860,    8433860,      75361,     372229,
+             6678897,     303794]], dtype=uint32),
+  'shape': array([-1,  3,  4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(100077, dtype=uint32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([39165,  3053,  6732], dtype=uint32),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([409, 258, 258, 258, 258, 258, 258, 258, 258, 258, 258, 280, 258,
+         258, 258, 674, 258, 258, 258, 680], dtype=uint32),
+  'shape': array([ 5, -1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 2, 0, 1), dtype=uint32),
+  'shape': array([1, 4, 2, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(66874, dtype=uint32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 0, 4, 4), dtype=uint32),
+  'shape': array([0, 4, 4, 4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=uint32),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=uint32),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(18, 0), dtype=uint32),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint32),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[   207,    207],
+           [   207,  70067],
+           [   207, 262143],
+           [106706,    207],
+           [   207,    207]]],
+  
+  
+         [[[   207,    256],
+           [   207,    207],
+           [   207,    207],
+           [   882,    207],
+           [   207,    207]]],
+  
+  
+         [[[   207,   7228],
+           [   207,    207],
+           [   207,    207],
+           [   207,    207],
+           [   207,    207]]],
+  
+  
+         [[[   207,    207],
+           [   207,    207],
+           [   207,    207],
+           [   207,   1357],
+           [ 47834,    207]]]], dtype=uint32), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[   207,    207],
+           [   207,  70067],
+           [   207, 262143],
+           [ 47834,    207],
+           [   207,    207]]],
+  
+  
+         [[[   207,    256],
+           [   207,    207],
+           [   207,    207],
+           [   882,    207],
+           [   207,    207]]],
+  
+  
+         [[[   207,   7228],
+           [   207,    207],
+           [   207,    207],
+           [   207,    207],
+           [   207,    207]]],
+  
+  
+         [[[   207,    207],
+           [   207,    207],
+           [   207,    207],
+           [   207,   1357],
+           [ 47834,    207]]]], dtype=uint32), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]]], dtype=uint32), 'shape': array([-1,  8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=uint32), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=uint32), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(2, dtype=uint32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 497568121, 1450198753,        660,       1758,        277],
+        dtype=uint32), 'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 497568121, 1450198753,        660,        660,        277],
+        dtype=uint32), 'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([         5, 1450198753,        660,        660,        277],
+        dtype=uint32), 'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint64),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint64),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0, 0, 0, 0], dtype=uint64),
+  'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([18446744073709551615], dtype=uint64),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[           914399828,           2119998963,           2119998963,
+                    2119998963,           2119998963, 18446744073709551615,
+                    2119998963,           2119998963,               522109,
+                       6248239,           1289911109,              4490366]],
+        dtype=uint64), 'shape': array([-1,  3,  4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(796952, dtype=uint64),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([201815,   6503,  18135], dtype=uint64),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([537, 309, 309, 309, 309, 309, 309, 309, 309, 309, 309, 341, 309,
+         309, 309, 986, 309, 309, 309, 997], dtype=uint64),
+  'shape': array([ 5, -1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 2, 0, 1), dtype=uint64),
+  'shape': array([1, 4, 2, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(437806, dtype=uint64),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 0, 4, 4), dtype=uint64),
+  'shape': array([0, 4, 4, 4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=uint64),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=uint64),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(18, 0), dtype=uint64),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint64),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=uint64),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[       231488868,        231488868],
+           [       231488868,        231488868],
+           [       231488868, 4503599627370497],
+           [       231488868,        231488868],
+           [       231488868,        231488868]]],
+  
+  
+         [[[       231488868,        231488868],
+           [       231488868,        231488868],
+           [       231488868,        231488868],
+           [           32511,        231488868],
+           [       231488868,        231488868]]],
+  
+  
+         [[[       231488868,        231488868],
+           [             223,        231488868],
+           [       231488868,        231488868],
+           [       231488868,        231488868],
+           [       231488868,        231488868]]],
+  
+  
+         [[[       231488868,        231488868],
+           [       231488868,        231488868],
+           [       231488868,        231488868],
+           [       231488868,             2339],
+           [          268856,        231488868]]]], dtype=uint64),
+  'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[268856,      0],
+           [     0,      0]]],
+  
+  
+         [[[     0,      0],
+           [     0,      0]]],
+  
+  
+         [[[     0,      0],
+           [     0,      0]]],
+  
+  
+         [[[     0,      0],
+           [     0,      0]]]], dtype=uint64), 'shape': array([2, 8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[2],
+         [2],
+         [2],
+         [2]], dtype=uint64), 'shape': array([-1,  1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([53513397,   205099], dtype=uint64),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([     0, 205099], dtype=uint64),
+  'shape': array([2])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint64),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([      8826, 8589934593,       3540,      26304,      45466],
+        dtype=uint64), 'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([      8826, 8589934593,       3540,      26304,      45466],
+        dtype=uint64), 'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('uint64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=uint64),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int8),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0, 0, 0, 0], dtype=int8),
+  'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([127], dtype=int8),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[ 82,  86,  86,  86,  86, 127,  86,  86,  28,  51,  84,  48]],
+        dtype=int8), 'shape': array([-1,  3,  4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(32, dtype=int8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 17, -34, -17], dtype=int8),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-86, -99, -99, -99, -99, -99, -99, -99, -99, -99, -99, -97, -99,
+         -99, -99, -72, -99, -99, -99, -72], dtype=int8),
+  'shape': array([ 5, -1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 2, 0, 1), dtype=int8),
+  'shape': array([1, 4, 2, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(26, dtype=int8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 0, 4, 4), dtype=int8),
+  'shape': array([0, 4, 4, 4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=int8),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=int8),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(18, 0), dtype=int8),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int8),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[-105, -105],
+           [-105,   27],
+           [-105,  100],
+           [  33, -105],
+           [-105, -105]]],
+  
+  
+         [[[-105,  -99],
+           [-105, -105],
+           [-105, -105],
+           [ -65, -105],
+           [-105, -105]]],
+  
+  
+         [[[-105,  -16],
+           [-105, -105],
+           [-105, -105],
+           [-105, -105],
+           [-105, -105]]],
+  
+  
+         [[[-105, -105],
+           [-105, -105],
+           [-105, -105],
+           [-105,  -54],
+           [  20, -105]]]], dtype=int8), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[-105, -105],
+           [-105,   27],
+           [-105,  100],
+           [  20, -105],
+           [-105, -105]]],
+  
+  
+         [[[-105,  -99],
+           [-105, -105],
+           [-105, -105],
+           [ -65, -105],
+           [-105, -105]]],
+  
+  
+         [[[-105,  -16],
+           [-105, -105],
+           [-105, -105],
+           [-105, -105],
+           [-105, -105]]],
+  
+  
+         [[[-105, -105],
+           [-105, -105],
+           [-105, -105],
+           [-105,  -54],
+           [  20, -105]]]], dtype=int8), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]]], dtype=int8), 'shape': array([-1,  8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=int8), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=int8), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(2, dtype=int8),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([116, 122, -73, -48, -97], dtype=int8),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([116, 122, -73, -73, -97], dtype=int8),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  5, 122, -73, -73, -97], dtype=int8),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0, 0, 0, 0], dtype=int16),
+  'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([32767], dtype=int16),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[ 2772,  3324,  3324,  3324,  3324, 32767,  3324,  3324,   275,
+            698,  2990,   624]], dtype=int16), 'shape': array([-1,  3,  4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(327, dtype=int16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 168, -344, -161], dtype=int16),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-3163, -6125, -6125, -6125, -6125, -6125, -6125, -6125, -6125,
+         -6125, -6125, -5416, -6125, -6125, -6125, -1665, -6125, -6125,
+         -6125, -1648], dtype=int16), 'shape': array([ 5, -1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 2, 0, 1), dtype=int16),
+  'shape': array([1, 4, 2, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(256, dtype=int16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 0, 4, 4), dtype=int16),
+  'shape': array([0, 4, 4, 4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=int16),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=int16),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(18, 0), dtype=int16),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int16),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[-8299, -8299],
+           [-8299,   263],
+           [-8299,   100],
+           [  340, -8299],
+           [-8299, -8299]]],
+  
+  
+         [[[-8299, -6171],
+           [-8299, -8299],
+           [-8299, -8299],
+           [-1211, -8299],
+           [-8299, -8299]]],
+  
+  
+         [[[-8299,  -146],
+           [-8299, -8299],
+           [-8299, -8299],
+           [-8299, -8299],
+           [-8299, -8299]]],
+  
+  
+         [[[-8299, -8299],
+           [-8299, -8299],
+           [-8299, -8299],
+           [-8299,  -756],
+           [  201, -8299]]]], dtype=int16), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[-8299, -8299],
+           [-8299,   263],
+           [-8299,   100],
+           [  201, -8299],
+           [-8299, -8299]]],
+  
+  
+         [[[-8299, -6171],
+           [-8299, -8299],
+           [-8299, -8299],
+           [-1211, -8299],
+           [-8299, -8299]]],
+  
+  
+         [[[-8299,  -146],
+           [-8299, -8299],
+           [-8299, -8299],
+           [-8299, -8299],
+           [-8299, -8299]]],
+  
+  
+         [[[-8299, -8299],
+           [-8299, -8299],
+           [-8299, -8299],
+           [-8299,  -756],
+           [  201, -8299]]]], dtype=int16), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]]], dtype=int16), 'shape': array([-1,  8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=int16), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=int16), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(2, dtype=int16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([16522, 23501, -1707,  -580, -5490], dtype=int16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([16522, 23501, -1707, -1707, -5490], dtype=int16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([    5, 23501, -1707, -1707, -5490], dtype=int16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int32),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0, 0, 0, 0], dtype=int32),
+  'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([2147483647], dtype=int32),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[    116940,     193223,     193223,     193223,     193223,
+          2147483647,     193223,     193223,        657,       4318,
+              143865,       3396]], dtype=int32),
+  'shape': array([-1,  3,  4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(918, dtype=int32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  303, -1015,  -288], dtype=int32),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ -168064, -1239835, -1239835, -1239835, -1239835, -1239835,
+         -1239835, -1239835, -1239835, -1239835, -1239835,  -833125,
+         -1239835, -1239835, -1239835,   -31455, -1239835, -1239835,
+         -1239835,   -30644], dtype=int32), 'shape': array([ 5, -1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 2, 0, 1), dtype=int32),
+  'shape': array([1, 4, 2, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(571, dtype=int32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 0, 4, 4), dtype=int32),
+  'shape': array([0, 4, 4, 4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=int32),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=int32),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(18, 0), dtype=int32),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int32),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0, dtype=int32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[  -3516504,   -3516504],
+           [  -3516504,        603],
+           [  -3516504, -134217728],
+           [       990,   -3516504],
+           [  -3516504,   -3516504]]],
+  
+  
+         [[[  -3516504,   -1270328],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [    -14718,   -3516504],
+           [  -3516504,   -3516504]]],
+  
+  
+         [[[  -3516504,       -260],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504]]],
+  
+  
+         [[[  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [  -3516504,      -5121],
+           [       384,   -3516504]]]], dtype=int32), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[  -3516504,   -3516504],
+           [  -3516504,        603],
+           [  -3516504, -134217728],
+           [       384,   -3516504],
+           [  -3516504,   -3516504]]],
+  
+  
+         [[[  -3516504,   -1270328],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [    -14718,   -3516504],
+           [  -3516504,   -3516504]]],
+  
+  
+         [[[  -3516504,       -260],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504]]],
+  
+  
+         [[[  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [  -3516504,   -3516504],
+           [  -3516504,      -5121],
+           [       384,   -3516504]]]], dtype=int32), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]],
+  
+  
+         [[[0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0],
+           [0, 0]]]], dtype=int32), 'shape': array([-1,  8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=int32), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]],
+  
+         [[0, 0, 0, 0, 0]]], dtype=int32), 'shape': array([0, 5, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(2, dtype=int32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 56591725, 318981959,    -33423,     -2918,   -869667], dtype=int32),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 56591725, 318981959,    -33423,    -33423,   -869667], dtype=int32),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([        5, 318981959,    -33423,    -33423,   -869667], dtype=int32),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int64),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0, 0, 0, 0]), 'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([9223372036854775807]),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[            1216443,             2711829,             2711829,
+                      2711829,             2711829, 9223372036854775807,
+                      2711829,             2711829,                 985,
+                        10874,             1687716,                7934]]),
+  'shape': array([-1,  3,  4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(1492),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  381, -1693,  -358]),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ -2164341, -69956605, -69956605, -69956605, -69956605, -69956605,
+         -69956605, -69956605, -69956605, -69956605, -69956605, -33438841,
+         -69956605, -69956605, -69956605,   -168287, -69956605, -69956605,
+         -69956605,   -162039]), 'shape': array([ 5, -1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 2, 0, 1), dtype=int64),
+  'shape': array([1, 4, 2, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(827),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(4, 0, 4, 4), dtype=int64),
+  'shape': array([0, 4, 4, 4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=int64),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(12, 0), dtype=int64),
+  'shape': array([2, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(18, 0), dtype=int64),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int64),
+  'shape': array([3, 0, 3, 2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[       331055,        331055],
+           [       331055,        331055],
+           [       331055, 4398046511103],
+           [       331055,        331055],
+           [       331055,        331055]]],
+  
+  
+         [[[       331055,        331055],
+           [       331055,        331055],
+           [       331055,        331055],
+           [         -154,        331055],
+           [       331055,        331055]]],
+  
+  
+         [[[       331055,        331055],
+           [  -1323680219,        331055],
+           [       331055,        331055],
+           [       331055,        331055],
+           [       331055,        331055]]],
+  
+  
+         [[[       331055,        331055],
+           [       331055,        331055],
+           [       331055,        331055],
+           [       331055,        -13627],
+           [          509,        331055]]]]), 'shape': array([5, 8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[[509,   0],
+           [  0,   0]]],
+  
+  
+         [[[  0,   0],
+           [  0,   0]]],
+  
+  
+         [[[  0,   0],
+           [  0,   0]]],
+  
+  
+         [[[  0,   0],
+           [  0,   0]]]]), 'shape': array([2, 8])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[2],
+         [2],
+         [2],
+         [2]]), 'shape': array([-1,  1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([83113,   387]),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([  0, 387]), 'shape': array([2])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int64),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([    -1020, -39916801,     -5372,      -220,       -52]),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([    -1020, -39916801,     -5372,      -220,       -52]),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('int64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=int64),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=float16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0., 0.], dtype=float16),
+  'shape': array([2])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([   1. , -255.9], dtype=float16),
+  'shape': array([2])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-0.5, dtype=float16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 5, 4, 3), dtype=float16),
+  'shape': array([15,  4,  0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[-0.],
+         [-0.]], dtype=float16), 'shape': array([2, 1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([nan, -2.], dtype=float16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-1.5, dtype=float16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0., 0., 0., 0., 0.], dtype=float16),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=float16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=float16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-255.9], dtype=float16),
+  'shape': array([1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.], dtype=float16),
+  'shape': array([1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.], dtype=float16),
+  'shape': array([1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(1.e-05, dtype=float16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=float16),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 1.5, -0. , -0. , -0. ], dtype=float16),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0. , 1.5, 1.5, 1.5], dtype=float16),
+  'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0., 0., 0., 0.], dtype=float16),
+  'shape': array([4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float16'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float16),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=float32),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0., 0., 0., 0., 0.], dtype=float32),
+  'shape': array([5])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([ 4.5170407e+16, -5.1677025e+16,  1.5000000e+00], dtype=float32),
+  'shape': array([3])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[           nan,            nan,            nan,            nan,
+                     nan,            nan,            nan,            nan,
+                     nan,  0.0000000e+00,            nan,            nan],
+         [           nan,            nan,            nan,            nan,
+                     nan,            nan,            nan,            nan,
+                     nan,            nan,            nan,            nan],
+         [-2.6500105e+16,            nan,            nan,            nan,
+           0.0000000e+00,            nan,            nan,            nan,
+                     nan, -3.1823541e+16,            nan,            nan],
+         [           nan,            nan,            nan,            nan,
+                     nan,            nan, -4.7926737e+16, -6.3135414e+16,
+                     nan, -2.3629434e+15,            nan,            nan],
+         [           nan,  0.0000000e+00,            nan,            nan,
+           5.4403591e+16,            nan,            nan, -1.7204624e+16,
+                     nan,            nan,            nan,            nan]],
+        dtype=float32), 'shape': array([0, 3, 4])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-0., dtype=float32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-4.6247254e+16, dtype=float32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(3, 0), dtype=float32),
+  'shape': array([2, 0, 3, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-1.8446743e+19, -1.8156689e+16,  2.5601456e+16, -5.6292706e+16],
+        dtype=float32), 'shape': array([4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(-2.5397349e+16, dtype=float32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 1.5486786e+16,  1.5486786e+16,  0.0000000e+00,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  6.7130944e+16,
+            1.5486786e+16]],
+  
+         [[ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+           -0.0000000e+00],
+          [ 1.5486786e+16,  1.5486786e+16,  1.8446743e+19,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16]],
+  
+         [[ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16, -5.7569402e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16, -0.0000000e+00,
+           -0.0000000e+00],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16]]], dtype=float32), 'shape': array([5, 0, 3])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 1.5486786e+16,  1.5486786e+16,  0.0000000e+00,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  6.7130944e+16,
+            1.5486786e+16]],
+  
+         [[ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+           -0.0000000e+00],
+          [ 1.5486786e+16,  1.5486786e+16,  1.8446743e+19,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16]],
+  
+         [[ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16, -5.7569402e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16, -0.0000000e+00,
+           -0.0000000e+00],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16]],
+  
+         [[ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16]],
+  
+         [[ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16],
+          [ 1.5486786e+16,  1.5486786e+16,  1.5486786e+16,  1.5486786e+16,
+            1.5486786e+16]]], dtype=float32), 'shape': array([0, 5, 3])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([1.5000000e+00, 6.7007194e+16], dtype=float32),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.0000000e+00, 6.7007194e+16], dtype=float32),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.0000000e+00, 6.7007194e+16], dtype=float32),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0., 0.], dtype=float32),
+  'shape': array([2])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 1.1754944e-38]],
+  
+         [[-1.1346795e+16]],
+  
+         [[ 3.3510853e+16]],
+  
+         [[ 6.3253717e+15]]], dtype=float32), 'shape': array([4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 1.1754944e-38]],
+  
+         [[-1.1346795e+16]],
+  
+         [[ 3.3510853e+16]],
+  
+         [[ 1.1754944e-38]]], dtype=float32), 'shape': array([4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 1.1754944e-38],
+          [-1.1346795e+16],
+          [ 3.3510853e+16],
+          [ 1.1754944e-38]],
+  
+         [[ 1.1754944e-38],
+          [ 1.1754944e-38],
+          [ 1.1754944e-38],
+          [ 1.1754944e-38]],
+  
+         [[ 1.1754944e-38],
+          [ 1.1754944e-38],
+          [ 1.1754944e-38],
+          [ 1.1754944e-38]],
+  
+         [[ 1.1754944e-38],
+          [ 1.1754944e-38],
+          [ 1.1754944e-38],
+          [ 1.1754944e-38]]], dtype=float32), 'shape': array([16])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 1.1754944e-38],
+          [-1.1346795e+16],
+          [ 3.3510853e+16],
+          [ 1.1754944e-38]]], dtype=float32), 'shape': array([4])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([-0.], dtype=float32),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0.], dtype=float32),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float32'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0., dtype=float32),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+.Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(0.),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], dtype=float64),
+  'shape': array([0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([0., 0., 0., 0., 0.]),
+  'shape': array([5])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([6.53985156e+016, 4.16115570e-104, 1.81537101e-188]),
+  'shape': array([-1])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([[[ 1.34078079e+154,  1.34078079e+154,  1.34078079e+154,
+            1.34078079e+154,  1.34078079e+154],
+          [ 1.34078079e+154,  5.02058210e+016, -2.22507386e-309,
+            1.34078079e+154,  1.34078079e+154],
+          [ 1.34078079e+154,  1.34078079e+154,  1.34078079e+154,
+            1.34078079e+154,  1.34078079e+154]],
+  
+         [[ 1.34078079e+154,  1.34078079e+154,  1.34078079e+154,
+            1.34078079e+154,  1.34078079e+154],
+          [ 1.34078079e+154,  1.34078079e+154,  2.02900774e-090,
+            1.34078079e+154,  1.34078079e+154],
+          [-1.65940914e+083, -1.34078079e+154,  1.34078079e+154,
+           -1.34078079e+154,  1.34078079e+154]],
+  
+         [[ 1.34078079e+154,  1.34078079e+154,  1.34078079e+154,
+            1.34078079e+154,  1.34078079e+154],
+          [ 1.34078079e+154,  1.34078079e+154,  1.34078079e+154,
+            1.34078079e+154,  1.34078079e+154],
+          [ 1.34078079e+154,  1.34078079e+154,  1.34078079e+154,
+            1.34078079e+154,  1.34078079e+154]]]), 'shape': array([ 3, 15])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(1, 0), dtype=float64),
+  'shape': array([1, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 1, 5, 3), dtype=float64),
+  'shape': array([3, 1, 0, 5])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array(1.1),
+  'shape': array([], dtype=int64)},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([], shape=(0, 3, 1, 3), dtype=float64),
+  'shape': array([3, 1, 0])},
+ attribute_kwargs={'allowzero': 1},
+ spox_fun=reshape)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v21' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v21.py'>,
+    dtype=dtype('float64'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'data': array([1.e-05]), 'shape': array([-1])},
+ attribute_kwargs={'allowzero': 0},
+ spox_fun=reshape)
+MLX error: float64 is not supported on the GPU at /private/tmp/mlx-c-20260708-16897-ls7m4o/mlx-c-0.6.0/mlx/c/ops.cpp:2712

@@ -1,0 +1,199 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+hypothesis profile 'onnx-tests-with-verbose-verbosity' -> deadline=None, max_examples=25, verbosity=Verbosity.verbose
+rootdir: /Users/justinc/Documents/GitHub/onnx-tests
+configfile: pyproject.toml
+plugins: xdist-3.8.0, hypothesis-6.155.7
+collected 1198 items / 1185 deselected / 13 selected
+
+tests/test_manipulation_functions.py Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], dtype=uint8)},
+ attribute_kwargs={'axis': 0, 'num_outputs': 1},
+ spox_fun=split)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0, 0], dtype=uint8)},
+ attribute_kwargs={'axis': 0, 'num_outputs': 1},
+ spox_fun=split)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([0, 0, 0], dtype=uint8)},
+ attribute_kwargs={'axis': 0, 'num_outputs': 1},
+ spox_fun=split)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([193, 147, 180], dtype=uint8)},
+ attribute_kwargs={'axis': 0, 'num_outputs': 3},
+ spox_fun=split)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[239,  62, 239],
+         [ 37, 239, 239],
+         [239, 239, 254],
+         [239, 239, 239],
+         [239, 239, 100]], dtype=uint8)},
+ attribute_kwargs={'axis': -1, 'num_outputs': 1},
+ spox_fun=split)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [135, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183]],
+  
+          [[183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 173, 183],
+           [183, 185, 183, 183],
+           [183, 183, 183, 183]],
+  
+          [[183, 183, 183, 183],
+           [183, 120, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183]]],
+  
+  
+         [[[100, 183, 183, 158],
+           [183, 183, 183, 183],
+           [179, 183, 183, 183],
+           [183, 183,  85, 183],
+           [183, 183, 183, 183]],
+  
+          [[183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 143],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183]],
+  
+          [[183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183]]],
+  
+  
+         [[[183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 207],
+           [183, 183, 183, 183]],
+  
+          [[183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183]],
+  
+          [[183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183],
+           [183, 183, 183, 183]]]], dtype=uint8)},
+ attribute_kwargs={'axis': 2, 'num_outputs': 1},
+ spox_fun=split)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([ 70, 137, 223], dtype=uint8)},
+ attribute_kwargs={'axis': 0, 'num_outputs': 1},
+ spox_fun=split)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([140,  21,  25, 109], dtype=uint8)},
+ attribute_kwargs={'axis': -1, 'num_outputs': 2},
+ spox_fun=split)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([[[[146,  38],
+           [146,  50],
+           [146, 146],
+           [146, 146],
+           [146, 146]],
+  
+          [[174, 146],
+           [103, 146],
+           [146, 146],
+           [146,   9],
+           [146, 146]],
+  
+          [[104, 146],
+           [146, 146],
+           [146, 146],
+           [146, 146],
+           [146, 146]],
+  
+          [[146,   0],
+           [146, 146],
+           [146,  11],
+           [146, 146],
+           [146, 171]]],
+  
+  
+         [[[206, 146],
+           [146, 146],
+           [146, 146],
+           [146, 146],
+           [174, 146]],
+  
+          [[198, 255],
+           [146,  98],
+           [146, 146],
+           [146, 146],
+           [146, 211]],
+  
+          [[146, 146],
+           [ 16, 146],
+           [146, 146],
+           [146, 146],
+           [146,  30]],
+  
+          [[146, 146],
+           [146, 146],
+           [146, 146],
+           [146, 146],
+           [146, 146]]]], dtype=uint8)},
+ attribute_kwargs={'axis': -4, 'num_outputs': 2},
+ spox_fun=split)
+Trying example: test_fun(
+    op=<module 'spox.opset.ai.onnx.v18' from '/Users/justinc/Documents/GitHub/onnx-tests/.pixi/envs/default/lib/python3.14/site-packages/spox/opset/ai/onnx/v18.py'>,
+    dtype=dtype('uint8'),
+    data=data(...),
+)
+Draw 1: TestCaseDraw(inputs={'input': array([], shape=(4, 0, 5), dtype=uint8)},
+ attribute_kwargs={'axis': -3, 'num_outputs': 3},
+ spox_fun=split)
+MLX error: Array split does not result in sub arrays with equal size: attempting 3 splits along axis 0 for shape (4,0,5). at /private/tmp/mlx-c-20260708-16897-ls7m4o/mlx-c-0.6.0/mlx/c/ops.cpp:3418
