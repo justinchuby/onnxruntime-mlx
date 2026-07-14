@@ -37,6 +37,8 @@ void RegisterBuiltinOps(OpRegistry& registry) {
   RegisterVision2bOps(registry);
   RegisterQuant2Ops(registry);
   RegisterMisc2Ops(registry);
+  RegisterRecurrentOps(registry);
+  RegisterControlFlowOps(registry);
 }
 
 }  // namespace

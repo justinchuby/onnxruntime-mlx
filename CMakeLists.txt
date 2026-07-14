@@ -77,6 +77,8 @@ add_library(onnxruntime_mlx_ep SHARED
   src/ep/ops/vision2b.cc
   src/ep/ops/quant2.cc
   src/ep/ops/misc2.cc
+  src/ep/ops/recurrent.cc
+  src/ep/ops/controlflow.cc
   src/ep/data_transfer.cc
   src/ep/metal_context.mm)
 

@@ -105,5 +105,7 @@ void RegisterVision2Ops(OpRegistry& registry);
 void RegisterVision2bOps(OpRegistry& registry);
 void RegisterQuant2Ops(OpRegistry& registry);
 void RegisterMisc2Ops(OpRegistry& registry);
+void RegisterRecurrentOps(OpRegistry& registry);
+void RegisterControlFlowOps(OpRegistry& registry);
 
 }  // namespace ort_mlx
