@@ -75,17 +75,17 @@ The following table is the current support contract. Do not broaden claims witho
 ### 2.1 Coverage status (2026-07-13) — full Mobius + broad ai.onnx opset-17+ coverage
 
 Coverage spans the full Mobius-emitted op set **plus the tractable ai.onnx opset-17+ standard**:
-**~151 of 202 non-deprecated ai.onnx ops** (140 registrations, up from 11 originally), verified by
-diffing `onnx.defs` against the registry. Every op claims the **most relaxed dtype set** its MLX
-translation supports (`IsMlxSupportedType`: bool/int/uint 8-64/fp16/bf16/fp32; **float64 excepted** —
-Apple GPUs have no double precision). The pytest op suite is **660 passing / ~54 skipped** (skips are
-`op×dtype` combos ORT CPU itself lacks a kernel for). The table in §2 lists the decode hot-path core;
-the full registered set spans elementwise/math/trig/activations, logical/bitwise, reductions,
-shape/data-movement, normalizations, attention (GQA/Attention 23-24/MHA/RoPE), MatMul/Gemm,
-conv/pooling, quantization (MatMulNBits, Gather/Quantize/Dequantize/DynamicQuantize/MatMulInteger),
-random, and more — one handler + claim + registration per op in `src/ep/ops/*.cc`, zero `ep.cc` edits.
+**162 of 202 non-deprecated ai.onnx ops** (up from 11 originally), verified by diffing `onnx.defs`
+against the registry. Every op claims the **most relaxed dtype set** its MLX translation supports
+(`IsMlxSupportedType`: bool/int/uint 8-64/fp16/bf16/fp32; **float64 excepted** — Apple GPUs have no
+double precision). The pytest op suite is **676 passing / ~54 skipped** (skips are `op×dtype` combos
+ORT CPU itself lacks a kernel for). Beyond the decode core, coverage now includes elementwise/math/
+trig/activations, logical/bitwise, all reductions, shape/data-movement, normalizations, attention,
+MatMul/Gemm, conv/pooling, quantization, random, **signal/FFT (DFT/STFT/windows/MelWeightMatrix —
+audio frontends)**, and **vision transforms (GridSample/AffineGrid/Col2Im)** — one handler + claim +
+registration per op in `src/ep/ops/*.cc`, zero `ep.cc` edits.
 
-**The ~51 ops still on ORT CPU** — each needs an engine feature MLX/Metal cannot express, or lacks an
+**The 40 ops still on ORT CPU** — each needs an engine feature MLX/Metal cannot express, or lacks an
 mlx-c primitive; not force-fit:
 
 | Category | Ops |
@@ -94,10 +94,9 @@ mlx-c primitive; not force-fit:
 | Recurrent (dynamic-time loop) | GRU, LSTM, RNN |
 | Sequence / Optional (non-tensor types) | Sequence*, SplitToSequence, ConcatFromSequence, Optional* |
 | String / Loss | RegexFullMatch, String*, TfIdfVectorizer, NegativeLogLikelihoodLoss, SoftmaxCrossEntropyLoss |
-| Complex vision sampling | RoiAlign, MaxRoiPool, GridSample, DeformConv, AffineGrid, NonMaxSuppression, MaxUnpool, Col2Im, ImageDecoder |
-| Signal (FFT/windows) | DFT, STFT, Blackman/Hamming/HannWindow, MelWeightMatrix |
+| Complex vision | RoiAlign, MaxRoiPool, MaxUnpool, DeformConv, NonMaxSuppression, ImageDecoder |
 | Exact-integer quant (±1-on-ties vs CPU) | QLinearMatMul, QLinearConv, ConvInteger |
-| mlx-c 0.6 gap / no primitive | NonZero, Unique, Det, BitCast, LinearAttention |
+| mlx-c gap / no primitive | NonZero, Unique, Det, BitCast, LinearAttention, Scatter (deprecated) |
 
 Float64 everywhere falls back to ORT CPU (Metal hardware limit). Zero-size/empty tensors are
 **handled on MLX** (not rejected). See §2.2 for the registry and the add-an-op recipe.
