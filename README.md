@@ -64,7 +64,7 @@ The crate binds the ORT plugin-EP C ABI and `mlx-c` directly via `bindgen`; it d
 ### Python (recommended)
 
 ```sh
-pip install onnxruntime-mlx        # macOS/Apple-Silicon wheel; bundles the mlx runtime
+pip install -U onnxruntime-mlx        # macOS/Apple-Silicon wheel; bundles the mlx runtime
 ```
 
 ```python
