@@ -75,7 +75,7 @@ The following table is the current support contract. Do not broaden claims witho
 ### 2.1 Coverage status (2026-07-13) — full Mobius + broad ai.onnx opset-17+ coverage
 
 Coverage spans the full Mobius-emitted op set **plus almost the entire ai.onnx opset-17+ standard**:
-**183 of 202 non-deprecated ai.onnx ops** (up from 11 originally), verified by diffing `onnx.defs`
+**184 of 202 non-deprecated ai.onnx ops** (up from 11 originally), verified by diffing `onnx.defs`
 against the registry. Every op claims the **most relaxed dtype set** its MLX translation supports
 (`IsMlxSupportedType`: bool/int/uint 8-64/fp16/bf16/fp32; **float64 excepted** — Apple GPUs have no
 double precision). The pytest op suite is **~750 passing / ~56 skipped** (skips are `op×dtype` combos
@@ -83,11 +83,12 @@ ORT CPU itself lacks a kernel for). Coverage includes elementwise/math/trig/acti
 logical/bitwise, all reductions, shape/data-movement, normalizations, attention, MatMul/Gemm,
 conv/pooling, **all quantization (Quantize/Dequantize/DynamicQuantize/MatMulInteger/ConvInteger/
 QLinearMatMul/QLinearConv)**, random, signal/FFT (DFT/STFT/windows/MelWeightMatrix — audio),
-vision (GridSample/AffineGrid/Col2Im/RoiAlign/MaxRoiPool/MaxUnpool), **recurrent (RNN/GRU/LSTM via
-static unrolling)**, **control flow (If/Scan/Loop via recursive subgraph-body translation)**, and
+vision (GridSample/AffineGrid/Col2Im/RoiAlign/MaxRoiPool/MaxUnpool), **recurrent (RNN/GRU/LSTM and
+com.microsoft LinearAttention via static unrolling)**, **control flow (If/Scan/Loop via recursive
+subgraph-body translation)**, and
 NonZero/Unique/Det/loss ops — one handler + claim + registration per op in `src/ep/ops/*.cc`.
 
-**The 19 ops still on ORT CPU** — each needs a non-tensor value type, non-numeric data, or a codec
+**The 18 ops still on ORT CPU** — each needs a non-tensor value type, non-numeric data, or a codec
 that a GPU tensor engine fundamentally cannot provide (not force-fit):
 
 | Category | Ops |
@@ -95,7 +96,7 @@ that a GPU tensor engine fundamentally cannot provide (not force-fit):
 | Sequence type (opaque list-of-tensors) | ConcatFromSequence, SequenceAt/Construct/Empty/Erase/Insert/Length/Map, SplitToSequence |
 | String tensors (no GPU string ops) | RegexFullMatch, StringConcat, StringNormalizer, StringSplit, TfIdfVectorizer |
 | Codec / wrapper type | ImageDecoder (JPEG/PNG decode), Optional (optional-typed output) |
-| Complex / data-dependent | DeformConv, NonMaxSuppression (greedy, dynamic, host-bound), LinearAttention |
+| Complex / data-dependent | DeformConv, NonMaxSuppression (greedy, dynamic, host-bound) |
 
 Float64 everywhere falls back to ORT CPU (Metal hardware limit). Zero-size/empty tensors are
 **handled on MLX** (not rejected). Control-flow BODIES still offload to MLX even when a rare CF form
@@ -114,7 +115,7 @@ The **core modules** (the opset-17+ expansion additionally added `trig`, `activa
 | `matmul.cc` | MatMul, Gemm |
 | `conv.cc` | Conv, ConvTranspose, AveragePool, GlobalAveragePool, MaxPool, GlobalMaxPool |
 | `quant.cc` | MatMulNBits, GatherBlockQuantized (symmetric **and** asymmetric/zero_points) |
-| `ssm_misc.cc` | TensorScatter (opset 24), CausalConvWithState |
+| `ssm_misc.cc` | TensorScatter (opset 24), CausalConvWithState, LinearAttention (linear/gated/delta/gated_delta, GQA) |
 
 Every claim is **conservative**: a handler claims only the ONNX forms it can translate correctly (dtype/shape/attr/opset checked in its `ClaimPredicate`); every other form falls back to ORT CPU, which is always correct. Each op has pytest coverage in `tests/ops/` (**660 passing**, ~54 skipped for ORT-CPU dtype gaps); the attention/matmul/resize/quant tests assert the node actually ran on `MLXExecutionProvider` (no vacuous CPU-fallback passes).
 
@@ -122,9 +123,6 @@ Every claim is **conservative**: a handler claims only the ONNX forms it can tra
 
 | Op | Reason |
 |---|---|
-| `Scan` | Nested subgraph BODY — a flat `NodeDesc` plan cannot represent control-flow subgraphs. |
-| `LSTM` | Gated recurrence over a dynamic time axis — no loop primitive in the flat plan. |
-| `LinearAttention` | Multi-rule chunked recurrence with 4D carried state — not a single MLX sequence. |
 | `MoE` | Data-dependent router top-k gather/scatter — cannot lower to a static MLX graph. |
 | `PackedMultiHeadAttention` | Ragged packed layout needs runtime cumulative-seqlen, unavailable at claim time. |
 
