@@ -1,16 +1,25 @@
 [package]
 name = "onnxruntime-mlx-ep"
-version = "0.0.1"
+version = "0.1.1"
 edition = "2024"
-description = "Rust spike: MLX-native ORT plugin EP (bind mlx-c directly, no mlx-rs)"
+description = "MLX-native ONNX Runtime execution provider (plugin EP) for Apple Silicon — binds mlx-c directly, no mlx-rs."
+license = "MIT"
+repository = "https://github.com/justinchuby/onnxruntime-mlx"
+readme = "README.md"
+keywords = ["onnx", "onnxruntime", "mlx", "apple-silicon", "metal"]
+categories = ["science", "api-bindings", "hardware-support"]
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-# Pure-Rust Chrome/Perfetto tracer (sibling onnx-genai checkout). `default-features
-# = false` drops the `perfetto` (prost) feature — we export Chrome Trace JSON only.
-onnx-runtime-tracer = { path = "../../onnx-genai/crates/onnx-runtime-tracer", default-features = false }
+# Pure-Rust Chrome/Perfetto tracer. `default-features = false` drops the
+# `perfetto` (prost) feature — we export Chrome Trace JSON only. Kept as a `path`
+# dependency for local dev (sibling onnx-genai checkout) with a matching
+# `version` so `cargo publish` resolves it from crates.io (path is stripped at
+# publish time; publishing onnxruntime-mlx-ep requires this crate to be on
+# crates.io first).
+onnx-runtime-tracer = { path = "../../onnx-genai/crates/onnx-runtime-tracer", version = "0.1.0-dev.0", default-features = false }
 
 [build-dependencies]
 bindgen = "0.72"

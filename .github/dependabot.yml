@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # Keep the SHA-pinned GitHub Actions current (Dependabot rewrites the pinned
+  # SHA and the trailing `# vX.Y.Z` comment together). This is what makes strict
+  # commit-SHA pinning maintainable — supply-chain safety without manual drift.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Rust dependencies of the MLX EP crate (bindgen, and — once published — the
+  # onnx-runtime-tracer registry dependency).
+  - package-ecosystem: cargo
+    directory: /rust
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns:
+          - "*"
+
+  # Python build backend / packaging deps (hatchling, build tooling).
+  - package-ecosystem: pip
+    directory: /python
+    schedule:
+      interval: weekly

@@ -13,13 +13,16 @@ jobs:
     env:
       ORT_VERSION: "1.27.0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install mlx-c (hard dependency)
         run: brew install mlx-c
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain (rustup — no third-party action, supply-chain hardening)
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version && cargo --version
 
       # The EP crate depends on the pure-Rust `onnx-runtime-tracer` (observability
       # only) at ../../onnx-genai/crates/onnx-runtime-tracer — a sibling of the repo
@@ -35,7 +38,7 @@ jobs:
             | tar xz
           echo "ORT_HOME=$PWD/onnxruntime-osx-arm64-${ORT_VERSION}" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
@@ -60,13 +63,16 @@ jobs:
     env:
       ORT_VERSION: "1.27.0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install mlx-c (hard dependency)
         run: brew install mlx-c
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain (rustup — no third-party action, supply-chain hardening)
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version && cargo --version
 
       - name: Provide onnx-genai sibling (pure-Rust tracer dependency)
         run: git clone --depth 1 https://github.com/justinchuby/onnx-genai ../onnx-genai
@@ -79,7 +85,7 @@ jobs:
             | tar xz
           echo "ORT_HOME=$PWD/onnxruntime-osx-arm64-${ORT_VERSION}" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
@@ -102,7 +108,7 @@ jobs:
           python -m abi3audit --strict --report dist/onnxruntime_mlx-*-py3-none-macosx_*_arm64.whl
 
       - name: Import + register under Python 3.13 (proves cross-version portability)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - name: Cross-version smoke test
