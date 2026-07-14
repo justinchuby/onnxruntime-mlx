@@ -7,13 +7,15 @@
 //!     optional attn_mask, is_causal, custom scale, in-op past/present KV concat.
 //!   * MultiHeadAttention (com.microsoft)  — separate Q/K/V with optional projection bias,
 //!     unidirectional (causal), custom scale.
-//!   * RotaryEmbedding (ai.onnx opset 23 & com.microsoft) — standalone RoPE with an explicit
-//!     cos/sin cache indexed by position_ids (rotate-half or interleaved, partial rotation).
+//!   * RotaryEmbedding (ai.onnx opset 23 & com.microsoft) — standalone RoPE (rotate-half or
+//!     interleaved, partial rotation). The fp32 gather / offset forms recover the RoPE period from
+//!     the cos/sin cache and run the fused `mlx_fast_rope` kernel; the absent-position-ids form
+//!     (explicit per-position cache) and reduced-precision caches keep the composed path.
 //!
 //! Every op honors the resolved input dtype (fp32/fp16/bf16). GQA head broadcast (q_num_heads a
 //! multiple of kv_num_heads) is handled inside MLX SDPA, so K/V are passed with their own head count.
-//! This is the eager (single-`mlx_eval`) path only: the compiled-decode fast-path (dynamic
-//! cos/sin slice, rotate-half matmul) is next-wave and not implemented here.
+//! GQA's in-op RoPE also fuses onto `mlx_fast_rope` for fp32 caches (composed fallback otherwise).
+//! This is the eager (single-`mlx_eval`) path only.
 
 use std::os::raw::c_char;
 
@@ -131,10 +133,88 @@ fn attr_scale(n: &NodeDesc, hd: i32) -> f32 {
     }
 }
 
-// ---- GroupQueryAttention in-op RoPE ------------------------------------------------------------
+// ---- Fused RoPE (mlx_fast_rope) ----------------------------------------------------------------
+
+/// A `mlx_optional_float` with no value — signals `mlx_fast_rope` to take frequencies from the
+/// explicit `freqs` array (its reciprocal) rather than deriving them from a `base`.
+#[inline]
+fn opt_float_none() -> mlx::mlx_optional_float {
+    mlx::mlx_optional_float {
+        value: 0.0,
+        has_value: false,
+    }
+}
+
+/// Recover the RoPE **period** array (length `half`) that `mlx_fast_rope` expects for its `freqs`
+/// argument, from a standard cos/sin cache whose row `p` holds `cos(p·invfreq)` / `sin(p·invfreq)`.
+///
+/// MLX internally computes `invfreq = 1/freqs` and `theta = (offset + s)·invfreq`, so passing the
+/// period (= `1/invfreq`) makes MLX reproduce the exact angles ORT baked into the cache. `invfreq`
+/// is read off absolute-position row 1 (`theta = 1·invfreq = atan2(sin[1], cos[1])`; every standard
+/// RoPE `invfreq ∈ (0,1]`, so this angle is unambiguous), then reciprocated.
+fn rope_freqs_from_cache(
+    ctx: &mut TranslationContext,
+    cos_cache: mlx::mlx_array,
+    sin_cache: mlx::mlx_array,
+    half: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let cos1 = slice(ctx, cos_cache, &[1, 0], &[2, half])?; // [1,half] @ position 1
+    let sin1 = slice(ctx, sin_cache, &[1, 0], &[2, half])?;
+    // Derive in fp32: for fp16/bf16 caches an atan2 in the low-precision dtype would corrupt the
+    // recovered period (mlx casts `freqs` to fp32 internally regardless).
+    let cos1 = ctx.astype(cos1, mlx::mlx_dtype__MLX_FLOAT32)?;
+    let sin1 = ctx.astype(sin1, mlx::mlx_dtype__MLX_FLOAT32)?;
+    let invfreq = ctx.emit(|res, s| unsafe { mlx::mlx_arctan2(res, sin1, cos1, s) })?;
+    let period = ctx.emit(|res, s| unsafe { mlx::mlx_reciprocal(res, invfreq, s) })?;
+    ctx.reshape(period, &[half])
+}
+
+/// Fused RoPE over the first `rot` head dims of x [B,N,S,hd] with a compile-time integer position
+/// `offset` (positions `offset + s`). `traditional` = interleaved (consecutive-pair) rotation.
+fn fast_rope_static(
+    ctx: &mut TranslationContext,
+    x4: mlx::mlx_array,
+    rot: i32,
+    traditional: bool,
+    offset: i32,
+    freqs: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
+    ctx.mark_fast("mlx_fast_rope");
+    ctx.emit(|res, s| unsafe {
+        mlx::mlx_fast_rope(res, x4, rot, traditional, opt_float_none(), 1.0, offset, freqs, s)
+    })
+}
+
+/// Fused RoPE with a runtime position `offset` array (scalar/[1], or per-row [B] for [B,S]
+/// position_ids). Positions are `offset + s`; `traditional` = interleaved rotation.
+fn fast_rope_dynamic(
+    ctx: &mut TranslationContext,
+    x4: mlx::mlx_array,
+    rot: i32,
+    traditional: bool,
+    offset: mlx::mlx_array,
+    freqs: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
+    ctx.mark_fast("mlx_fast_rope");
+    ctx.emit(|res, s| unsafe {
+        mlx::mlx_fast_rope_dynamic(res, x4, rot, traditional, opt_float_none(), 1.0, offset, freqs, s)
+    })
+}
+
+/// True when `a`'s dtype is fp32. The fused kernel recomputes cos/sin from frequencies recovered
+/// out of the cos/sin cache; recovering those frequencies from a reduced-precision (fp16/bf16)
+/// cache drifts from the exact values ORT stored, so such caches keep the composed path (which
+/// consumes the provided cache directly).
+#[inline]
+fn is_fp32(ctx: &TranslationContext, a: mlx::mlx_array) -> bool {
+    ctx.dtype_of(a) == mlx::mlx_dtype__MLX_FLOAT32
+}
+
+// ---- GroupQueryAttention composed RoPE (reduced-precision fallback) -----------------------------
 
 /// Rotate-half (non-interleaved) or interleaved rotary over the first 2*half head dims of x [B,H,S,hd].
-/// cos/sin are the per-position rows [S, half], broadcast over B and the head axis.
+/// cos/sin are the per-position rows [S, half], broadcast over B and the head axis. Used only when the
+/// cache dtype rules out the fused `mlx_fast_rope` path (see `is_fp32`).
 fn gqa_rope(
     ctx: &mut TranslationContext,
     x: mlx::mlx_array,
@@ -213,10 +293,23 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
         let cos = ctx.resolve(&n.inputs[7])?; // [max_seq, rot/2]
         let sin = ctx.resolve(&n.inputs[8])?;
         let half = ctx.shape_of(cos)[1]; // rot/2
-        let cr = cos_sin_row(ctx, cos, past, s, half)?;
-        let sr = cos_sin_row(ctx, sin, past, s, half)?;
-        qh = gqa_rope(ctx, qh, cr, sr, half, interleaved)?;
-        kh = gqa_rope(ctx, kh, cr, sr, half, interleaved)?;
+        if is_fp32(ctx, cos) {
+            // Fused RoPE: positions run [past, past+S); the standard [max_seq, half] caches encode a
+            // base/scale formula, so recover the period and let mlx_fast_rope apply it.
+            let rot = 2 * half;
+            let freqs = rope_freqs_from_cache(ctx, cos, sin, half)?;
+            qh = fast_rope_static(ctx, qh, rot, interleaved, past, freqs)?;
+            kh = fast_rope_static(ctx, kh, rot, interleaved, past, freqs)?;
+        } else {
+            // Reduced-precision cache: consume it directly via the composed path.
+            let cr = cos_sin_row(ctx, cos, past, s, half)?;
+            let sr = cos_sin_row(ctx, sin, past, s, half)?;
+            qh = gqa_rope(ctx, qh, cr, sr, half, interleaved)?;
+            kh = gqa_rope(ctx, kh, cr, sr, half, interleaved)?;
+            ctx.mark_composed(
+                "GroupQueryAttention RoPE composed: reduced-precision (fp16/bf16) cos/sin cache — recovered frequencies would drift from the stored values",
+            );
+        }
     }
 
     // Append to KV cache along the sequence axis.
@@ -460,22 +553,56 @@ fn rotary_embedding_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
         (b, nh, s, hd, x4)
     };
 
-    let (pos, pos_rank) = if present(n, pi) {
-        let p = ctx.resolve(&n.inputs[pi])?;
-        (Some(p), ctx.ndim(p) as i32)
-    } else {
-        (None, -1)
-    };
-
     let cos_cache = ctx.resolve(&n.inputs[ci])?;
     let sin_cache = ctx.resolve(&n.inputs[si])?;
-    let cos4 = gather_cache(ctx, cos_cache, pos, pos_rank, s)?;
-    let sin4 = gather_cache(ctx, sin_cache, pos, pos_rank, s)?;
-    let half = ctx.shape_of(cos4)[3];
+    let has_pos = present(n, pi);
 
-    let out4 = rope_apply(ctx, x4, cos4, sin4, half, interleaved)?;
-    // Composed rope (slice/mul/sub/add/concat) — mlx_fast_rope is NOT used here.
-    ctx.mark_composed("RotaryEmbedding composed (slice/mul/sub/add) — mlx_fast_rope not used");
+    let out4 = if has_pos && is_fp32(ctx, cos_cache) {
+        // Standard fp32 [max_seq, half] cache indexed by position_ids: recover the RoPE period and
+        // apply the fused mlx_fast_rope kernel. Positions are contiguous per row (offset + s): the
+        // [1] offset form (com.microsoft) and the [B,S] gather form both start each row at its first
+        // position_id, which is how RoPE position_ids are always laid out.
+        let pos = ctx.resolve(&n.inputs[pi])?;
+        let pos_rank = ctx.ndim(pos) as i32;
+        let half = ctx.shape_of(cos_cache)[1];
+        let rot = 2 * half;
+        let freqs = rope_freqs_from_cache(ctx, cos_cache, sin_cache, half)?;
+
+        let offset = if pos_rank == 2 {
+            // position_ids [B,S] -> per-row start offset [B].
+            let ps = ctx.shape_of(pos);
+            let col = slice(ctx, pos, &[0, 0], &[ps[0], 1])?; // [B,1]
+            let col = ctx.reshape(col, &[ps[0]])?;
+            ctx.astype(col, mlx::mlx_dtype__MLX_INT32)?
+        } else {
+            // position_ids [1] absolute offset (com.microsoft).
+            ctx.astype(pos, mlx::mlx_dtype__MLX_INT32)?
+        };
+        fast_rope_dynamic(ctx, x4, rot, interleaved, offset, freqs)?
+    } else {
+        // Composed fallback for the two forms mlx_fast_rope cannot faithfully reproduce:
+        //   * absent position_ids — cos/sin is an explicit per-position [B,S,half] cache that need
+        //     not follow any base/scale formula;
+        //   * reduced-precision (fp16/bf16) cache — frequencies recovered from it would drift from
+        //     the exact values the cache stored.
+        let (pos, pos_rank) = if has_pos {
+            let p = ctx.resolve(&n.inputs[pi])?;
+            let r = ctx.ndim(p) as i32;
+            (Some(p), r)
+        } else {
+            (None, -1)
+        };
+        let cos4 = gather_cache(ctx, cos_cache, pos, pos_rank, s)?;
+        let sin4 = gather_cache(ctx, sin_cache, pos, pos_rank, s)?;
+        let half = ctx.shape_of(cos4)[3];
+        let out = rope_apply(ctx, x4, cos4, sin4, half, interleaved)?;
+        ctx.mark_composed(if has_pos {
+            "RotaryEmbedding composed: reduced-precision (fp16/bf16) cos/sin cache — recovered frequencies would drift from the stored values"
+        } else {
+            "RotaryEmbedding composed: absent position_ids supplies an explicit per-position cos/sin cache (no base/scale formula) — mlx_fast_rope not applicable"
+        });
+        out
+    };
 
     if rank == 4 {
         ctx.bind(&n.outputs[0], out4); // already [B,N,S,hd]
