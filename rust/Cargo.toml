@@ -1,0 +1,14 @@
+[package]
+name = "onnxruntime-mlx-ep"
+version = "0.0.1"
+edition = "2021"
+description = "Rust spike: MLX-native ORT plugin EP (bind mlx-c directly, no mlx-rs)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[build-dependencies]
+bindgen = "0.70"
+
+[profile.release]
+panic = "abort"
