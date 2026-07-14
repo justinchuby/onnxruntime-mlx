@@ -1,6 +1,6 @@
-"""Op-correctness tests for the Misc2 family (src/ep/ops/misc2.cc) vs ORT CPU.
+"""Op-correctness tests for the Misc2 family (rust/src/ops/misc.rs) vs ORT CPU.
 
-Each registered/translatable op is parametrised against ORT's CPU EP. Forms that misc2.cc leaves
+Each registered/translatable op is parametrised against ORT's CPU EP. Forms that misc.rs leaves
 to ORT CPU (BitCast — no such op in the shipping ORT; Optional wrapper; axis'd Unique) are recorded
 as skips with the reason.
 """

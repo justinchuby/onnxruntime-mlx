@@ -1,25 +1,25 @@
 # ONNX→MLX Op Translation Architecture
 
-**Status:** Final post-pivot architecture  
-**Date:** 2026-07-13  
-**Repo:** `onnxruntime-mlx`  
+**Status:** Final Rust post-pivot architecture
+**Date:** 2026-07-13
+**Repo:** `onnxruntime-mlx`
 **Companion:** [`DESIGN.md`](./DESIGN.md)
 
 ---
 
 ## 0. Summary
 
-The op architecture is now an ONNX→MLX translator, not a hand-kernel registry.
+The op architecture is now a Rust ONNX→MLX translator, not a hand-kernel registry.
 
-`src/ep/ep.cc` decides which ONNX nodes are claimable, asks ORT to fuse the supported partition, and compiles the partition into an MLX-oriented node-descriptor plan. `src/ep/mlx_backend.cc` runs that plan through `mlx-c`, dispatching each node through a **modular, opset-aware, dtype-generic op registry** (`src/ep/op_registry.{h,cc}` + the per-family handler modules under `src/ep/ops/`). MLX is the **only** compute path for both prefill and decode.
+`ep.rs` under `rust/src/` decides which ONNX nodes are claimable, asks ORT to fuse maximal convex supported partitions, and compiles each partition into an MLX-oriented node-descriptor plan. `rust/src/engine.rs` runs that plan through `mlx-c`, dispatching each node through a **modular, opset-aware, dtype-generic op registry** (`rust/src/registry.rs` plus per-family handler modules under `rust/src/ops/`). MLX is the **only** compute path for both prefill and decode.
 
-The registered EP name is **`MLXExecutionProvider`** (the name passed to `RegisterExecutionProviderLibrary` and returned by the factory/EP `GetName`). The repo, vendor string, target, and artifact are MLX-native:
+The registered EP name is **`MLXExecutionProvider`** (the name passed to `RegisterExecutionProviderLibrary` and returned by the factory/EP `GetName`). The repo, vendor string, crate, and artifact are MLX-native:
 
 - Repo/vendor: `onnxruntime-mlx`
-- Target: `onnxruntime_mlx_ep`
-- Dylib: `libonnxruntime_mlx_ep.dylib`
+- Crate: `rust/`
+- Dylib: `rust/target/release/libonnxruntime_mlx_ep.dylib`
 
-There are no active `.metal` kernels, no Metal shader registry, and no dtype/MSL specialization scaffold. Op translations live in the modular registry described in §2.2 — adding an op is one handler + one claim predicate + one registration line in a single `ops/<family>.cc` module, with **zero `ep.cc` edits**.
+There are no active `.metal` kernels, no Metal shader registry, and no dtype/MSL specialization scaffold. Op translations live in the modular registry described in §2.2 — adding an op is one handler + one claim predicate + one registration line in a single `rust/src/ops/<family>.rs` module, with **zero `ep.rs` under `rust/src/` edits**.
 
 ---
 
@@ -33,11 +33,11 @@ If a node is unsupported, ambiguous, or only supported by the old hand-kernel pa
 
 ### 1.2 Fuse
 
-Claimed nodes are grouped into an ORT partition for the plugin EP. The design goal is a fused decoder subgraph rather than a sequence of per-op custom kernel launches.
+Claimed nodes are grouped into maximal convex connected ORT partitions for the plugin EP. The design goal is a fused decoder subgraph rather than a sequence of per-op custom kernel launches.
 
 ### 1.3 Compile
 
-`src/ep/ep.cc` owns `Compile` and builds the ONNX→MLX plan. The plan records:
+`ep.rs` under `rust/src/` owns `Compile` and builds the ONNX→MLX plan. The plan records:
 
 - The translated MLX operation sequence.
 - Input/output binding information for ORT tensors.
@@ -46,7 +46,7 @@ Claimed nodes are grouped into an ORT partition for the plugin EP. The design go
 
 ### 1.4 Run
 
-`src/ep/mlx_backend.cc` materializes and executes the MLX graph via `mlx-c`, dispatching each node through the op registry (§2.2). The runtime evaluates once at the fused subgraph boundary with `mlx_eval`, then writes outputs back to the ORT tensors expected by the session.
+`rust/src/engine.rs` materializes and executes the MLX graph via `mlx-c`, dispatching each node through the op registry (§2.2). The runtime evaluates once at the fused subgraph boundary with `mlx_eval`, then writes outputs back to the ORT tensors expected by the session.
 
 ### 1.5 Fallback
 
@@ -77,7 +77,7 @@ The following table is the current support contract. Do not broaden claims witho
 Coverage spans the full Mobius-emitted op set **plus almost the entire ai.onnx opset-17+ standard**:
 **184 of 202 non-deprecated ai.onnx ops** (up from 11 originally), verified by diffing `onnx.defs`
 against the registry. Every op claims the **most relaxed dtype set** its MLX translation supports
-(`IsMlxSupportedType`: bool/int/uint 8-64/fp16/bf16/fp32; **float64 excepted** — Apple GPUs have no
+(`is_mlx_supported_type`: bool/int/uint 8-64/fp16/bf16/fp32; **float64 excepted** — Apple GPUs have no
 double precision). The pytest op suite is **~750 passing / ~56 skipped** (skips are `op×dtype` combos
 ORT CPU itself lacks a kernel for). Coverage includes elementwise/math/trig/activations,
 logical/bitwise, all reductions, shape/data-movement, normalizations, attention, MatMul/Gemm,
@@ -86,7 +86,7 @@ QLinearMatMul/QLinearConv)**, random, signal/FFT (DFT/STFT/windows/MelWeightMatr
 vision (GridSample/AffineGrid/Col2Im/RoiAlign/MaxRoiPool/MaxUnpool), **recurrent (RNN/GRU/LSTM and
 com.microsoft LinearAttention via static unrolling)**, **control flow (If/Scan/Loop via recursive
 subgraph-body translation)**, and
-NonZero/Unique/Det/loss ops — one handler + claim + registration per op in `src/ep/ops/*.cc`.
+NonZero/Unique/Det/loss ops — one handler + claim + registration per op in `rust/src/ops/*.rs`.
 
 **The 18 ops still on ORT CPU** — each needs a non-tensor value type, non-numeric data, or a codec
 that a GPU tensor engine fundamentally cannot provide (not force-fit):
@@ -102,20 +102,22 @@ Float64 everywhere falls back to ORT CPU (Metal hardware limit). Zero-size/empty
 **handled on MLX** (not rejected). Control-flow BODIES still offload to MLX even when a rare CF form
 runs on CPU. See §2.2 for the registry and the add-an-op recipe.
 
-The **core modules** (the opset-17+ expansion additionally added `trig`, `activations2`, `bitwise`, `reduction2`, `shape2`, `normpool`, `quantize`, `randommisc` — counted in §2.1 above) register:
+The **core Rust modules** register:
 
 | Module | Registered ops |
 |---|---|
-| `elementwise.cc` | Add, Mul, Sub, Sigmoid, Softmax, Cast |
-| `math.cc` | Div, Relu, Tanh, Softplus, Clip, Gelu, Exp, Log, Sqrt, Reciprocal, Neg, Abs, Floor, Sign, Erf, Sin, Cos, Min, Max, Pow, Mod, Round, CastLike, Where, Equal, Less, Greater, GreaterOrEqual, LessOrEqual, And, Or, Not, Elu, Swish, LogSoftmax, OneHot, Trilu, ArgMin, ArgMax |
-| `reduction.cc` | ReduceSum, ReduceMax, ReduceMean, ReduceMin, ReduceSumSquare, ReduceL2, CumSum, TopK |
-| `shape.cc` | Gather, GatherElements, Concat, Reshape, Transpose, Unsqueeze, Squeeze, Flatten, Expand, Slice, Split, Tile, Pad, Identity, ConstantOfShape, Range, ScatterElements, Shape, Size, SpaceToDepth, Compress, Constant, **Resize** (nearest+linear) |
-| `norm.cc` / `norm_ext.cc` | RMSNormalization, SkipSimplifiedLayerNormalization, LayerNormalization, SimplifiedLayerNormalization, SkipLayerNormalization, GroupNormalization, LpNormalization, BatchNormalization |
-| `attention.cc` / `attention_ext.cc` | GroupQueryAttention, Attention (opset 23 & 24), MultiHeadAttention, RotaryEmbedding |
-| `matmul.cc` | MatMul, Gemm |
-| `conv.cc` | Conv, ConvTranspose, AveragePool, GlobalAveragePool, MaxPool, GlobalMaxPool |
-| `quant.cc` | MatMulNBits, GatherBlockQuantized (symmetric **and** asymmetric/zero_points) |
-| `ssm_misc.cc` | TensorScatter (opset 24), CausalConvWithState, LinearAttention (linear/gated/delta/gated_delta, GQA) |
+| `elementwise.rs` | Add, Mul, Sub, Sigmoid, Softmax, Cast |
+| `math.rs` | Div, Relu, Tanh, Softplus, Clip, Gelu, Exp, Log, Sqrt, Reciprocal, Neg, Abs, Floor, Sign, Erf, Sin, Cos, Min, Max, Pow, Mod, Round, CastLike, Where, Equal, Less, Greater, GreaterOrEqual, LessOrEqual, And, Or, Not, Elu, Swish, LogSoftmax, OneHot, Trilu, ArgMin, ArgMax |
+| `reduction.rs` | ReduceSum, ReduceMax, ReduceMean, ReduceMin, ReduceSumSquare, ReduceL2, CumSum, TopK |
+| `shape.rs` | Gather, GatherElements, Concat, Reshape, Transpose, Unsqueeze, Squeeze, Flatten, Expand, Slice, Split, Tile, Pad, Identity, ConstantOfShape, Range, ScatterElements, Shape, Size, SpaceToDepth, Compress, Constant, **Resize** (nearest+linear) |
+| `norm.rs` | RMSNormalization, SkipSimplifiedLayerNormalization, LayerNormalization, SimplifiedLayerNormalization, SkipLayerNormalization, GroupNormalization, LpNormalization, BatchNormalization |
+| `attention.rs` | GroupQueryAttention, Attention (opset 23 & 24), MultiHeadAttention, RotaryEmbedding |
+| `matmul.rs` | MatMul, Gemm |
+| `conv.rs` | Conv, ConvTranspose, AveragePool, GlobalAveragePool, MaxPool, GlobalMaxPool |
+| `quant.rs` | MatMulNBits, GatherBlockQuantized, Quantize/Dequantize/DynamicQuantize, MatMulInteger, ConvInteger, QLinearMatMul, QLinearConv |
+| `ssm.rs` | TensorScatter (opset 24), CausalConvWithState, LinearAttention (linear/gated/delta/gated_delta, GQA) |
+| `misc.rs` | Consolidated miscellaneous handlers that used to be split across multiple C++ families. |
+| `random.rs` / `signal.rs` / `recurrent.rs` / `vision.rs` / `controlflow.rs` | Random, signal/FFT/window, RNN/GRU/LSTM, vision, and recursive control-flow translations. |
 
 Every claim is **conservative**: a handler claims only the ONNX forms it can translate correctly (dtype/shape/attr/opset checked in its `ClaimPredicate`); every other form falls back to ORT CPU, which is always correct. Each op has pytest coverage in `tests/ops/` (**660 passing**, ~54 skipped for ORT-CPU dtype gaps); the attention/matmul/resize/quant tests assert the node actually ran on `MLXExecutionProvider` (no vacuous CPU-fallback passes).
 
@@ -128,7 +130,7 @@ Every claim is **conservative**: a handler claims only the ONNX forms it can tra
 
 Plus conservative per-op form exclusions (e.g. `Resize` cubic/roi/antialias, Conv 3D/SAME/asymmetric-pad, MHA padding-mask/KV-cache) that also fall back to correct ORT CPU.
 
-**Engine fix (landed):** ORT returns a **null** `OrtValueInfo` for an omitted *interior* optional input (e.g. `Resize` `roi`, `Clip` `min`); the `GetCapability` clustering pass in `ep.cc` dereferenced it and crashed session creation graph-wide. `ep.cc` now null-guards input names at all four iteration sites (`InputName`), so interior-optional-gap ops are safe. (Earlier `HasInteriorGap` claim guards in attention/ssm modules can now be relaxed as a follow-up.)
+**Engine fix (landed):** ORT returns a **null** `OrtValueInfo` for an omitted *interior* optional input (e.g. `Resize` `roi`, `Clip` `min`); the Rust clustering pass now null-guards input names before constructing dataflow edges, so interior-optional-gap ops are safe. Earlier interior-gap claim guards in attention/SSM modules can now be relaxed as a follow-up.
 
 ---
 
@@ -140,63 +142,73 @@ The translator is a **registry**, not an if-chain. Both the claim-time membershi
 
 | File | Role |
 |---|---|
-| `src/ep/op_registry.{h,cc}` | The `OpRegistry` singleton: the `(domain, op_type, [min_opset, max_opset]) → {handler, claimable}` table, `Find()`, `FindEntry()`, `Supported()`, and `Claimable(node)`. |
-| `src/ep/op_claim.h` | Shared claim-time helpers (`TensorInfo`, `IsMlxFloatType`, `IsFloatType`, `IntAttribute`, `FloatAttribute`, `SuffixBroadcast`, `ScalarOrSuffixBroadcast`) used by the per-op claim predicates in the `ops/*.cc` modules. |
-| `src/ep/mlx_engine.h` | `MlxDtypeFromOnnx()` (the dtype mapping), `Plan` (persistent MLX state), and `TranslationContext` (the object handlers use to `Resolve`/`Bind` and emit MLX ops). |
-| `src/ep/mlx_backend.cc` | The engine: `TranslationContext` method definitions, boundary eval + copy-out, and the `BuildPlan`/`RunPlan`/`DestroyPlan` API. **No op-specific logic.** |
-| `src/ep/ops/elementwise.cc` | `Add`, `Mul`, `Sub`, `Sigmoid`, `Softmax`, `Cast` handlers **+ claim predicates** + `RegisterElementwiseOps`. |
-| `src/ep/ops/norm.cc` | `RMSNormalization`, `SkipSimplifiedLayerNormalization` + claim predicates + `RegisterNormOps`. |
-| `src/ep/ops/attention.cc` | `GroupQueryAttention` (in-op RoPE) + claim predicate + `RegisterAttentionOps`. |
-| `src/ep/ops/quant.cc` | `MatMulNBits`, `GatherBlockQuantized` + claim predicates + `RegisterQuantOps`. |
+| `rust/src/registry.rs` | The `OpRegistry` singleton: the `(domain, op_type, [min_opset, max_opset]) → {handler, claim}` table, lookup, `translate`, and `claimable`. Also contains `NodeView` and claim helpers such as `is_mlx_float` and `suffix_broadcast`. |
+| `rust/src/engine.rs` | `mlx_dtype_from_onnx()` (the dtype mapping), `Plan` (persistent MLX state), and `TranslationContext` (the object handlers use to resolve inputs, bind outputs, keep arrays alive, run boundary eval, and copy out). |
+| `rust/src/mlx.rs` | Safe RAII layer over `mlx-c`: `Stream`, `Array`, and `VectorArray` wrappers with `Drop`; raw bindgen stays in `rust/src/sys.rs`. |
+| `ep.rs` under `rust/src/` | ORT `OrtEp` vtable boundary: `GetCapability`, convex clustering, `Compile`, `OrtNodeComputeInfo` ownership, and runtime compute entry points. No op-specific translation logic. |
+| `rust/src/ops/elementwise.rs` | `Add`, `Mul`, `Sub`, `Sigmoid`, `Softmax`, `Cast` handlers **+ claim predicates** + registration. |
+| `rust/src/ops/norm.rs` | Normalization handlers and claim predicates. |
+| `rust/src/ops/attention.rs` | Attention, GQA, MHA, and RoPE handlers and claim predicates. |
+| `rust/src/ops/quant.rs` | Quantization handlers including `MatMulNBits` and `GatherBlockQuantized`; the former split quantization families are consolidated here. |
+| `rust/src/ops/{math,matmul,misc,random,recurrent,reduction,shape,signal,ssm,vision,conv,controlflow}.rs` | Remaining op families. |
 
-Each module exposes one `RegisterXxxOps(OpRegistry&)` function; `op_registry.cc::RegisterBuiltinOps` calls them all once when the singleton is first used (explicit registration — no reliance on static-init ordering).
+Each module registers into the registry; `rust/src/registry.rs` `register_builtin_ops` wires the modules into a process-wide `OnceLock` singleton. Registration is explicit — no reliance on static-init ordering.
 
 ### The registry key: `(domain, op_type, opset range)` + claim predicate
 
-A handler is `void(TranslationContext&, const NodeDesc&)`. It is registered under a domain (`""` = `ai.onnx`, or `com.microsoft`), an op type, an inclusive opset range `[min_opset, max_opset]`, the handler, **and a claim predicate** `bool(Ort::ConstNode)`. `kAnyOpset` (`-1`) means "unbounded on that side"; a version-insensitive or contrib op registers with `{kAnyOpset, kAnyOpset}`.
+A handler has the Rust type `fn(&mut TranslationContext, &NodeDesc) -> Result<(), MlxError>`. It is registered under a domain (`""` = `ai.onnx`, or `com.microsoft`), an op type, an inclusive opset range `[min_opset, max_opset]`, the handler, **and a claim predicate** `fn(&NodeView) -> bool`. `K_ANY_OPSET` (`-1`) means "unbounded on that side"; a version-insensitive or contrib op registers with `{K_ANY_OPSET, K_ANY_OPSET}`.
 
-```cpp
-// One registry entry = translate handler + claim predicate, registered together in the op module.
-registry.Register({domain, "MyOp", min_opset, max_opset, &MyOpTranslate, &MyOpClaim});
+```rust
+registry.register(OpRegistration {
+    domain,
+    op_type: "MyOp",
+    min_opset,
+    max_opset,
+    handler: my_op,
+    claim: my_op_claim,
+});
 ```
 
-The claim predicate answers, for a concrete ONNX node whose `(domain, op, opset)` already matched this entry: **can the MLX backend translate THIS node exactly** — right dtypes, shapes, attributes, input/output form? It lives in the same `ops/<family>.cc` module as its handler, using the shared helpers in `src/ep/op_claim.h` (`TensorInfo`, `IsMlxFloatType`, `IsFloatType`, `IntAttribute`, `FloatAttribute`, `SuffixBroadcast`, `ScalarOrSuffixBroadcast`). This replaces the old per-family `AddClaimable`/`MarietteClaimable`/`CocoClaimable` funcs that used to live in `ep.cc`.
+The claim predicate answers, for a concrete ONNX node whose `(domain, op, opset)` already matched this entry: **can the MLX backend translate THIS node exactly** — right dtypes, shapes, attributes, input/output form? It lives in the same `rust/src/ops/<family>.rs` module as its handler, using shared helpers in `rust/src/registry.rs` (`SlotInfo`, `is_mlx_float`, `suffix_broadcast`, and related helpers).
 
-`ep.cc` no longer contains any per-op claim logic. `GetCapability` calls a single hook — `ort_mps_mlx::Claimable(node)` — which looks up the matching registry entry and runs its claim predicate:
+`ep.rs` under `rust/src/` contains no per-op claim logic. `GetCapability` calls a single hook — `claimable(&NodeView)` — which looks up the matching registry entry and runs its claim predicate.
 
-```cpp
-bool Claimable(Ort::ConstNode node) {
-  const OpRegistration* e = OpRegistry::Instance().FindEntry(
-      node.GetDomain(), node.GetOperatorType(), node.GetSinceVersion());
-  return e && e->claimable && e->claimable(node);
+```rust
+pub fn claimable(node: &NodeView) -> bool {
+    match registry().find_entry(&node.domain(), &node.op_type(), node.since_version()) {
+        Some(entry) => (entry.claim)(node),
+        None => false,
+    }
 }
 ```
 
-Because the same `FindEntry` lookup backs both claim and run-time dispatch, "claimed" and "translatable" can never disagree. `MetalEp::Config::claim_enabled` (set false by `ONNX_GENAI_METAL_EP_CLAIM=none`) is the single global kill-switch.
+Because the same lookup backs both claim and run-time dispatch, "claimed" and "translatable" can never disagree.
 
 ### The registry key: opset dispatch
 
-The opset is threaded end-to-end: `ep.cc` reads `Ort::ConstNode::GetSinceVersion()` into `NodeDesc::since_version`, and `OpRegistry::Find`/`FindEntry` dispatch by matching the range. This is the seam that lets opset-23 and opset-24 variants of an op (e.g. `Attention`, `TensorScatter`) map to different handlers — a version-split op registers two handlers with adjacent, non-overlapping ranges (e.g. `[1, 22]` and `[23, kAnyOpset]`). `RMSNormalization` already uses a bounded range (`[23, kAnyOpset]`) as a live example.
+The opset is threaded end-to-end: `ep.rs` under `rust/src/` reads the node's since-version into `NodeDesc::since_version`, and `OpRegistry::find_entry` dispatches by matching the range. This is the seam that lets opset-23 and opset-24 variants of an op (e.g. `Attention`, `TensorScatter`) map to different handlers — a version-split op registers two handlers with adjacent, non-overlapping ranges (e.g. `[1, 22]` and `[23, K_ANY_OPSET]`). `RMSNormalization` uses a bounded range as a live example.
 
 ### Generic node attributes (`NodeDesc`)
 
-`ep.cc` copies **every** ONNX attribute on each node into `NodeDesc` generically — there is no fixed per-op attribute list. Attributes are split by ONNX attribute type into typed maps:
+`ep.rs` under `rust/src/` copies ONNX attributes on each node into `NodeDesc` generically. Attributes are split by ONNX attribute type into typed maps:
 
 | ONNX attr type | `NodeDesc` map | Handler reads |
 |---|---|---|
-| `ORT_OP_ATTR_INT` | `ints` (`map<string,int64_t>`) | `n.ints.at("axis")` |
-| `ORT_OP_ATTR_FLOAT` | `floats` (`map<string,float>`) | `n.floats.at("epsilon")` |
-| `ORT_OP_ATTR_INTS` | `int_arrays` (`map<string,vector<int64_t>>`) | `n.int_arrays.at("axes")` — Slice/Reduce/Transpose/Conv/Split |
-| `ORT_OP_ATTR_FLOATS` | `float_arrays` (`map<string,vector<float>>`) | `n.float_arrays.at("scales")` |
-| `ORT_OP_ATTR_STRING` | `strings` (`map<string,string>`) | `n.strings.at("mode")` |
+| `ORT_OP_ATTR_INT` | `ints` (`HashMap<String, i64>`) | `n.ints.get("axis")` |
+| `ORT_OP_ATTR_FLOAT` | `floats` (`HashMap<String, f32>`) | `n.floats.get("epsilon")` |
+| `ORT_OP_ATTR_INTS` | `int_arrays` (`HashMap<String, Vec<i64>>`) | `n.int_arrays.get("axes")` — Slice/Reduce/Transpose/Conv/Split |
+| `ORT_OP_ATTR_FLOATS` | `float_arrays` (`HashMap<String, Vec<f32>>`) | `n.float_arrays.get("scales")` |
+| `ORT_OP_ATTR_STRING` | `strings` (`HashMap<String, String>`) | `n.strings.get("mode")` |
+| `ORT_OP_ATTR_TENSOR` | `tensors` (`HashMap<String, ConstTensor>`) | Constant and ConstantOfShape tensor payloads |
+| `ORT_OP_ATTR_GRAPH` | `subgraphs` (`Vec<SubgraphDesc>`) | If/Scan/Loop body translation |
 
-Absent attributes are simply not present in the map, so a handler reads an optional attr as `n.<map>.count(name) ? n.<map>.at(name) : <default>` and a required attr as `n.<map>.at(name)`. `STRINGS`, `GRAPH`, and `TENSOR` attributes are not carried today (no claimed op reads them); adding them is a localized `ep.cc` + `NodeDesc` change if a future op needs them. This schema is what unblocks the long tail (Slice, Reduce\*, Transpose, Conv, Attention, Split, LayerNorm) whose attributes are int/float **arrays** and **strings**, which the old fixed scalar list could not represent.
+Absent attributes are simply not present in the map, so a handler reads an optional attr with `get(...).copied().unwrap_or(default)` and a required attr with `get(...).ok_or_else(...)`. This schema is what unblocks the long tail (Slice, Reduce*, Transpose, Conv, Attention, Split, LayerNorm) whose attributes are arrays and strings.
 
 ### The dtype mapping
 
-`MlxDtypeFromOnnx()` maps every ONNX tensor element type mlx-c can carry to its `mlx_dtype`: `fp32`, `fp16`, **`bf16`**, `fp64`, the signed/unsigned integer widths (`int8/16/32/64`, `uint8/16/32/64`), and `bool`. It is used in `Resolve`/`Bind`, constant materialization, the pre-eval boundary cast, and `CopyOut`, so **every tensor honors its actual dtype** rather than a hard-coded fp32.
+`mlx_dtype_from_onnx()` maps every ONNX tensor element type `mlx-c` can carry to its `mlx_dtype`: `fp32`, `fp16`, **`bf16`**, `fp64`, the signed/unsigned integer widths (`int8/16/32/64`, `uint8/16/32/64`), and `bool`. It is used in input resolution, constant materialization, boundary casts, and copy-out, so **every tensor honors its actual dtype** rather than a hard-coded fp32.
 
-Because MLX carries the resolved dtype through its ops with no per-dtype code, the dtype-generic handlers (elementwise, activation, softmax, normalization, cast) work in fp32, fp16 **and** bf16 with a single implementation. `GroupQueryAttention` also accepts matching fp32/fp16/bf16 tensors end to end. `MatMulNBits` and `GatherBlockQuantized` remain fp32-only because their quantized representations match the cpu-recipe graph.
+Because MLX carries the resolved dtype through its ops with no per-dtype code, the dtype-generic handlers (elementwise, activation, softmax, normalization, cast) work in fp32, fp16 **and** bf16 with a single implementation. `GroupQueryAttention` also accepts matching fp32/fp16/bf16 tensors end to end. `MatMulNBits` and `GatherBlockQuantized` remain fp32-only where their quantized representations match the cpu-recipe graph.
 
 ---
 
@@ -258,6 +270,8 @@ Some values are available only through live context data, so they are cached on 
 
 This replaces the old per-kernel pipeline-state model. There are no Metal compute pipeline states, shader names, or MSL dtype suffixes in the current architecture.
 
+Rust ownership is a deliberate design win: ORT factory/EP objects cross the C ABI with `Box::into_raw` / `Box::from_raw`, while MLX streams, arrays, and vector arrays are owned by wrappers in `rust/src/mlx.rs` whose `Drop` implementations call the matching `mlx_*_free`. Runtime-produced arrays live in `TranslationContext`'s arena for the duration of a compute call; persistent constants live in the plan cache and are freed with the plan.
+
 ---
 
 ## 5. Claiming rules
@@ -273,7 +287,7 @@ That means every claim must validate:
 5. Layout assumptions, especially KV-cache shape for GQA.
 6. Whether constants/initializers can be cached in the current plan.
 
-The claim predicate is registered **next to its translate handler** in the op module (`ops/<family>.cc`) as `OpRegistration::claimable`, and is additionally AND-gated by registry membership: `ort_mps_mlx::Claimable(node)` (called from `ep.cc::GetCapability`) looks up the matching `(domain, op, opset)` entry and runs its claim predicate. A node with no matching entry — or whose entry's predicate rejects it — is never claimed, so "claimed" can never outrun "translatable". **`ep.cc` contains no per-op claim logic.**
+The claim predicate is registered **next to its translate handler** in the op module (`rust/src/ops/<family>.rs`) as `OpRegistration::claim`, and is additionally AND-gated by registry membership: `claimable(&NodeView)` (called from `ep.rs` under `rust/src/` `GetCapability`) looks up the matching `(domain, op, opset)` entry and runs its claim predicate. A node with no matching entry — or whose entry's predicate rejects it — is never claimed, so "claimed" can never outrun "translatable". **`ep.rs` under `rust/src/` contains no per-op claim logic.**
 
 When in doubt, do not claim. CPU fallback is preferred to an approximate translation.
 
@@ -281,23 +295,23 @@ When in doubt, do not claim. CPU fallback is preferred to an approximate transla
 
 ## 6. Adding or changing a translated op
 
-The extension path is **purely additive** and **registry-centric**: adding an op is one self-contained handler module plus one registration line — **no `ep.cc` edits, ever.** To add a long-tail op:
+The extension path is **purely additive** and **registry-centric**: adding an op is one self-contained handler module plus one registration line — **no `ep.rs` under `rust/src/` edits, ever.** To add a long-tail op:
 
-1. **Handler + claim predicate — in one module.** In the appropriate `src/ep/ops/<family>.cc` (or a new module), add:
-   - `void MyOp(TranslationContext& ctx, const NodeDesc& n)` — resolve inputs with `ctx.Resolve(n.inputs[i])`, read attributes generically (`n.ints.at("axis")`, `n.int_arrays.at("axes")`, `n.strings.at("mode")`, …), emit MLX ops via the `ctx` helpers (`Reshape`, `Transpose`, `Astype`, `Mul`, `AddA`, …) or `mlx_*` calls wrapped in `ctx.Keep(...)`, and bind results with `ctx.Bind(n.outputs[i], ...)`. Read the tensor's actual dtype through `MlxDtypeFromOnnx` — never hard-code fp32.
-   - `bool MyOpClaim(Ort::ConstNode node)` — the dtype/shape/attribute claim checks, using the shared helpers in `src/ep/op_claim.h`.
-2. **Register — one line.** Add to that module's `RegisterXxxOps`: `registry.Register({domain, "MyOp", min_opset, max_opset, &MyOp, &MyOpClaim});`. Use `kAnyOpset` for a version-insensitive op, or a bounded range for an opset-split op.
-3. **CMake (new module only).** If you created a new `src/ep/ops/<family>.cc`, add it to `CMakeLists.txt` and declare `RegisterMyFamilyOps` in `op_registry.h`, called from `op_registry.cc::RegisterBuiltinOps`.
-4. **Attributes — nothing to do.** `ep.cc` already copies **all** of a node's attributes into `NodeDesc` generically (int/float/int-array/float-array/string). Your handler and claim predicate just read them. (Only if you need a `STRINGS`/`GRAPH`/`TENSOR` attribute — which no current op does — is a localized `ep.cc`/`NodeDesc` extension required.)
+1. **Handler + claim predicate — in one module.** In the appropriate `rust/src/ops/<family>.rs` (or a new module), add:
+   - `fn my_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>` — resolve inputs with the `TranslationContext` helpers, read attributes generically (`n.ints`, `n.int_arrays`, `n.strings`, …), emit MLX ops through safe `mlx.rs` wrappers or raw `mlx-c` calls kept by the context, and bind results to `n.outputs[i]`. Read the tensor's actual dtype through `mlx_dtype_from_onnx` — never hard-code fp32.
+   - `fn my_op_claim(node: &NodeView) -> bool` — the dtype/shape/attribute claim checks, using shared helpers in `rust/src/registry.rs`.
+2. **Register — one line.** Add a `registry.register(OpRegistration { ... })` call in that module's `register` function. Use `K_ANY_OPSET` for a version-insensitive op, or a bounded range for an opset-split op.
+3. **New module wiring only if needed.** If you created a new `rust/src/ops/<family>.rs`, add it to `rust/src/ops/mod.rs` and call its `register` function from `register_builtin_ops` in `rust/src/registry.rs`.
+4. **Attributes — usually nothing to do.** `ep.rs` under `rust/src/` already copies node attributes into `NodeDesc` generically. Your handler and claim predicate just read them. Only if a future op needs a new attribute payload shape is a localized `NodeDesc` extraction extension required.
 5. **Tests.** Add op-correctness coverage in `tests/ops/` (ONNX IR API via `_models.py`). For a dtype-generic op, add fp16 (vs ORT CPU) and bf16 (bf16-interior subgraph vs a numpy reference) cases.
-6. **E2E.** Add or update `tests/e2e/` coverage if the op affects decoder coherence or KV-cache behavior.
+6. **Conformance / E2E.** Add opt-in conformance coverage when broad ONNX behavior matters, and add/update E2E coverage if the op affects decoder coherence or KV-cache behavior.
 7. **Docs.** Update the §2 table and, if relevant, §2.2.
 
-**Summary of touch points for a new op in an existing family:** one handler function + one claim predicate + one `registry.Register(...)` line in `ops/<family>.cc`, plus tests. **Zero changes to `ep.cc`, `mlx_backend.cc`, or the engine.**
+**Summary of touch points for a new op in an existing family:** one handler function + one claim predicate + one `registry.register(...)` line in `rust/src/ops/<family>.rs`, plus tests. **Zero changes to `ep.rs` under `rust/src/`, `rust/src/engine.rs`, or the registry core.**
 
-**Add a new opset variant:** register a second handler for the new range and narrow the existing registration (e.g. change `[23, kAnyOpset]` to `[23, 23]` and add `[24, kAnyOpset]`).
+**Add a new opset variant:** register a second handler for the new range and narrow the existing registration (e.g. change `[23, K_ANY_OPSET]` to `[23, 23]` and add `[24, K_ANY_OPSET]`).
 
-**Add a new dtype:** if mlx-c exposes it, add the `ONNX → mlx_dtype` case to `MlxDtypeFromOnnx`, a `CopyOut` memcpy case, and widen the relevant claim predicate. Dtype-generic handlers need no change.
+**Add a new dtype:** if `mlx-c` exposes it, add the `ONNX → mlx_dtype` case to `mlx_dtype_from_onnx`, ensure copy-out handles the byte layout, and widen the relevant claim predicate. Dtype-generic handlers need no change.
 
 Do not add a new `.metal` kernel or a dtype-traits/MSL specialization layer for new coverage.
 
@@ -305,22 +319,30 @@ Do not add a new `.metal` kernel or a dtype-traits/MSL specialization layer for 
 
 ## 7. Testing expectations
 
+Use the Rust plugin artifact with the Python tests:
+
+```sh
+DYLD_LIBRARY_PATH=<ort-prebuilt/lib> \
+ONNXRUNTIME_MLX_EP_LIB=$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib \
+python -m pytest tests/ops -q
+```
+
 | Layer | Test | Purpose |
 |---|---|---|
-| Op correctness | `tests/ops/mlx_op_test.py` / `mlx_op_tests` | Confirms each claimed translation matches a reference within accepted tolerances. fp32/fp16 compare against ORT CPU; bf16 keeps the compute inside an MLX-claimed subgraph (fp32 boundaries) and compares against a numpy fp32 reference (~1e-2), since ORT CPU has no bf16 kernels. |
-| E2E coherence | `tests/e2e/` / `mlx_e2e` | Confirms the plugin produces coherent model output. |
-| Memory stability | `tests/e2e/` / `mlx_leak_test` | Confirms allocator memory stays flat across bounded runs. |
+| Op correctness | `tests/ops/` / `python -m pytest tests/ops -q` | Confirms each claimed translation matches a reference within accepted tolerances. fp32/fp16 compare against ORT CPU; bf16 keeps the compute inside an MLX-claimed subgraph (fp32 boundaries) and compares against a numpy fp32 reference (~1e-2), since ORT CPU has no bf16 kernels. |
+| Conformance | `tests/conformance/` | Opt-in broader ONNX coverage. |
+| Memory stability | macOS `leaks` around Rust stress scripts | Confirms Rust RAII teardown stays leak-free across repeated sessions. |
 
 Current post-pivot baseline:
 
-- Build green.
-- `ctest`: 3/3 green (`mlx_op_tests`, `mlx_e2e`, `mlx_leak_test`).
+- Rust release build green.
+- Python op tests green through `MLXExecutionProvider`.
 - Qwen2.5-0.5B emits `The capital of France is Paris`.
 - CPU token stream match for the first 14 tokens; known fp32 decode drift after that is accepted.
-- Prefill/TTFT improves from ~33 ms CPU to ~15 ms MLXExecutionProvider for a 26-token prompt.
-- Prefill/TTFT improves from ~575 ms CPU to ~165 ms MLXExecutionProvider for a 512-token prompt.
+- Prefill/TTFT improves from ~33 ms CPU to ~15 ms `MLXExecutionProvider` for a 26-token prompt.
+- Prefill/TTFT improves from ~575 ms CPU to ~165 ms `MLXExecutionProvider` for a 512-token prompt.
 - Warm decode is ~122–148 tok/s at short context.
-- Leak test shows flat allocator memory across bounded cycles.
+- Leak stress shows flat allocator memory and 0 leaked MLX handles across bounded cycles.
 
 ---
 
@@ -332,14 +354,21 @@ Current post-pivot baseline:
 brew install mlx-c
 ```
 
-CMake configure fails if it cannot find `mlx-c`. There is no build flag to disable MLX and no hand-kernel fallback.
+Build with Cargo from the Rust crate:
 
-Use only the current target/artifact names:
+```sh
+cd rust
+ORT_INCLUDE_DIR=<ORT include dir> cargo build --release
+```
 
-- `onnxruntime_mlx_ep`
-- `libonnxruntime_mlx_ep.dylib`
+`rust/build.rs` also honors `$ORT_HOME/include` as a fallback. It runs bindgen over the ORT plugin-EP C ABI and `mlx-c` headers, and it does **not** link `libonnxruntime`.
 
-The registered EP name is `MLXExecutionProvider`; do not use the target/dylib name as evidence that the runtime-facing EP name differs.
+Use only the current crate/artifact names:
+
+- `rust/`
+- `rust/target/release/libonnxruntime_mlx_ep.dylib`
+
+The registered EP name is `MLXExecutionProvider`; do not use the dylib name as evidence that the runtime-facing EP name differs.
 
 ---
 
@@ -347,12 +376,12 @@ The registered EP name is `MLXExecutionProvider`; do not use the target/dylib na
 
 This document replaces the older modular-op and dtype plan. The following are historical and must not be described as active:
 
-- `src/kernels/*.metal` hand-written shaders for matmulnbits, GQA, norm, softmax, RoPE, elementwise, data movement, and quantized gather.
-- Metal shader compile/registry/encode machinery in `src/ep/metal_context.{h,mm}`.
-- `cmake/metal_kernels.inc.in`.
-- `src/ops/` and its old **hand-kernel** op-registry scaffold (distinct from the current `src/ep/ops/` ONNX→MLX handler modules, which are active — see §2.2).
-- `src/dtype/dtype_traits.h` and the dtype/MSL specialization plan.
-- The old `onnxruntime_mps_ep` target and `libonnxruntime_mps_ep.dylib` artifact.
+- Hand-written Metal shaders for matmulnbits, GQA, norm, softmax, RoPE, elementwise, data movement, and quantized gather.
+- Metal shader compile/registry/encode machinery and the former allocator bridge.
+- Generated Metal-kernel include fragments.
+- The old hand-kernel op-registry scaffold.
+- The dtype/MSL specialization plan.
+- The old MPS target and dylib artifact.
 - Transitional MLX/Metal feature flags and any hand-kernel fallback path.
 
 For the data that justified the pivot, see [`docs/MLX_EVALUATION.md`](./MLX_EVALUATION.md).

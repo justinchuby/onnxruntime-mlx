@@ -43,15 +43,19 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 
-# --- ONNX Runtime Metal/MPS EP (Phase 1) ---
-# CMake build output (the plugin .dylib + e2e binary are rebuilt from source).
+# --- ONNX Runtime MLX EP (Rust) ---
+# Cargo build output (the plugin dylib is rebuilt from source: `cargo build`).
+/rust/target/
 build/
 # Scratch reference material downloaded during development.
 .ref/
-# Generated e2e prompt fixture (regenerate with tests/e2e/prepare_prompt.py).
-tests/e2e/prompt_tokens.txt
 build-mlx/
 .vscode/
+
+# Bundled runtime artifacts dropped into the wheel package by the build hook
+# (python/hatch_build.py). Rebuilt on every wheel build; never committed.
+python/src/onnxruntime_mlx/*.dylib
+python/src/onnxruntime_mlx/*.metallib
 
 # --- Python (op tests, tooling) ---
 __pycache__/

@@ -1,10 +1,10 @@
 """Pytest configuration for the MLX EP op-correctness suite.
 
 The MLX execution-provider plugin is registered once per test session from the
-``ONNXRUNTIME_MLX_EP_LIB`` environment variable (set by CTest to the built
-``libonnxruntime_mlx_ep.dylib``). Running ``pytest`` without that variable skips
-the suite rather than failing, so the tests are usable both under CTest and by
-hand (``ONNXRUNTIME_MLX_EP_LIB=<dylib> pytest tests/ops``).
+``ONNXRUNTIME_MLX_EP_LIB`` environment variable (the cargo-built
+``rust/target/release/libonnxruntime_mlx_ep.dylib``). Running ``pytest`` without
+that variable skips the suite rather than failing, so the tests are usable both
+in CI and by hand (``ONNXRUNTIME_MLX_EP_LIB=<dylib> pytest tests/ops``).
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
-build-backend = "scikit_build_core.build"
+requires = ["hatchling>=1.24", "delocate>=0.11"]
+build-backend = "hatchling.build"
 
 [project]
 name = "onnxruntime-mlx"
@@ -17,7 +17,7 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Operating System :: MacOS :: MacOS X",
-  "Programming Language :: C++",
+  "Programming Language :: Rust",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -28,30 +28,42 @@ classifiers = [
 Homepage = "https://github.com/justinchuby/onnxruntime-mlx"
 Repository = "https://github.com/justinchuby/onnxruntime-mlx"
 
-[tool.scikit-build]
-# The wheel package lives under python/src/onnxruntime_mlx; compiled artifacts
-# (the nanobind _core extension, the EP dylib and its bundled mlx deps) are
-# installed into it by CMakeLists.txt.
-wheel.packages = ["src/onnxruntime_mlx"]
-minimum-version = "build-system.requires"
-build-dir = "build/{wheel_tag}"
-# Build a single CPython Stable ABI (abi3) wheel targeting Python 3.12+, so one
-# cp312-abi3 wheel serves 3.12/3.13/... instead of one wheel per version.
-wheel.py-api = "cp312"
+# --- Hatchling wheel build ----------------------------------------------------
+# The execution provider is a Rust `cdylib` (../rust). It is NOT a Python
+# extension module, so there is no compiled Python surface to build: the Python
+# layer (onnxruntime_mlx/__init__.py) is a *pure-Python locator* that only finds
+# and registers the bundled dylib. The custom build hook (hatch_build.py):
+#   1. runs `cargo build --release` in ../rust (honouring ORT_INCLUDE_DIR / ORT_HOME),
+#   2. bundles the cargo-built libonnxruntime_mlx_ep.dylib + the mlx-c/mlx runtime
+#      (via delocate) into the package, relinked to @loader_path,
+#   3. forces a platform wheel tag (py3-none-macosx_*_arm64) — one wheel that
+#      installs on CPython 3.12, 3.13 AND the free-threaded (3.13t/3.14t) builds,
+#      because it ships no CPython-ABI-bound extension. abi3audit has nothing to
+#      audit (no extension modules) so `abi3audit --strict` is trivially clean.
+#
+# Why pure-Python instead of maturin+pyo3: `_core` was only ever a locator
+# (ep_name/version/library_path). A compiled pyo3 abi3 extension cannot also be
+# free-threaded (abi3 wheels are unsupported under Py_GIL_DISABLED), so "abi3 AND
+# abi3t" would force *separate* per-version cp313t/cp314t wheels. Shipping zero
+# native Python code sidesteps that entirely: one platform wheel serves every
+# interpreter (GIL and free-threaded alike) and is abi3audit-clean by construction.
 
-[tool.scikit-build.cmake.define]
-# Absolute path to the repository root (the parent of python/), which holds the
-# EP sources and the top-level CMake. Defaults to the parent of this project and
-# may be overridden for out-of-tree builds:
-#   pip install python/ -C cmake.define.ORT_MLX_REPO_ROOT=/abs/path/to/repo
-ORT_MLX_REPO_ROOT = ""
+[tool.hatch.build.targets.wheel]
+packages = ["src/onnxruntime_mlx"]
+# The dylibs / metallib are placed into the package dir by the build hook.
+artifacts = [
+  "src/onnxruntime_mlx/*.dylib",
+  "src/onnxruntime_mlx/*.metallib",
+]
 
-[tool.cibuildwheel]
-# Stable ABI (abi3) → build ONCE on CPython 3.12; the resulting cp312-abi3 wheel
-# is installable on 3.12 and all newer CPythons.
-build = "cp312-macosx_arm64"
-# The EP dylib links mlx-c/mlx (brew) at build time; delocate bundles them into
-# the wheel. onnxruntime is resolved from the host onnxruntime package at runtime
-# (two-level namespace), so it must NOT be vendored.
-[tool.cibuildwheel.macos]
-repair-wheel-command = "delocate-wheel --require-archs arm64 -e libonnxruntime -w {dest_dir} -v {wheel}"
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.sdist]
+# The sdist carries the Python layer + the build hook. Wheels are built from a
+# full repo checkout (where ../rust is present) so the hook can run cargo.
+include = [
+  "src/onnxruntime_mlx",
+  "hatch_build.py",
+  "README.md",
+]

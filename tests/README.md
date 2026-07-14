@@ -1,64 +1,54 @@
 # MLX EP tests
 
-The EP is MLX-native (ONNX fused decoder subgraph → MLX graph, MLX as the sole compute path). Three
-suites run through CTest:
+The EP is MLX-native and written in Rust (`rust/`): an ONNX fused decoder subgraph is translated to
+an MLX graph, with MLX as the sole compute path. The suites are **Python** (pytest); there is no
+longer any C++/CTest build.
 
-- **`mlx_op_tests`** (`tests/ops/`, pytest) — op-correctness: each ONNX decoder op the EP
-  translates to MLX (MatMulNBits, GroupQueryAttention, RMSNormalization,
-  SkipSimplifiedLayerNormalization, GatherBlockQuantized, Softmax, Add/Mul/Sub/Sigmoid/Cast) is run
-  through the plugin and compared, tolerance-gated, against ORT's CPU EP reference (fp16 too) or a
-  numpy reference (bf16). Parametrized `pytest` (`test_mlx_ops.py` + `_models.py` builders); the EP
-  is registered once by `conftest.py` from `ONNXRUNTIME_MLX_EP_LIB`. Run standalone with
-  `ONNXRUNTIME_MLX_EP_LIB=build/libonnxruntime_mlx_ep.dylib pytest tests/ops`. Models are built
-  with the ONNX IR (`onnx_ir`: `ir.Value`/`ir.Node`/`ir.Graph`/`ir.Model`), not `onnx.helper`.
-- **`mlx_e2e`** (`tests/e2e/e2e_test.cc`) — full-MLX prefill+decode coherence gate: the MetalEP token
-  stream must match the ORT CPU reference ("The capital of France is Paris").
-- **`mlx_leak_test`** (`tests/e2e/leak_test.mm`) — memory-leak regression (below).
-
-## Memory-leak regression
-
-`mlx_leak_test` loads the plugin EP in-process and measures `MTLDevice.currentAllocatedSize` (which
-captures both the residual MTLBuffer I/O pool and MLX's Metal allocations) across bounded
-create-session, short-generate, destroy-session cycles. The first cycle establishes a post-warmup
-baseline. Every later cycle must return within a small bound of it; the test stops immediately on
-growth and also has a hard ceiling.
-
-The default model is:
-
-```text
-../onnx-genai/models/qwen2.5-0.5b-cpu-recipe/model.onnx
-```
-
-Run through CTest:
+Build the EP first (see the repo `README.md`):
 
 ```bash
-cmake --build build -j8
-DYLD_LIBRARY_PATH=<ort-prebuilt/lib> ctest --test-dir build --output-on-failure
+cd rust
+ORT_INCLUDE_DIR=<ort-include-dir> cargo build --release   # or set ORT_HOME=<ort-release-root>
+# => rust/target/release/libonnxruntime_mlx_ep.dylib
 ```
 
-CTest reports the leak/e2e tests as skipped (return code 77) when the model or its external data
-file is unavailable.
+## `tests/ops` — op-correctness (pytest)
 
-## Metal validation layers
-
-Run the E2E coherence test and the leak regression with Apple's CPU-side API validation, GPU shader
-validation, error reporting, and abort-on-fault enabled:
+Each ONNX decoder op the EP translates to MLX (MatMulNBits, GroupQueryAttention, RMSNormalization,
+SkipSimplifiedLayerNormalization, GatherBlockQuantized, Softmax, Add/Mul/Sub/Sigmoid/Cast, and the
+full modular registry in `rust/src/ops/*.rs`) is run through the plugin and compared, tolerance-gated,
+against ORT's CPU EP reference (fp16 too) or a numpy reference (bf16). Parametrized `pytest`
+(`test_*.py` + `_models.py` builders); the EP is registered once by `conftest.py` from
+`ONNXRUNTIME_MLX_EP_LIB`. Models are built with the ONNX IR (`onnx_ir`:
+`ir.Value`/`ir.Node`/`ir.Graph`/`ir.Model`), not `onnx.helper`.
 
 ```bash
-tests/run_with_metal_validation.sh build
+export ONNXRUNTIME_MLX_EP_LIB="$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib"
+export DYLD_LIBRARY_PATH=<ort-prebuilt/lib>
+python -m pytest tests/ops -q
 ```
 
-The script exports:
+Running `pytest` without `ONNXRUNTIME_MLX_EP_LIB` set **skips** the suite (rather than failing), so
+it is safe to include in any pytest invocation.
 
-```text
-METAL_DEVICE_WRAPPER_TYPE=1
-MTL_SHADER_VALIDATION=1
-MTL_SHADER_VALIDATION_ENABLE_ERROR_REPORTING=1
-MTL_SHADER_VALIDATION_REPORT_TO_STDERR=1
-MTL_SHADER_VALIDATION_ABORT_ON_FAULT=1
-MTL_DEBUG_LAYER=1
-MTL_DEBUG_LAYER_WARNING_MODE=nslog
+## `tests/conformance` — ONNX-standard fuzz-conformance (opt-in)
+
+Bounded fuzz-conformance of the MLX EP against the ONNX standard via `cbourjau/onnx-tests`. Each op
+is fuzzed in its own subprocess so a single native crash cannot abort the run. It reads the EP dylib
+from `MLX_EP_LIB`. See [`tests/conformance/README.md`](conformance/README.md).
+
+## Memory-leak checks
+
+RAII (`impl Drop` in `rust/src/mlx.rs`) gives deterministic teardown, so leak-checking is done ad hoc
+with macOS `leaks` against the Rust stress scripts rather than a dedicated CTest target:
+
+```bash
+MallocStackLogging=1 leaks --atExit -- \
+  env ONNXRUNTIME_MLX_EP_LIB="$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib" \
+      DYLD_LIBRARY_PATH=<ort-prebuilt/lib> \
+  python rust/stress_add.py
 ```
 
-Override paths with `MPS_E2E_MODEL`, `MPS_EP_LIBRARY`, or `MPS_PROMPT_TOKENS`.
-
+The stress scripts (`rust/stress_add.py`, `rust/stress_norm_attn.py`, `rust/stress_wave2.py`) exercise
+the fast-norm / fast-SDPA / RoPE / multi-output paths across many back-to-back sessions and report
+**0 leaks / 0 bytes**.

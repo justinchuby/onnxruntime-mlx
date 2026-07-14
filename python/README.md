@@ -1,10 +1,11 @@
 # onnxruntime-mlx (Python package)
 
 Pip-installable **MLX-native execution provider** for ONNX Runtime on Apple
-Silicon. The wheel bundles the `libonnxruntime_mlx_ep.dylib` plugin EP (plus its
-`mlx-c` / `mlx` dynamic dependencies and `mlx.metallib`) and a nanobind
-extension that locates it, so Python users can register the EP with a stock
-`onnxruntime` wheel — no ONNX Runtime fork or manual dylib path required.
+Silicon. The wheel bundles the cargo-built `libonnxruntime_mlx_ep.dylib` plugin
+EP (plus its `mlx-c` / `mlx` dynamic dependencies and `mlx.metallib`) and a
+thin **pure-Python locator** that finds it, so Python users can register the EP
+with a stock `onnxruntime` wheel — no ONNX Runtime fork or manual dylib path
+required.
 
 - **Import name:** `onnxruntime_mlx`
 - **Distribution name:** `onnxruntime-mlx`
@@ -13,17 +14,30 @@ extension that locates it, so Python users can register the EP with a stock
 
 ## Install
 
+The wheel is built from a full repository checkout (the build hook runs
+`cargo build --release` in the sibling `rust/` crate). Install a Rust toolchain
+(`rustup`) and `brew install mlx-c` first, then:
+
 ```sh
-cd python
-pip install .
-# dev iteration:
-pip install -e . --no-build-isolation
+# from the repo root; point at the ORT C-API headers (or set ORT_HOME):
+ORT_INCLUDE_DIR=/path/to/onnxruntime/include python -m build --wheel ./python
+# or install directly:
+ORT_INCLUDE_DIR=/path/to/onnxruntime/include pip install ./python
 ```
 
-Build backend: **scikit-build-core** + **nanobind**. The build reuses the
-top-level CMake to compile the EP dylib (which requires `brew install mlx-c`),
-builds the `onnxruntime_mlx._core` nanobind extension, and bundles everything
-into the wheel.
+Build backend: **hatchling** with a custom build hook (`hatch_build.py`). There
+is **no compiled Python extension** — the EP is a Rust `cdylib`, and the Python
+layer is a pure-Python locator. The hook:
+
+1. runs `cargo build --release` in `../rust` (honouring `ORT_INCLUDE_DIR`, else
+   `$ORT_HOME/include`), then
+2. bundles the resulting dylib + the `mlx-c`/`mlx` runtime into the package
+   (relinked to `@loader_path`), and
+3. forces a single `py3-none-macosx_*_arm64` platform wheel.
+
+Because the wheel ships zero CPython-ABI code, **one** wheel installs on CPython
+3.12, 3.13 **and** the free-threaded (3.13t/3.14t) builds — and `abi3audit
+--strict` is clean by construction (nothing auditable).
 
 ## Usage
 
@@ -38,39 +52,27 @@ sess = ort.InferenceSession(
 )
 ```
 
-## Native API (`onnxruntime_mlx._core`)
+## Public API (`onnxruntime_mlx`)
 
 | Function          | Returns                                                        |
 |-------------------|---------------------------------------------------------------|
 | `ep_name()`       | `"MLXExecutionProvider"`                                       |
-| `version()`       | plugin version string (`"0.1.0"`)                             |
+| `version()`       | the installed package version string                          |
 | `vendor()`        | `"onnxruntime-mlx"`                                            |
 | `library_path()`  | absolute path to the bundled `libonnxruntime_mlx_ep.dylib`     |
 
-Python helpers in `onnxruntime_mlx`: `register_execution_provider_library()`,
-`append_to_session_options()`, plus re-exports of the above.
+Plus `register_execution_provider_library()` and `append_to_session_options()`.
 
 ## How the dylib + mlx deps are bundled
 
-At install time the build:
+The build hook (`hatch_build.py`):
 
 1. copies `libmlxc.dylib`, `libmlx.dylib`, and `mlx.metallib` next to the
    plugin inside the package;
 2. rewrites the plugin's mlx dependencies to `@loader_path/lib{mlxc,mlx}.dylib`
-   and the bundled install ids to match;
-3. rewrites the plugin's `onnxruntime` dependency to
-   `@rpath/libonnxruntime.1.dylib`, which macOS resolves from the host
-   `onnxruntime` package already loaded in-process (an rpath into the sibling
-   `onnxruntime/capi` directory is added as a fallback).
+   and the bundled install ids to match, then re-signs (ad-hoc) each mutated
+   binary.
 
-The result is a self-contained wheel that does **not** vendor `onnxruntime`
-(that must match the host at runtime).
-
-### Distribution repair (optional)
-
-For CI/wheel distribution you can additionally run `delocate` — but it **must
-exclude** `onnxruntime`:
-
-```sh
-delocate-wheel --require-archs arm64 -e libonnxruntime -w dist_repaired dist/*.whl
-```
+The Rust EP does **not** link `libonnxruntime` (it reaches ORT purely through
+the `OrtApi` function-pointer table), so there is no `onnxruntime` dependency to
+rewrite; `onnxruntime` is never vendored and must match the host at runtime.

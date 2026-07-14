@@ -2,7 +2,7 @@ name: conformance (onnx-tests)
 
 # Opt-in ONLY. Fuzz-conformance of the MLX EP against the ONNX standard using
 # cbourjau/onnx-tests. This is deliberately NOT wired into the required CI
-# (ci.yml): it depends on pixi + network + a full native build and is too
+# (ci.yml): it depends on pixi + network + a cargo build and is too
 # heavy/flaky to gate PRs. Trigger it by hand from the Actions tab.
 on:
   workflow_dispatch:
@@ -33,6 +33,12 @@ jobs:
       - name: Install mlx-c (hard dependency)
         run: brew install mlx-c
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Provide onnx-genai sibling (pure-Rust tracer dependency)
+        run: git clone --depth 1 https://github.com/justinchuby/onnx-genai ../onnx-genai
+
       - name: Provision ONNX Runtime ${{ env.ORT_VERSION }}
         run: |
           set -euo pipefail
@@ -41,14 +47,12 @@ jobs:
             | tar xz
           echo "ORT_HOME=$PWD/onnxruntime-osx-arm64-${ORT_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Configure + build the EP
+      - name: Build the Rust EP (cargo)
         run: |
           set -euo pipefail
-          cmake -S . -B build -G "Unix Makefiles" \
-            -DORT_HOME="$ORT_HOME" \
-            -DORT_MLX_BUILD_E2E=OFF
-          cmake --build build -j3
-          test -f build/libonnxruntime_mlx_ep.dylib
+          cd rust
+          ORT_INCLUDE_DIR="$ORT_HOME/include" cargo build --release
+          test -f target/release/libonnxruntime_mlx_ep.dylib
 
       - name: Install pixi
         run: |
@@ -69,7 +73,7 @@ jobs:
         continue-on-error: true
         env:
           ONNX_TESTS_DIR: ${{ github.workspace }}/../onnx-tests
-          MLX_EP_LIB: ${{ github.workspace }}/build/libonnxruntime_mlx_ep.dylib
+          MLX_EP_LIB: ${{ github.workspace }}/rust/target/release/libonnxruntime_mlx_ep.dylib
           ORT_LIB_DIR: ${{ env.ORT_HOME }}/lib
           MAX_EXAMPLES: ${{ github.event.inputs.max_examples }}
           SEED: ${{ github.event.inputs.seed }}

@@ -28,7 +28,7 @@ reference evaluator; outputs are compared with the suite's own tolerances).
 
 | | |
 |---|---|
-| EP dylib | `build/libonnxruntime_mlx_ep.dylib` (this repo, `ORT_API_VERSION 27`) |
+| EP dylib | `rust/target/release/libonnxruntime_mlx_ep.dylib` (this repo, `ORT_API_VERSION 27`) |
 | EP name | `MLXExecutionProvider` (+ `CPUExecutionProvider` fallback) |
 | onnxruntime (python) | **1.27.0** (PyPI) — required; the EP refuses to load on ≤1.26 (`MetalEP requires an ONNX Runtime built with ORT_API_VERSION >= 27`) |
 | ORT native lib (DYLD) | onnx-genai `ort-prebuilt/lib/libonnxruntime.1.27.0.dylib` |
@@ -45,7 +45,7 @@ source is modified.** We point it at our own wrapper:
 ```
 RUN_CANDIDATE=mlx_runtime_wrapper.run_mlx
 PYTHONPATH=<this dir>          # so the wrapper is importable
-MLX_EP_LIB=<abs path to build/libonnxruntime_mlx_ep.dylib>
+MLX_EP_LIB=<abs path to rust/target/release/libonnxruntime_mlx_ep.dylib>
 ```
 
 `mlx_runtime_wrapper.run_mlx` calls
@@ -225,7 +225,7 @@ worth forcing.) Concat/Reshape/Transpose/Squeeze/Unsqueeze/Tile/Slice now
 
 Per the corrected directive, empties are **no longer rejected to CPU** — they
 run on MLX and match the ONNX/numpy reference output. Two distinct crash
-mechanisms were found and worked around **in the handlers** (`src/ep/ops/*.cc`),
+mechanisms were found and worked around **in the handlers** (`rust/src/ops/*.rs`),
 keeping the claim predicates permissive:
 
 1. **Construction-abort ops.** `mlx_max`/`mlx_min`/`mlx_logsumexp` call `abort()`
@@ -271,7 +271,7 @@ dereferences a null `OrtValueInfo`. Clip/Slice no longer crash (Slice PASSes).
 
 ## Claim-hardening — shared guards & handler-level empty handling
 
-Claim guards (`src/ep/op_claim.h`) — null-safety + the fp64 gate only:
+Claim guards (`rust/src/registry.rs`) — null-safety + the fp64 gate only:
 
 | Helper | Purpose |
 |---|---|
@@ -340,7 +340,7 @@ Prereqs (once):
 ```bash
 # 1. Build the EP dylib (mlx-c is a hard dep)
 cd <onnxruntime-mlx>
-cmake -S . -B build -G "Unix Makefiles" && cmake --build build -j8
+cd rust && ORT_INCLUDE_DIR=<ort-include-dir> cargo build --release
 
 # 2. Clone + install onnx-tests (sibling of this repo)
 git clone https://github.com/cbourjau/onnx-tests ../onnx-tests
@@ -363,7 +363,7 @@ Isolate a single crashing example (verbose, uncaptured):
 
 ```bash
 cd ../onnx-tests
-MLX_EP_LIB=$PWD/../onnxruntime-mlx/build/libonnxruntime_mlx_ep.dylib \
+MLX_EP_LIB=$PWD/../onnxruntime-mlx/rust/target/release/libonnxruntime_mlx_ep.dylib \
 DYLD_LIBRARY_PATH=<ort-prebuilt/lib> \
 PYTHONPATH=$PWD/../onnxruntime-mlx/tests/conformance \
 RUN_CANDIDATE=mlx_runtime_wrapper.run_mlx \

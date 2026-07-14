@@ -10,8 +10,8 @@ It **skips** (never errors) when prerequisites are absent, so it is safe to
 include in any ``pytest`` invocation:
 
   * ``MLX_EP_LIB`` / ``ONNXRUNTIME_MLX_EP_LIB`` — the built EP dylib
-    (defaults to ``build/libonnxruntime_mlx_ep.dylib``, or set it to the Rust
-    EP at ``rust/target/release/libonnxruntime_mlx_ep.dylib``).
+    (defaults to the Rust EP at
+    ``rust/target/release/libonnxruntime_mlx_ep.dylib``).
   * ``ONNX_TESTS_DIR`` — a cbourjau/onnx-tests clone (defaults to a sibling
     checkout ``../onnx-tests``).
   * ``pixi`` — the onnx-tests python env (``pixi run postinstall`` done, with
@@ -38,7 +38,7 @@ def _ep_lib() -> str:
     return (
         os.environ.get("MLX_EP_LIB")
         or os.environ.get("ONNXRUNTIME_MLX_EP_LIB")
-        or str(REPO_ROOT / "build" / "libonnxruntime_mlx_ep.dylib")
+        or str(REPO_ROOT / "rust" / "target" / "release" / "libonnxruntime_mlx_ep.dylib")
     )
 
 

@@ -25,6 +25,12 @@ jobs:
       - name: Install mlx-c (hard dependency)
         run: brew install mlx-c
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Provide onnx-genai sibling (pure-Rust tracer dependency)
+        run: git clone --depth 1 https://github.com/justinchuby/onnx-genai ../onnx-genai
+
       - name: Provision ONNX Runtime ${{ env.ORT_VERSION }}
         run: |
           set -euo pipefail
@@ -37,18 +43,23 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build wheels (cibuildwheel + delocate)
+      - name: Build the wheel (hatchling; cargo dylib + mlx bundled)
         run: |
-          python -m pip install --upgrade cibuildwheel
-          python -m cibuildwheel --output-dir wheelhouse python
-        env:
-          # Pass ORT_HOME to scikit-build-core's CMake; bundle mlx via delocate (see pyproject).
-          CIBW_CONFIG_SETTINGS: "cmake.define.ORT_HOME=${{ env.ORT_HOME }}"
-          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=14.0"
+          python -m pip install --upgrade pip build
+          # hatch_build.py runs `cargo build --release`, bundles the cargo-built
+          # libonnxruntime_mlx_ep.dylib + the mlx runtime (install_name_tool relink),
+          # and forces a single py3-none-macosx_*_arm64 platform wheel. No CPython
+          # ABI is embedded, so one wheel serves 3.12/3.13 and the free-threaded
+          # builds alike.
+          ORT_INCLUDE_DIR="$ORT_HOME/include" MACOSX_DEPLOYMENT_TARGET=14.0 \
+            python -m build --wheel ./python -o wheelhouse
+          ls -la wheelhouse
 
-      - name: Audit wheels are genuinely abi3 (abi3audit)
+      - name: Audit wheels (abi3audit — no native Python ABI to violate)
         run: |
           python -m pip install --upgrade abi3audit
+          # No compiled Python extension ships in the wheel, so abi3audit finds
+          # nothing auditable and --strict passes (abi3-clean by construction).
           python -m abi3audit --strict --report wheelhouse/*.whl
 
       - uses: actions/upload-artifact@v4

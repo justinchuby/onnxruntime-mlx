@@ -47,7 +47,7 @@ def _ep_lib_path() -> str:
     if not lib:
         raise RuntimeError(
             "MLX_EP_LIB is not set. Point it at the absolute path of "
-            "build/libonnxruntime_mlx_ep.dylib."
+            "rust/target/release/libonnxruntime_mlx_ep.dylib."
         )
     if not Path(lib).is_file():
         raise RuntimeError(f"MLX_EP_LIB does not point at a file: {lib!r}")

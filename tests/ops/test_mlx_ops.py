@@ -1,6 +1,6 @@
 """MLX op-correctness tests for the MLX-native ONNX Runtime execution provider.
 
-Each ONNX decoder op the modular registry (``src/ep/ops/*.cc``) translates to MLX is run through the
+Each ONNX decoder op the modular registry (``rust/src/ops/*.rs``) translates to MLX is run through the
 ``MLXExecutionProvider`` plugin and compared, tolerance-gated, against a reference:
 
 * fp32 / fp16 cases compare against ORT's **CPU EP** (which has kernels for these ops);

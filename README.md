@@ -28,7 +28,7 @@ no `.metal` kernels to maintain.
 Ops the EP does not translate are left unclaimed and run on ORT's CPU EP.
 
 The translator covers the **full set of ops Mobius emits** (~85 op types) via a modular, opset-aware
-registry (`src/ep/ops/*.cc`) — math/logical, reductions, shape/data-movement, normalizations,
+registry (`rust/src/ops/*.rs`) — math/logical, reductions, shape/data-movement, normalizations,
 attention (GQA, Attention 23/24, MHA, RoPE), dense MatMul/Gemm, Conv/pooling, quantized matmul &
 embedding, and more, in fp32/fp16/bf16. A handful of ops that need engine-level control-flow or
 recurrence (`Scan`, `LSTM`, `LinearAttention`, `MoE`, `PackedMultiHeadAttention`) run on ORT CPU by
@@ -38,14 +38,26 @@ design. See [`docs/OP_ARCHITECTURE.md`](docs/OP_ARCHITECTURE.md) for the full co
 
 - macOS on Apple Silicon, ORT 1.27 prebuilt (`ORT_API_VERSION >= 27`)
 - **`mlx-c` (and `mlx`) — a HARD build dependency**: `brew install mlx-c`
+- A **Rust toolchain** (`rustup`) to build the EP from source
 
 ## Build
 
+The EP is a Rust `cdylib` crate under [`rust/`](rust/). Point it at an ONNX Runtime C-API
+include directory and `cargo build`:
+
 ```sh
-cmake -S . -B build -G "Unix Makefiles"   # FAILS if mlx-c is not installed
-cmake --build build -j8
-# => build/libonnxruntime_mlx_ep.dylib   (registers the EP under the name "MLXExecutionProvider")
+brew install mlx-c                                  # HARD dependency (mlx-c + mlx)
+cd rust
+# Either point ORT_INCLUDE_DIR at the ORT headers directly, or set ORT_HOME to an
+# ONNX Runtime release root (build.rs will look in $ORT_HOME/include):
+export ORT_INCLUDE_DIR=/path/to/onnxruntime/include   # or: export ORT_HOME=/path/to/onnxruntime-osx-arm64-1.27.0
+cargo build --release
+# => rust/target/release/libonnxruntime_mlx_ep.dylib  (registers the EP as "MLXExecutionProvider")
 ```
+
+The crate binds the ORT plugin-EP C ABI and `mlx-c` directly via `bindgen`; it does **not** link
+`libonnxruntime` (ORT is reached through the `OrtApi` function-pointer table passed to
+`CreateEpFactories`).
 
 ## Install & use
 
@@ -98,20 +110,25 @@ decode edge widens on larger models. Unclaimed ops fall back to ORT CPU, so any 
 
 ```
 docs/     design docs (DESIGN, OP_ARCHITECTURE, MLX_EVALUATION)
-include/  public C entry-point headers (CreateEpFactories / ReleaseEpFactory)
-src/ep/   plugin-EP ABI glue + the modular ONNX->MLX translator (ops/*.cc, mlx_backend, op_registry)
-python/   nanobind + scikit-build-core pip package (onnxruntime-mlx)
-cmake/    build helpers
-tests/    MLX op-correctness (tests/ops, pytest) + e2e coherence & leak (tests/e2e)
-.github/  CI (build + op tests) and PyPI trusted-publishing workflows
+rust/     the Rust EP: plugin-EP C-ABI vtables (factory/ep) + the modular ONNX->MLX
+          translator (engine, registry, ops/*.rs) over a mlx-c RAII layer (mlx.rs)
+python/   pure-Python pip package (onnxruntime-mlx): a locator that bundles + registers
+          the cargo-built dylib (hatchling build hook, hatch_build.py)
+tests/    MLX op-correctness (tests/ops, pytest) + ONNX-standard conformance (tests/conformance)
+.github/  CI (cargo build + op tests) and PyPI trusted-publishing workflows
 ```
 
 ## Testing
 
+Build the EP (above), then run the pytest op-correctness suite (MLX vs ORT CPU reference):
+
 ```sh
-DYLD_LIBRARY_PATH=<ort-prebuilt/lib> ctest --test-dir build
+export ONNXRUNTIME_MLX_EP_LIB=$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib
+export DYLD_LIBRARY_PATH=<ort-prebuilt/lib>
+python -m pytest tests/ops -q
 ```
 
-- `mlx_op_tests` — each translated decoder op via MLX vs. ORT CPU reference (tolerance-gated)
-- `mlx_e2e` — full-MLX prefill+decode coherence gate ("The capital of France is Paris")
-- `mlx_leak_test` — allocator memory flat across bounded session/inference cycles
+- `tests/ops` — each translated decoder op via MLX vs. ORT CPU reference (tolerance-gated, pytest)
+- `tests/conformance` — opt-in fuzz-conformance of the MLX EP against the ONNX standard
+  (`cbourjau/onnx-tests`); see [`tests/conformance/README.md`](tests/conformance/README.md)
+

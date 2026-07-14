@@ -22,8 +22,6 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-from . import _core
-
 if TYPE_CHECKING:  # pragma: no cover
     import onnxruntime as ort
 
@@ -38,35 +36,55 @@ __all__ = [
     "__version__",
 ]
 
-#: The registered execution-provider name understood by ONNX Runtime.
-EP_NAME: str = _core.ep_name()
+#: The registered execution-provider name understood by ONNX Runtime. Must match
+#: the name the Rust EP factory reports (rust/src/factory.rs) and the vendor id
+#: onnx-genai binds by; do not change without updating the Rust crate.
+EP_NAME: str = "MLXExecutionProvider"
 
-__version__: str = _core.version()
+#: Vendor string carried by the plugin (the repo name).
+_VENDOR: str = "onnxruntime-mlx"
+
+#: Basename of the cargo-built plugin dylib bundled inside this package.
+_PLUGIN_DYLIB_NAME: str = "libonnxruntime_mlx_ep.dylib"
+
+try:  # Python 3.8+: read the installed distribution version.
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    try:
+        __version__: str = _pkg_version("onnxruntime-mlx")
+    except PackageNotFoundError:  # pragma: no cover - running from a source tree
+        __version__ = "0.0.0+unknown"
+except ImportError:  # pragma: no cover
+    __version__ = "0.0.0+unknown"
 
 
 def ep_name() -> str:
     """Return the registered execution-provider name (``"MLXExecutionProvider"``)."""
-    return _core.ep_name()
+    return EP_NAME
 
 
 def version() -> str:
     """Return the version string of the bundled MLX execution-provider plugin."""
-    return _core.version()
+    return __version__
 
 
 def vendor() -> str:
     """Return the vendor string of the bundled plugin."""
-    return _core.vendor()
+    return _VENDOR
 
 
 def library_path() -> str:
     """Return the absolute path to the bundled ``libonnxruntime_mlx_ep.dylib``.
 
+    The dylib is the cargo-built Rust execution provider, bundled next to this
+    module in the wheel. Resolved from this package's on-disk location so it
+    keeps working regardless of where the wheel is installed.
+
     Raises:
         FileNotFoundError: if the bundled plugin dylib cannot be found (which
             indicates a broken installation).
     """
-    path = _core.library_path()
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _PLUGIN_DYLIB_NAME)
     if not os.path.isfile(path):
         raise FileNotFoundError(
             f"Bundled MLX EP plugin not found at {path!r}. "

@@ -1,5 +1,5 @@
 """MLX EP correctness tests for the remaining INTEGER / QLinear quantization ops
-(``src/ep/ops/quant2.cc``, ``RegisterQuant2Ops``):
+(``rust/src/ops/quant.rs``, ``RegisterQuant2Ops``):
 
   * ``ConvInteger``    — integer conv ``(x - x_zp) (*) (w - w_zp) -> int32``. The MLX path widens the
                          centered int operands to fp32, runs ``mlx_conv{1,2}d``, and rounds back to

@@ -1,4 +1,4 @@
-"""Op-correctness tests for the recurrent family (src/ep/ops/recurrent.cc) vs ORT CPU.
+"""Op-correctness tests for the recurrent family (rust/src/ops/recurrent.rs) vs ORT CPU.
 
 RNN / GRU / LSTM are unrolled over a STATICALLY-KNOWN sequence length into a fixed MLX graph. Each
 claimed form (forward / reverse, with and without bias / initial state / peepholes) is parametrised

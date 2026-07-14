@@ -11,9 +11,40 @@ fn brew_prefix(pkg: &str) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
+/// Discover the ONNX Runtime C-API include directory for a standalone checkout.
+///
+/// Resolution order:
+///   1. `ORT_INCLUDE_DIR` — an explicit include dir (highest precedence).
+///   2. `$ORT_HOME/include` — the standard layout of an ORT release tarball
+///      (`onnxruntime-osx-arm64-<ver>/include`), which is what CI provisions.
+///
+/// Whichever we pick, we verify `onnxruntime_c_api.h` is actually present so the
+/// error surfaces here (with a clear message) rather than deep inside bindgen.
+fn resolve_ort_include() -> String {
+    let candidate = env::var("ORT_INCLUDE_DIR").ok().or_else(|| {
+        env::var("ORT_HOME")
+            .ok()
+            .map(|home| format!("{home}/include"))
+    });
+
+    match candidate {
+        Some(dir) if PathBuf::from(&dir).join("onnxruntime_c_api.h").is_file() => dir,
+        Some(dir) => panic!(
+            "ORT include dir '{dir}' does not contain onnxruntime_c_api.h. \
+             Set ORT_INCLUDE_DIR to the ONNX Runtime C-API include directory, \
+             or set ORT_HOME to an ONNX Runtime release root (expects \
+             $ORT_HOME/include/onnxruntime_c_api.h)."
+        ),
+        None => panic!(
+            "Could not locate the ONNX Runtime headers. Set ORT_INCLUDE_DIR to \
+             the ORT C-API include directory, or set ORT_HOME to an ONNX Runtime \
+             release root (expects $ORT_HOME/include/onnxruntime_c_api.h)."
+        ),
+    }
+}
+
 fn main() {
-    let ort_inc = env::var("ORT_INCLUDE_DIR")
-        .expect("set ORT_INCLUDE_DIR to the ORT 1.27 prebuilt include dir");
+    let ort_inc = resolve_ort_include();
     let mlxc = brew_prefix("mlx-c");
     let mlx = brew_prefix("mlx");
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -21,6 +52,7 @@ fn main() {
     println!("cargo:rerun-if-changed=wrapper_ort.h");
     println!("cargo:rerun-if-changed=wrapper_mlx.h");
     println!("cargo:rerun-if-env-changed=ORT_INCLUDE_DIR");
+    println!("cargo:rerun-if-env-changed=ORT_HOME");
 
     // --- ORT plugin-EP C ABI bindings (pure C header; pulls in onnxruntime_ep_c_api.h) ---
     bindgen::Builder::default()

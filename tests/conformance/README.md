@@ -26,7 +26,7 @@ a dotted import path to a `Callable[[onnx.ModelProto], dict[str, np.ndarray]]`
 ```
 RUN_CANDIDATE = mlx_runtime_wrapper.run_mlx
 PYTHONPATH    = <this directory>          # makes the wrapper importable
-MLX_EP_LIB    = <abs path to build/libonnxruntime_mlx_ep.dylib>
+MLX_EP_LIB    = <abs path to rust/target/release/libonnxruntime_mlx_ep.dylib>
 ```
 
 Each generated model is executed on the MLX EP (our wrapper) **and** on the ONNX
@@ -37,9 +37,9 @@ the two with its own tolerances.
 
 1. **Build the EP dylib** (mlx-c is a hard dependency):
    ```sh
-   cd <repo root>
-   cmake -S . -B build -G "Unix Makefiles"
-   cmake --build build -j8          # -> build/libonnxruntime_mlx_ep.dylib
+   cd <repo root>/rust
+   ORT_INCLUDE_DIR=<ort-include-dir> cargo build --release   # or set ORT_HOME=<ort-release-root>
+   # -> rust/target/release/libonnxruntime_mlx_ep.dylib
    ```
 2. **Clone onnx-tests as a sibling** and install it with pixi:
    ```sh
@@ -74,7 +74,7 @@ Outputs: `results.csv`, per-op `logs/<Op>.log`, and (with `PROFILE=1`)
 | Var | Default | Meaning |
 |---|---|---|
 | `ONNX_TESTS_DIR` | sibling `../onnx-tests` | onnx-tests clone location |
-| `MLX_EP_LIB` | `<repo>/build/libonnxruntime_mlx_ep.dylib` | EP dylib to register |
+| `MLX_EP_LIB` | `<repo>/rust/target/release/libonnxruntime_mlx_ep.dylib` | EP dylib to register |
 | `ORT_LIB_DIR` | auto-discovered from onnx-genai `ort-prebuilt` | dir with `libonnxruntime.1.27.0.dylib`, added to `DYLD_LIBRARY_PATH` |
 | `PIXI` | `~/.pixi/bin/pixi` | pixi binary |
 | `MAX_EXAMPLES` | `20` | Hypothesis `max_examples` per test (bounded fuzzing) |

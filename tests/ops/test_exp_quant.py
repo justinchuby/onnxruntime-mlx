@@ -1,4 +1,4 @@
-"""MLX EP correctness tests for the opset-17+ QUANTIZATION family (``src/ep/ops/quantize.cc``).
+"""MLX EP correctness tests for the opset-17+ QUANTIZATION family (``rust/src/ops/quant.rs``).
 
 Covers the ops registered by ``RegisterQuantizeOps``:
   * ``QuantizeLinear``        — per-tensor and per-axis scale/zero-point; int8/uint8/int16/uint16

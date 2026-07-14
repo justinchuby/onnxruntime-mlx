@@ -14,7 +14,7 @@
 # pass / test-failure / crash per op.
 #
 # Prereqs (see README.md in this directory):
-#   * Built EP dylib:   <repo>/build/libonnxruntime_mlx_ep.dylib
+#   * Built EP dylib:   <repo>/rust/target/release/libonnxruntime_mlx_ep.dylib
 #   * onnx-tests clone: sibling checkout with `pixi run postinstall` done
 #   * onnxruntime 1.27 python in the pixi env (matches EP ORT_API_VERSION 27):
 #       cd <onnx-tests>; pixi run python -m pip install "onnxruntime==1.27.0"
@@ -27,7 +27,7 @@
 #
 # Env overrides:
 #   ONNX_TESTS_DIR   path to the onnx-tests clone (default: sibling of repo root)
-#   MLX_EP_LIB       path to libonnxruntime_mlx_ep.dylib (default: <repo>/build/..)
+#   MLX_EP_LIB       path to libonnxruntime_mlx_ep.dylib (default: <repo>/rust/target/release/..)
 #   ORT_LIB_DIR      dir holding libonnxruntime.1.27.0.dylib (for DYLD_LIBRARY_PATH)
 #   PIXI             pixi binary (default: ~/.pixi/bin/pixi)
 #   MAX_EXAMPLES     Hypothesis max_examples per test (default: 20)
@@ -41,7 +41,7 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 
 PIXI="${PIXI:-$HOME/.pixi/bin/pixi}"
 ONNX_TESTS_DIR="${ONNX_TESTS_DIR:-$(cd "$REPO_ROOT/.." && pwd)/onnx-tests}"
-MLX_EP_LIB="${MLX_EP_LIB:-$REPO_ROOT/build/libonnxruntime_mlx_ep.dylib}"
+MLX_EP_LIB="${MLX_EP_LIB:-$REPO_ROOT/rust/target/release/libonnxruntime_mlx_ep.dylib}"
 MAX_EXAMPLES="${MAX_EXAMPLES:-20}"
 SEED="${SEED:-0}"
 PROFILE="${PROFILE:-0}"
@@ -52,7 +52,7 @@ fi
 
 if [[ ! -f "$MLX_EP_LIB" ]]; then
   echo "ERROR: EP dylib not found: $MLX_EP_LIB" >&2
-  echo "Build it first: (cd $REPO_ROOT && cmake -S . -B build -G 'Unix Makefiles' && cmake --build build -j8)" >&2
+  echo "Build it first: (cd $REPO_ROOT/rust && ORT_INCLUDE_DIR=<ort-include> cargo build --release)" >&2
   exit 1
 fi
 if [[ ! -d "$ONNX_TESTS_DIR" ]]; then
