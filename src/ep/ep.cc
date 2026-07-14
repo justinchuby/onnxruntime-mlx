@@ -860,6 +860,139 @@ OrtStatus* ORT_API_CALL MetalEp::CompileImpl(OrtEp* this_ptr, const OrtGraph** g
         mlx_nodes.push_back(std::move(mnd));
       }
 
+      // ---- sibling weight fusion (ONNX_GENAI_MLX_FUSE=1, default OFF) ---------------------------
+      // Fuse groups of MatMulNBits that share the SAME input activation (per Qwen layer: q/k/v on
+      // the input-layernorm output; gate/up on the post-attn-layernorm output) into ONE int4 GEMM
+      // over their weights+scales concatenated along the output N dimension, then split the result
+      // back into the original per-projection outputs. Output rows are independent under block-quant
+      // (block structure is per-(N, K/block)), so this is byte-identical to running each projection
+      // separately, and it collapses 3->1 / 2->1 GEMV dispatches per layer. The concatenation runs
+      // ONCE here at compile time into plan-owned buffers (TensorRef::init_owned); the run-time
+      // uint8->uint32 repack still happens exactly once (cached on the fused weight name).
+      //
+      // MEASURED DEFAULT-OFF: on Qwen2.5-0.5B (this model) the fusion is a small NET REGRESSION for
+      // BOTH compiled decode (~+5-10% eval) and prefill (~+5% wall). Decode projections are M=1
+      // memory-bandwidth-bound GEMVs, so fusing q/k/v reads the SAME weight bytes (no bandwidth
+      // win) while the mandatory split-back (mlx_slice_dynamic, the only shapeless-compile-safe
+      // split) adds per-part dispatch/copy cost that outweighs the saved GEMV launches. Kept, gated,
+      // and byte-exact so it stays A/B-testable and can pay off on larger models where the fused
+      // GEMM is compute-bound and better-occupied. Enable with ONNX_GENAI_MLX_FUSE=1.
+      {
+        const char* fenv = std::getenv("ONNX_GENAI_MLX_FUSE");
+        const bool fuse_enabled = fenv && fenv[0] == '1';
+        auto init_of = [&](const std::string& nm) -> const InitData* {
+          auto it = initializers.find(nm);
+          return it == initializers.end() ? nullptr : &it->second;
+        };
+        // Fusable = 3-input (no-bias) com.microsoft MatMulNBits whose weight (uint8 packed int4) and
+        // scale (float) are constant initializers readable at compile time.
+        auto fusable = [&](const ort_mlx::NodeDesc& nd) -> bool {
+          if (nd.domain != "com.microsoft" || nd.op_type != "MatMulNBits") return false;
+          if (nd.inputs.size() != 3 || nd.outputs.size() != 1) return false;
+          if (!nd.ints.count("K") || !nd.ints.count("N")) return false;
+          const InitData* w = init_of(nd.inputs[1].name);
+          const InitData* s = init_of(nd.inputs[2].name);
+          return w && s && w->type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8 &&
+                 s->type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+        };
+        if (fuse_enabled) {
+          // Group fusable nodes by shared activation input, preserving first-appearance order.
+          std::vector<std::string> group_order;
+          std::unordered_map<std::string, std::vector<size_t>> groups;
+          for (size_t i = 0; i < mlx_nodes.size(); ++i) {
+            if (!fusable(mlx_nodes[i])) continue;
+            const std::string& key = mlx_nodes[i].inputs[0].name;
+            auto it = groups.find(key);
+            if (it == groups.end()) {
+              groups.emplace(key, std::vector<size_t>{i});
+              group_order.push_back(key);
+            } else {
+              it->second.push_back(i);
+            }
+          }
+          std::vector<char> drop(mlx_nodes.size(), 0);
+          std::unordered_map<size_t, ort_mlx::NodeDesc> fused_at;
+          size_t fused_groups = 0, saved_dispatches = 0;
+          for (const std::string& key : group_order) {
+            const std::vector<size_t>& idxs = groups[key];
+            if (idxs.size() < 2) continue;
+            const int64_t K = mlx_nodes[idxs[0]].ints.at("K");
+            bool same_k = true;
+            for (size_t j : idxs) {
+              if (mlx_nodes[j].ints.at("K") != K) { same_k = false; break; }
+            }
+            if (!same_k) continue;
+            const int64_t nblocks = K / 32;
+            // Concatenate weight bytes [N_i,nblocks,16] and scale bytes [N_i,nblocks] along N.
+            auto wbuf = std::make_shared<std::vector<uint8_t>>();
+            auto sbuf = std::make_shared<std::vector<uint8_t>>();
+            std::vector<int64_t> split_n;
+            int64_t N_total = 0;
+            for (size_t j : idxs) {
+              const ort_mlx::NodeDesc& nd = mlx_nodes[j];
+              const int64_t Ni = nd.ints.at("N");
+              const InitData* w = init_of(nd.inputs[1].name);
+              const InitData* s = init_of(nd.inputs[2].name);
+              const auto* wb = static_cast<const uint8_t*>(w->data);
+              const auto* sb = static_cast<const uint8_t*>(s->data);
+              wbuf->insert(wbuf->end(), wb,
+                           wb + static_cast<size_t>(Ni) * nblocks * 16);
+              sbuf->insert(sbuf->end(), sb,
+                           sb + static_cast<size_t>(Ni) * nblocks * sizeof(float));
+              split_n.push_back(Ni);
+              N_total += Ni;
+            }
+            ort_mlx::NodeDesc f;
+            f.op_type = "MatMulNBits";
+            f.domain = "mlx.fused";
+            f.since_version = 1;
+            f.ints["K"] = K;
+            f.ints["N"] = N_total;
+            f.int_arrays["split_n"] = split_n;
+            f.inputs.push_back(mlx_nodes[idxs[0]].inputs[0]);  // shared activation
+            ort_mlx::TensorRef wt;
+            wt.name = mlx_nodes[idxs[0]].inputs[1].name + "__fused_qw";
+            wt.source = ort_mlx::Src::Initializer;
+            wt.init_owned = wbuf;
+            wt.init_data = wbuf->data();
+            wt.init_shape = {N_total, nblocks, 16};
+            wt.init_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
+            wt.init_count = static_cast<size_t>(N_total) * nblocks * 16;
+            f.inputs.push_back(std::move(wt));
+            ort_mlx::TensorRef st;
+            st.name = mlx_nodes[idxs[0]].inputs[2].name + "__fused_sc";
+            st.source = ort_mlx::Src::Initializer;
+            st.init_owned = sbuf;
+            st.init_data = sbuf->data();
+            st.init_shape = {N_total, nblocks};
+            st.init_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+            st.init_count = static_cast<size_t>(N_total) * nblocks;
+            f.inputs.push_back(std::move(st));
+            for (size_t j : idxs) f.outputs.push_back(mlx_nodes[j].outputs[0]);
+            fused_at.emplace(idxs[0], std::move(f));
+            for (size_t k = 1; k < idxs.size(); ++k) drop[idxs[k]] = 1;
+            ++fused_groups;
+            saved_dispatches += idxs.size() - 1;
+          }
+          if (fused_groups) {
+            std::vector<ort_mlx::NodeDesc> rebuilt;
+            rebuilt.reserve(mlx_nodes.size());
+            for (size_t i = 0; i < mlx_nodes.size(); ++i) {
+              auto it = fused_at.find(i);
+              if (it != fused_at.end()) {
+                rebuilt.push_back(std::move(it->second));
+              } else if (!drop[i]) {
+                rebuilt.push_back(std::move(mlx_nodes[i]));
+              }
+            }
+            mlx_nodes = std::move(rebuilt);
+            MPS_LOG(INFO, "MetalEP: fused "
+                              << fused_groups << " sibling MatMulNBits group(s), saving "
+                              << saved_dispatches << " GEMV dispatch(es)/forward");
+          }
+        }
+      }
+
       const size_t node_count = mlx_nodes.size();
       std::string mlx_err;
       plan->mlx_plan.reset(ort_mlx::BuildPlan(std::move(mlx_nodes), mlx_err));

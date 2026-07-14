@@ -15,17 +15,14 @@ namespace ort_mlx {
 
 namespace {
 
-// MatMulNBits: Y[M,N] = A[M,K] @ dequant(B)^T (+bias). Repack our uint8 [N,nblocks,16] to MLX affine
-// uint32 words + biases=-8*scale ONCE (cached by weight name), then mlx_quantized_matmul.
-void MatMulNBitsOp(TranslationContext& ctx, const NodeDesc& n) {
-  const int64_t K = n.ints.at("K");
-  const int64_t N = n.ints.at("N");
+// Core int4 block-quant GEMM: given the flattened activation a2 [M,K], the constant packed-int4
+// weight (wref) and scales (sref), repack the uint8 [N,nblocks,16] weight to MLX affine uint32 words
+// + biases=-8*scale ONCE (cached by weight/scale name), then mlx_quantized_matmul -> y [M,N] (Kept).
+// Shared by the plain MatMulNBits handler and the sibling-fused handler (which then slices y by N).
+mlx_array MatMulNBitsCore(TranslationContext& ctx, const TensorRef& wref, const TensorRef& sref,
+                          mlx_array a2, int64_t K, int64_t N) {
   const int64_t block = 32, bits = 4;
   const int64_t nblocks = K / block;
-
-  mlx_array a = ctx.Resolve(n.inputs[0]);
-  const TensorRef& wref = n.inputs[1];
-  const TensorRef& sref = n.inputs[2];
 
   // Repacked uint32 weight [N, K/8] (8 nibbles/word, low->high).
   mlx_array w = ctx.Cached(wref.name + "#qw", [&]() {
@@ -60,26 +57,75 @@ void MatMulNBitsOp(TranslationContext& ctx, const NodeDesc& n) {
     return mlx_array_new_data(bi.data(), sh, 2, MLX_FLOAT32);
   });
 
+  mlx_array y = mlx_array_new();
+  mlx_optional_int gs = {static_cast<int>(block), true};
+  mlx_optional_int bb = {static_cast<int>(bits), true};
+  MLX_CHECK(mlx_quantized_matmul(&y, a2, w, scales, biases, /*transpose=*/true, gs, bb, "affine",
+                                 ctx.stream()));
+  return ctx.Keep(y);
+}
+
+// MatMulNBits: Y[M,N] = A[M,K] @ dequant(B)^T (+bias). Repack once (cached), then quantized matmul.
+void MatMulNBitsOp(TranslationContext& ctx, const NodeDesc& n) {
+  const int64_t K = n.ints.at("K");
+  const int64_t N = n.ints.at("N");
+
+  mlx_array a = ctx.Resolve(n.inputs[0]);
+
   // Flatten leading dims of A to [M, K].
   std::vector<int> ashape = TranslationContext::ShapeOf(a);
   int M = 1;
   for (size_t i = 0; i + 1 < ashape.size(); ++i) M *= ashape[i];
   mlx_array a2 = ctx.Reshape(a, {M, static_cast<int>(K)});
 
-  mlx_array y = mlx_array_new();
-  mlx_optional_int gs = {static_cast<int>(block), true};
-  mlx_optional_int bb = {static_cast<int>(bits), true};
-  MLX_CHECK(mlx_quantized_matmul(&y, a2, w, scales, biases, /*transpose=*/true, gs, bb, "affine",
-                                 ctx.stream()));
-  ctx.Keep(y);
-
-  mlx_array out = y;
+  mlx_array out = MatMulNBitsCore(ctx, n.inputs[1], n.inputs[2], a2, K, N);
   if (n.inputs.size() == 4) out = ctx.AddA(out, ctx.Resolve(n.inputs[3]));
 
   // Restore leading dims with N as the last dim.
   std::vector<int> oshape(ashape);
   oshape.back() = static_cast<int>(N);
   ctx.Bind(n.outputs[0], ctx.Reshape(out, oshape));
+}
+
+// Sibling-fused MatMulNBits (internal op, synthesized by ep.cc's weight-fusion pass): ONE int4 GEMM
+// over the concatenated (along N) weights/scales of several sibling projections that share the same
+// input activation (q/k/v or gate/up), then slice the [M, N_total] result back into the original
+// per-projection outputs. Byte-identical to running each projection separately (output rows are
+// independent under block-quant), but collapses 3->1 / 2->1 GEMV dispatches per layer. The per-output
+// N split widths are carried in the "split_n" int-array attribute (same order as n.outputs).
+void MatMulNBitsFusedOp(TranslationContext& ctx, const NodeDesc& n) {
+  const int64_t K = n.ints.at("K");
+  const int64_t N = n.ints.at("N");
+  const std::vector<int64_t>& split_n = n.int_arrays.at("split_n");
+
+  mlx_array a = ctx.Resolve(n.inputs[0]);
+  std::vector<int> ashape = TranslationContext::ShapeOf(a);
+  int M = 1;
+  for (size_t i = 0; i + 1 < ashape.size(); ++i) M *= ashape[i];
+  mlx_array a2 = ctx.Reshape(a, {M, static_cast<int>(K)});
+
+  mlx_array y = MatMulNBitsCore(ctx, n.inputs[1], n.inputs[2], a2, K, N);  // [M, N_total]
+
+  // Split the fused [M, N_total] result back into the original per-projection outputs. Use
+  // mlx_slice_dynamic (runtime start index, STATIC full-rank slice_size) NOT slice/split:
+  // shapeless mlx_compile (the decode fast-path) cannot infer a Slice/Split output shape when a
+  // leading dim is symbolic, whereas slice_dynamic takes the output shape directly. M is always 1
+  // on the compiled decode path (and concrete on the eager path), so slice_size=[M,Ni] is exact.
+  int off = 0;
+  const int axis1 = 1;
+  for (size_t oi = 0; oi < n.outputs.size(); ++oi) {
+    const int Ni = static_cast<int>(split_n[oi]);
+    int32_t start_val = off;
+    mlx_array start = ctx.Keep(mlx_array_new_data(&start_val, nullptr, 0, MLX_INT32));
+    const int slice_size[2] = {M, Ni};
+    mlx_array part = mlx_array_new();
+    MLX_CHECK(mlx_slice_dynamic(&part, y, start, &axis1, 1, slice_size, 2, ctx.stream()));  // [M,Ni]
+    ctx.Keep(part);
+    std::vector<int> oshape(ashape);
+    oshape.back() = Ni;
+    ctx.Bind(n.outputs[oi], ctx.Reshape(part, oshape));
+    off += Ni;
+  }
 }
 
 // Gather rows `idx` (0-axis) of `src`, returning [BS, ...] (kept for teardown).
@@ -250,6 +296,10 @@ bool GatherBlockQuantizedClaim(Ort::ConstNode node) {
 void RegisterQuantOps(OpRegistry& registry) {
   registry.Register(
       {"com.microsoft", "MatMulNBits", kAnyOpset, kAnyOpset, &MatMulNBitsOp, &MatMulNBitsClaim});
+  // Internal fused op synthesized by ep.cc's sibling weight-fusion pass; never claimed from ONNX
+  // (only BuildPlan's translate-validation looks it up), so it has no claim predicate.
+  registry.Register(
+      {"mlx.fused", "MatMulNBits", kAnyOpset, kAnyOpset, &MatMulNBitsFusedOp, nullptr});
   registry.Register({"com.microsoft", "GatherBlockQuantized", kAnyOpset, kAnyOpset,
                      &GatherBlockQuantizedOp, &GatherBlockQuantizedClaim});
 }
