@@ -7,7 +7,7 @@ name = "onnxruntime-mlx"
 version = "0.1.0"
 description = "MLX-native ONNX Runtime execution provider (plugin EP) for Apple Silicon"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "onnxruntime-mlx" }]
 keywords = ["onnxruntime", "mlx", "execution-provider", "apple-silicon", "metal", "coreml"]
@@ -19,6 +19,8 @@ classifiers = [
   "Operating System :: MacOS :: MacOS X",
   "Programming Language :: Rust",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -37,7 +39,7 @@ Repository = "https://github.com/justinchuby/onnxruntime-mlx"
 #   2. bundles the cargo-built libonnxruntime_mlx_ep.dylib + the mlx-c/mlx runtime
 #      (via delocate) into the package, relinked to @loader_path,
 #   3. forces a platform wheel tag (py3-none-macosx_*_arm64) — one wheel that
-#      installs on CPython 3.12, 3.13 AND the free-threaded (3.13t/3.14t) builds,
+#      installs on CPython 3.10-3.13 AND the free-threaded (3.13t/3.14t) builds,
 #      because it ships no CPython-ABI-bound extension. abi3audit has nothing to
 #      audit (no extension modules) so `abi3audit --strict` is trivially clean.
 #
