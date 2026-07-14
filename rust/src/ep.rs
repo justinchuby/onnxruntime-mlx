@@ -60,6 +60,15 @@ impl MlxEp {
 // The per-EP mlx stream is now owned by the `Stream` RAII wrapper, freed exactly once when ORT
 // calls ReleaseEp (which drops our Box<MlxEp>). No manual free / no explicit Drop needed.
 
+// On EP teardown, flush the (env-gated) trace. The tracer's collector accumulates
+// across all sessions in the process, so each teardown rewrites the full cumulative
+// trace; the last one leaves the complete file on disk (no-op when tracing is off).
+impl Drop for MlxEp {
+    fn drop(&mut self) {
+        crate::trace::tracer().export();
+    }
+}
+
 #[inline]
 unsafe fn this(p: *const ort::OrtEp) -> *const MlxEp {
     p as *const MlxEp
@@ -428,6 +437,13 @@ unsafe fn build_plan(
         let mut nd = NodeDesc::new(op_type, domain, since_version);
 
         collect_attributes(api, node, &mut nd);
+
+        // Build-time span so each subgraph's op structure is visible in the trace.
+        let _op_span = crate::trace::tracer().op_span(
+            &nd.op_type,
+            node_input_names(api, node).len(),
+            node_output_names(api, node).len(),
+        );
 
         // Inputs.
         for name in node_input_names(api, node) {
@@ -808,6 +824,10 @@ unsafe extern "C" fn compute(
     let api = &*info.ort_api;
 
     let node_count = info.plan.nodes.len();
+    let tr = crate::trace::tracer();
+    tr.note_thread("mlx.ep.compute");
+    let _region = tr.subgraph_region(node_count);
+    tr.sample_gpu_counters();
     let mut tctx = TranslationContext::new(&mut info.plan, info.ort_api, kctx, info.stream);
     match tctx.execute() {
         Ok(()) => {

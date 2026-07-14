@@ -14,6 +14,7 @@ mod mlx;
 mod ops;
 mod registry;
 mod sys;
+mod trace;
 
 use std::ffi::{c_char, CString};
 use std::ptr;

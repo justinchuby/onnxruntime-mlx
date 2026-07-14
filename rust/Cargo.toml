@@ -7,6 +7,11 @@ description = "Rust spike: MLX-native ORT plugin EP (bind mlx-c directly, no mlx
 [lib]
 crate-type = ["cdylib"]
 
+[dependencies]
+# Pure-Rust Chrome/Perfetto tracer (sibling onnx-genai checkout). `default-features
+# = false` drops the `perfetto` (prost) feature — we export Chrome Trace JSON only.
+onnx-runtime-tracer = { path = "../../onnx-genai/crates/onnx-runtime-tracer", default-features = false }
+
 [build-dependencies]
 bindgen = "0.70"
 

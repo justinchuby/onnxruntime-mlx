@@ -396,7 +396,17 @@ impl<'a> TranslationContext<'a> {
                 }
             }
         }
-        mlx::eval(&outs)?;
+        // The single synchronous `mlx_eval` boundary: with tracing on this is wrapped
+        // in the `mlx.eval` (cat "gpu") span, whose CPU wall time is the GPU-inclusive
+        // time of the whole fused subgraph (MLX blocks here until the GPU work lands).
+        // Sample GPU-memory counters just before and after so the curve shows the eval.
+        let tr = crate::trace::tracer();
+        tr.sample_gpu_counters();
+        {
+            let _eval = tr.eval_region();
+            mlx::eval(&outs)?;
+        }
+        tr.sample_gpu_counters();
         for (o, a) in &ext {
             self.copy_out(o, *a)?;
         }

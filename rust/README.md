@@ -54,6 +54,37 @@ DYLD_LIBRARY_PATH=$ORT_LIB \
   python -m pytest ../tests/ops/test_mlx_ops.py -k "binary_fp32 and Add" -q -s
 ```
 
+## Observability tracing (`src/trace.rs`)
+
+Env-gated GPU tracing into the pure-Rust `onnx-runtime-tracer` (Chrome/Perfetto
+JSON). It ships the **feasible slice** of `docs/METAL_TRACING.md`: because
+`mlx-c` only exposes the Xcode `mlx_metal_start_capture` and MLX fuses a whole
+subgraph into ONE hidden, synchronous `mlx_eval`, per-op `MTLCommandBuffer`
+`gpuStartTime` and per-kernel counters (design §4/§6) are unreachable — so the
+`mlx_eval` wall time (GPU-inclusive, since eval blocks) is the granularity.
+
+```sh
+# Write a Chrome/Perfetto trace (loads in https://ui.perfetto.dev):
+ONNX_GENAI_MLX_TRACE=/tmp/mlx_trace.json DYLD_LIBRARY_PATH=$ORT_LIB \
+  ONNXRUNTIME_MLX_EP_LIB=$PWD/target/release/libonnxruntime_mlx_ep.dylib \
+  python -m pytest ../tests/ops/test_mlx_ops.py -k "binary_fp32 and Add" -q
+```
+
+- **Spans:** `mlx.subgraph` (cat `ep`, whole Compute) → nested `mlx.eval`
+  (cat `gpu`, the synchronous eval = GPU-inclusive time); one `<op_type>`
+  (cat `op`) span per node at graph-build time.
+- **GPU counters** (Chrome `"C"` phase, own Perfetto tracks): `mlx.gpu_mem_bytes`
+  (`MTLDevice.currentAllocatedSize`) and `mlx.gpu_mem_pct` (÷
+  `recommendedMaxWorkingSetSize`). GPU-utilisation % via the private **IOReport**
+  framework is a documented TODO (block-based sampling is heavy to land cleanly).
+- **os_signpost** intervals around the same subgraph/eval regions for an
+  Instruments *Metal System Trace* (`ONNX_GENAI_MLX_SIGNPOST=1` forces them on).
+- Events are stamped with the real `pid` (`std::process::id()`) so they merge into
+  onnx-genai's Perfetto timeline. Written on EP teardown; the collector
+  accumulates across sessions, so each teardown rewrites the full cumulative trace.
+- **Cost when off** (env unset): a single relaxed atomic load + early return per
+  entry point — no signpost log, no device handle, no allocation.
+
 ## Full-port plan (what this unlocks)
 
 The two boundaries are proven; the rest is mechanical, guarded by the
