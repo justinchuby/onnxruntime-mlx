@@ -19,15 +19,21 @@
 //     the shared clustering pass (ep.cc) dereferences unconditionally, so it is an engine-level
 //     follow-up left to ORT CPU.
 //
+//   * LinearAttention (com.microsoft) — a chunked/recurrent linear-attention op with a 4D recurrent
+//     state carried over the time axis T. Like GRU/LSTM/RNN it is translated by STATIC-LENGTH
+//     UNROLLING over T (see src/ep/ops/recurrent.cc): the per-step delta-rule recurrence is emitted
+//     as T bounded steps of MLX graph (exp-decay gating, k@state retrieval, beta delta-rule outer
+//     product, q@new_state output). All four update rules (linear / gated / delta / gated_delta),
+//     GQA (Q/K heads tiled up to kv_num_heads), and the optional past_state / decay / beta inputs are
+//     handled; ORT's CPU contrib kernel is the ground truth the handler matches.
+//
 // Deliberately NOT claimed here (left to ORT CPU) — see the note at the bottom of this file:
-//   * LinearAttention (com.microsoft / ai.onnx) — a chunked linear-attention recurrence with several
-//     update rules (linear / delta / gated) plus optional decay/beta and a 4D recurrent state. It is
-//     not a clean, single MLX op sequence and is not claimed.
 //   * LightningAttention (com.microsoft) — not a registered op/kernel in this ORT build, so it is
 //     unreachable and untestable; not claimed.
 //   * Scan (ai.onnx) — carries a nested BODY subgraph, which the flat NodeDesc plan cannot represent;
 //     it needs engine-level control-flow support (a follow-up) and is left to ORT CPU.
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -60,6 +66,11 @@ int NormAxis(int64_t axis, int rank) {
 std::string StringAttr(const NodeDesc& n, const char* name, const std::string& def) {
   auto it = n.strings.find(name);
   return it != n.strings.end() ? it->second : def;
+}
+
+// A node input slot is present when it exists and is not an omitted optional.
+bool Present(const NodeDesc& n, size_t i) {
+  return i < n.inputs.size() && n.inputs[i].source != Src::Absent;
 }
 
 // Claim-time STRING attribute read (falls back to `def` when absent or of another type).
@@ -272,6 +283,217 @@ bool CausalConvWithStateClaim(Ort::ConstNode node) {
   return activation == "none" || activation == "silu" || activation == "swish";
 }
 
+// ---- LinearAttention (com.microsoft) --------------------------------------------------------
+
+// The four recognized update rules and the optional inputs each needs.
+bool RuleUsesDecay(const std::string& rule) {
+  return rule == "gated" || rule == "gated_delta";
+}
+bool RuleUsesBeta(const std::string& rule) {
+  return rule == "delta" || rule == "gated_delta";
+}
+bool IsKnownRule(const std::string& rule) {
+  return rule == "linear" || rule == "gated" || rule == "delta" || rule == "gated_delta";
+}
+
+// A dtype-matched scalar (float value cast to `dt`) so mixing it into an fp16/bf16 graph keeps the
+// graph dtype instead of promoting to fp32.
+mlx_array LaScalar(TranslationContext& ctx, float value, mlx_dtype dt) {
+  mlx_array s = ctx.Keep(mlx_array_new_float32(value));
+  return dt == MLX_FLOAT32 ? s : ctx.Astype(s, dt);
+}
+
+mlx_array LaExp(TranslationContext& ctx, mlx_array x) {
+  mlx_array r = mlx_array_new();
+  MLX_CHECK(mlx_exp(&r, x, ctx.stream()));
+  return ctx.Keep(r);
+}
+
+mlx_array LaExpandDims(TranslationContext& ctx, mlx_array a, int axis) {
+  mlx_array r = mlx_array_new();
+  MLX_CHECK(mlx_expand_dims(&r, a, axis, ctx.stream()));
+  return ctx.Keep(r);
+}
+
+mlx_array LaSqueeze(TranslationContext& ctx, mlx_array a, int axis) {
+  mlx_array r = mlx_array_new();
+  MLX_CHECK(mlx_squeeze_axis(&r, a, axis, ctx.stream()));
+  return ctx.Keep(r);
+}
+
+mlx_array LaZeros(TranslationContext& ctx, const std::vector<int>& shape, mlx_dtype dt) {
+  mlx_array r = mlx_array_new();
+  MLX_CHECK(mlx_zeros(&r, shape.data(), shape.size(), dt, ctx.stream()));
+  return ctx.Keep(r);
+}
+
+// Repeat-interleave each element along `axis` `repeats` times (GQA head expansion: head h maps to
+// original head h / repeats). A no-op when repeats == 1.
+mlx_array LaRepeatAxis(TranslationContext& ctx, mlx_array a, int repeats, int axis) {
+  if (repeats == 1) return a;
+  mlx_array r = mlx_array_new();
+  MLX_CHECK(mlx_repeat_axis(&r, a, repeats, axis, ctx.stream()));
+  return ctx.Keep(r);
+}
+
+// From a (B, H, T, X) tensor pick time-step t as a (B, H, X) slab.
+mlx_array LaTimeSlab(TranslationContext& ctx, mlx_array a, int t, int B, int H, int X) {
+  mlx_array s = ctx.Slice(a, {0, 0, t, 0}, {B, H, t + 1, X});
+  return ctx.Reshape(s, {B, H, X});
+}
+
+// From a (B, H, T) tensor pick time-step t as a (B, H) slab.
+mlx_array LaTimeSlab2(TranslationContext& ctx, mlx_array a, int t, int B, int H) {
+  mlx_array s = ctx.Slice(a, {0, 0, t}, {B, H, t + 1});
+  return ctx.Reshape(s, {B, H});
+}
+
+// LinearAttention: a delta-rule linear-attention recurrence unrolled over the static time axis T.
+//
+// Reshapes the 3D activations to 4D per the head counts, tiles Q/K up to kv_num_heads for GQA,
+// scales the query, then runs the per-step recurrence over t = 0..T-1 with a (B, H, d_k, d_v) state:
+//   if uses_decay:  state = state * exp(decay_t)[..., None]
+//   retrieval = squeeze(k_row @ state)                 ; delta = (v_t - retrieval)*beta  or  v_t
+//   state = state + k_col @ delta_row                  ; out_t = squeeze(q_row @ state)
+// output = concat(out_t) over T reshaped to (B, T, H*d_v); present_state = final state.
+void LinearAttentionOp(TranslationContext& ctx, const NodeDesc& n) {
+  const std::string rule = StringAttr(n, "update_rule", "gated_delta");
+  const bool uses_decay = RuleUsesDecay(rule);
+  const bool uses_beta = RuleUsesBeta(rule);
+  const int Hq = static_cast<int>(n.ints.at("q_num_heads"));
+  const int H = static_cast<int>(n.ints.at("kv_num_heads"));  // recurrence head count
+  const int gqa = H / Hq;
+
+  mlx_array query = ctx.Resolve(n.inputs[0]);  // (B, T, Hq*d_k)
+  mlx_array key = ctx.Resolve(n.inputs[1]);    // (B, T, Hq*d_k)
+  mlx_array value = ctx.Resolve(n.inputs[2]);  // (B, T, H*d_v)
+  const mlx_dtype dt = mlx_array_dtype(query);
+
+  const std::vector<int> qsh = TranslationContext::ShapeOf(query);
+  const std::vector<int> vsh = TranslationContext::ShapeOf(value);
+  const int B = qsh[0];
+  const int T = qsh[1];
+  const int d_k = qsh[2] / Hq;
+  const int d_v = vsh[2] / H;
+
+  const float scale_attr = n.floats.count("scale") ? n.floats.at("scale") : 0.0f;
+  // ORT convention: scale == 0 (its schema default) means "use 1/sqrt(d_k)".
+  const float scale =
+      scale_attr != 0.0f ? scale_attr : 1.0f / std::sqrt(static_cast<float>(d_k));
+
+  const bool has_past = Present(n, 3);
+
+  // Initial recurrence state (B, H, d_k, d_v): past_state or zeros.
+  mlx_array state = has_past ? ctx.Resolve(n.inputs[3]) : LaZeros(ctx, {B, H, d_k, d_v}, dt);
+
+  // Zero-length time axis: no steps run. output is empty (B, 0, H*d_v); present_state == state.
+  if (T == 0) {
+    if (!n.outputs.empty() && !n.outputs[0].name.empty()) {
+      ctx.Bind(n.outputs[0], LaZeros(ctx, {B, 0, H * d_v}, dt));
+    }
+    if (n.outputs.size() >= 2 && !n.outputs[1].name.empty()) {
+      ctx.Bind(n.outputs[1], Contiguous(ctx, state));
+    }
+    return;
+  }
+
+  // 3D -> 4D (B, H, T, ·): reshape by head count, transpose heads before T, tile Q/K for GQA.
+  auto to_heads = [&](mlx_array a, int heads, int last) {
+    mlx_array r = ctx.Reshape(a, {B, T, heads, last});
+    return ctx.Transpose(r, {0, 2, 1, 3});  // (B, heads, T, last)
+  };
+  mlx_array q4 = LaRepeatAxis(ctx, to_heads(query, Hq, d_k), gqa, 1);  // (B, H, T, d_k)
+  mlx_array k4 = LaRepeatAxis(ctx, to_heads(key, Hq, d_k), gqa, 1);    // (B, H, T, d_k)
+  mlx_array v4 = to_heads(value, H, d_v);                              // (B, H, T, d_v)
+  q4 = ctx.Mul(q4, LaScalar(ctx, scale, dt));                         // scaled query
+
+  mlx_array decay4{};  // (B, H, T, d_k)
+  if (uses_decay) decay4 = to_heads(ctx.Resolve(n.inputs[4]), H, d_k);
+  mlx_array beta3{};   // (B, H, T)
+  if (uses_beta) beta3 = ctx.Transpose(ctx.Resolve(n.inputs[5]), {0, 2, 1});
+
+  std::vector<mlx_array> outs(T);
+  for (int t = 0; t < T; ++t) {
+    if (uses_decay) {
+      mlx_array g = LaExp(ctx, LaTimeSlab(ctx, decay4, t, B, H, d_k));   // (B, H, d_k)
+      state = ctx.Mul(state, LaExpandDims(ctx, g, 3));                   // * (B,H,d_k,1)
+    }
+    mlx_array k_t = LaTimeSlab(ctx, k4, t, B, H, d_k);                   // (B, H, d_k)
+    // retrieval = squeeze(k_row @ state): (B,H,1,d_k)@(B,H,d_k,d_v) -> (B,H,1,d_v) -> (B,H,d_v)
+    mlx_array retrieval = LaSqueeze(ctx, ctx.MatMul(LaExpandDims(ctx, k_t, 2), state), 2);
+
+    mlx_array v_t = LaTimeSlab(ctx, v4, t, B, H, d_v);                   // (B, H, d_v)
+    mlx_array delta = v_t;
+    if (uses_beta) {
+      mlx_array beta_t = LaTimeSlab2(ctx, beta3, t, B, H);              // (B, H)
+      delta = ctx.Mul(ctx.SubA(v_t, retrieval), LaExpandDims(ctx, beta_t, 2));
+    }
+    // outer = k_col @ delta_row: (B,H,d_k,1) @ (B,H,1,d_v) -> (B,H,d_k,d_v)
+    mlx_array outer = ctx.MatMul(LaExpandDims(ctx, k_t, 3), LaExpandDims(ctx, delta, 2));
+    state = ctx.AddA(state, outer);
+
+    mlx_array q_t = LaTimeSlab(ctx, q4, t, B, H, d_k);                   // (B, H, d_k)
+    // out_t = squeeze(q_row @ new_state): (B,H,1,d_k)@(B,H,d_k,d_v) -> (B,H,d_v)
+    outs[t] = LaSqueeze(ctx, ctx.MatMul(LaExpandDims(ctx, q_t, 2), state), 2);
+  }
+
+  if (!n.outputs.empty() && !n.outputs[0].name.empty()) {
+    // Assemble output (B, T, H*d_v): each step's (B, H, d_v) slab reshapes (row-major, head-major)
+    // to (B, 1, H*d_v); concat the T slabs along the time axis.
+    mlx_array out{};
+    for (int t = 0; t < T; ++t) {
+      mlx_array slab = ctx.Reshape(outs[t], {B, 1, H * d_v});
+      out = t == 0 ? slab : ctx.Concat2(out, slab, 1);
+    }
+    ctx.Bind(n.outputs[0], Contiguous(ctx, out));
+  }
+  if (n.outputs.size() >= 2 && !n.outputs[1].name.empty()) {
+    ctx.Bind(n.outputs[1], Contiguous(ctx, state));                    // present_state
+  }
+}
+
+// LinearAttention claim: float dtypes only (all operands same dtype); static, non-negative T so the
+// recurrence can be unrolled; a recognized update_rule (default gated_delta) whose required inputs
+// (decay for gated/gated_delta, beta for delta/gated_delta) are present; valid head counts with
+// kv_num_heads % q_num_heads == 0. Dynamic/symbolic T and unknown forms fall back to ORT CPU.
+bool LinearAttentionClaim(Ort::ConstNode node) {
+  const std::vector<Ort::ConstValueInfo> inputs = node.GetInputs();
+  const std::vector<Ort::ConstValueInfo> outputs = node.GetOutputs();
+  if (inputs.size() < 3 || outputs.empty()) return false;
+
+  const std::string rule = StringAttribute(node, "update_rule", "gated_delta");
+  if (!IsKnownRule(rule)) return false;
+
+  const int64_t Hq = IntAttribute(node, "q_num_heads", 0);
+  const int64_t H = IntAttribute(node, "kv_num_heads", 0);
+  if (Hq <= 0 || H <= 0 || H % Hq != 0) return false;
+
+  // query / key / value: same float dtype; query rank-3 with a STATIC (non-symbolic) T (dim 1).
+  ONNXTensorElementDataType qt, kt, vt;
+  std::vector<int64_t> qshape;
+  if (!TensorInfo(inputs[0], qt, &qshape) || !TensorInfo(inputs[1], kt) ||
+      !TensorInfo(inputs[2], vt)) {
+    return false;
+  }
+  if (!IsMlxFloatType(qt) || kt != qt || vt != qt) return false;
+  if (qshape.size() != 3) return false;
+  if (qshape[1] < 0) return false;  // dynamic / symbolic T -> CPU
+
+  // Optional past_state / decay / beta must share the float dtype when present.
+  auto float_ok = [&](size_t i) {
+    if (!SlotPresent(inputs, i)) return true;
+    ONNXTensorElementDataType t;
+    return TensorInfo(inputs[i], t) && t == qt;
+  };
+  if (!float_ok(3) || !float_ok(4) || !float_ok(5)) return false;
+
+  // Each rule's required inputs must be present (ORT CPU errors otherwise, so must we not claim).
+  if (RuleUsesDecay(rule) && !SlotPresent(inputs, 4)) return false;
+  if (RuleUsesBeta(rule) && !SlotPresent(inputs, 5)) return false;
+
+  return true;
+}
+
 }  // namespace
 
 void RegisterSsmMiscOps(OpRegistry& registry) {
@@ -279,6 +501,8 @@ void RegisterSsmMiscOps(OpRegistry& registry) {
       {"", "TensorScatter", kAnyOpset, kAnyOpset, &TensorScatterOp, &TensorScatterClaim});
   registry.Register({"com.microsoft", "CausalConvWithState", kAnyOpset, kAnyOpset,
                      &CausalConvWithStateOp, &CausalConvWithStateClaim});
+  registry.Register({"com.microsoft", "LinearAttention", kAnyOpset, kAnyOpset, &LinearAttentionOp,
+                     &LinearAttentionClaim});
 }
 
 }  // namespace ort_mlx
