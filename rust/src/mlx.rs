@@ -60,11 +60,18 @@ impl Array {
     /// Wrap host bytes into a new MLX array of `dtype` and the given shape (row-major). MLX copies
     /// the data (managed lifetime), so the source buffer need not outlive the array.
     pub fn from_data(data: *const std::os::raw::c_void, shape: &[i32], dtype: mlx::mlx_dtype) -> Self {
-        Array {
+        let arr = Array {
             raw: unsafe {
                 mlx::mlx_array_new_data(data, shape.as_ptr(), shape.len() as i32, dtype)
             },
+        };
+        // Memory view: a COPY-wrap (MLX copies the bytes into managed memory). Gated so a
+        // traced-off run pays a single atomic load.
+        let tr = crate::trace::tracer();
+        if tr.active() {
+            tr.record_copy_wrap((arr.size() * arr.itemsize()) as u64);
         }
+        arr
     }
 
     /// Wrap an externally-owned buffer WITHOUT copying (zero-copy). MLX takes the raw pointer and,
@@ -85,7 +92,7 @@ impl Array {
     ) -> Self {
         // ORT owns the buffer; MLX must never free it. A no-op dtor makes the wrap purely borrowing.
         unsafe extern "C" fn noop_dtor(_: *mut std::os::raw::c_void) {}
-        Array {
+        let arr = Array {
             raw: unsafe {
                 mlx::mlx_array_new_data_managed(
                     data as *mut std::os::raw::c_void,
@@ -95,7 +102,16 @@ impl Array {
                     Some(noop_dtor),
                 )
             },
+        };
+        // Memory view: the boundary zero-copy managed-wrap. A 16 KB page-aligned buffer takes MLX's
+        // true `newBufferWithBytesNoCopy` no-copy path; an unaligned one silently falls back to an
+        // internal allocate+copy — record which, plus the bytes borrowed. Gated (one atomic load off).
+        let tr = crate::trace::tracer();
+        if tr.active() {
+            let aligned = (data as usize) % 16384 == 0;
+            tr.record_managed_wrap((arr.size() * arr.itemsize()) as u64, aligned);
         }
+        arr
     }
 
     /// The raw handle, for passing to `mlx_*` calls. Ownership is NOT transferred.

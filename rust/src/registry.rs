@@ -130,6 +130,35 @@ pub fn claimable(node: &NodeView) -> bool {
     }
 }
 
+/// Best-effort, human-readable explanation of WHY MLX declined to claim `node` — surfaced in the
+/// tracer's "claiming view" so a user can see the per-op fallback reason (which nodes went to CPU
+/// and roughly why). Only called when observability is active, so its extra FFI reads never touch
+/// the traced-off fast path. The reasons are heuristic (the claim predicates return a bare bool):
+///   * no registry entry for the (domain, op, opset) → "no MLX handler (op/opset)";
+///   * an entry exists but the predicate declined → inspect the node for the common causes
+///     (fp64 / other unsupported dtype) and otherwise report a generic "claim predicate declined".
+pub fn decline_reason(node: &NodeView) -> String {
+    let entry = registry().find_entry(&node.domain(), &node.op_type(), node.since_version());
+    if entry.is_none() {
+        return "no MLX handler (op/opset)".to_string();
+    }
+    // The op is registered but this concrete node was rejected. Probe the cheapest common cause.
+    let mut has_fp64 = false;
+    for i in 0..node.num_inputs() {
+        if let Some(info) = node.input_info(i) {
+            #[allow(non_upper_case_globals)]
+            if info.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE {
+                has_fp64 = true;
+            }
+        }
+    }
+    if has_fp64 {
+        "dtype fp64 → CPU".to_string()
+    } else {
+        "claim predicate declined (shape/dtype/attr)".to_string()
+    }
+}
+
 // ---- Claim-time node view -----------------------------------------------------------------------
 
 /// A light read-only view over an `OrtNode` used by claim predicates (mirrors `Ort::ConstNode` plus

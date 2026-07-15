@@ -1374,10 +1374,15 @@ impl<'a> TranslationContext<'a> {
     pub fn execute(&mut self) -> Result<(), MlxError> {
         let nodes = std::mem::take(&mut self.plan.nodes);
         let mut result = Ok(());
-        for node in &nodes {
-            if let Err(e) = crate::registry::translate(self, node) {
-                result = Err(e);
-                break;
+        let tr = crate::trace::tracer();
+        {
+            // Timing attribution: the eager per-node translation (graph build) phase.
+            let _phase = tr.phase("translate");
+            for node in &nodes {
+                if let Err(e) = crate::registry::translate(self, node) {
+                    result = Err(e);
+                    break;
+                }
             }
         }
         if result.is_ok() {
@@ -1415,12 +1420,17 @@ impl<'a> TranslationContext<'a> {
         // Sample GPU-memory counters just before and after so the curve shows the eval.
         let tr = crate::trace::tracer();
         tr.sample_gpu_counters();
+        let eval_t0 = if tr.active() { Some(std::time::Instant::now()) } else { None };
         {
             // Wrap the FIRST eval in a Metal GPU capture when requested (one-shot; the
             // guard stops the capture on drop). `None`/near-zero cost otherwise.
             let _cap = tr.begin_gpu_capture();
             let _eval = tr.eval_region();
             mlx::eval(&outs)?;
+        }
+        if let Some(t0) = eval_t0 {
+            // Timing attribution: the synchronous GPU-inclusive eval phase (summary).
+            tr.record_phase("eval", t0.elapsed());
         }
         tr.sample_gpu_counters();
         for (o, a) in &ext {
@@ -1513,6 +1523,12 @@ pub(crate) fn copy_out_raw_delta(
         if src.is_null() || dst.is_null() {
             return Ok(());
         }
+        // Memory + timing view: record whether this copy-out took the delta (new-rows-only) or full
+        // path, the bytes moved, and the wall time. Gated so a traced-off run pays one atomic load.
+        let tr = crate::trace::tracer();
+        let t0 = if tr.active() { Some(std::time::Instant::now()) } else { None };
+        let mut was_delta = false;
+        let mut moved_bytes: u64 = (count * itemsize) as u64;
         match delta {
             // Partial copy: only the newly written rows along `axis`, and ONLY when `present` really
             // aliases `past` in ORT memory (dst pointer matches the recorded `past` address). `past`
@@ -1546,12 +1562,17 @@ pub(crate) fn copy_out_raw_delta(
                         run,
                     );
                 }
+                was_delta = true;
+                moved_bytes = (outer * run) as u64;
             }
             // No delta, or `present` did NOT alias `past`: full contiguous copy (growing path is
             // bit-for-bit unchanged; also the safe fallback whenever aliasing can't be confirmed).
             _ => {
                 std::ptr::copy_nonoverlapping(src, dst as *mut u8, count * itemsize);
             }
+        }
+        if let Some(t0) = t0 {
+            tr.record_copyout(was_delta, moved_bytes, t0.elapsed());
         }
     }
     Ok(())

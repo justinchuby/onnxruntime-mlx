@@ -69,6 +69,10 @@ impl Drop for MlxEp {
         // Compact agent-friendly "slowest ops" summary (stderr + trace metadata) before
         // the JSON is written, so the ranking is embedded in the exported trace too.
         tr.log_slowest_ops();
+        // The at-a-glance session digest (claim rate, per-path Compute breakdown, memory movement,
+        // time attribution). Printed to stderr when tracing OR the verbose flag is on; also embedded
+        // in the JSON trace. No-op / no stderr when neither is set.
+        tr.log_summary();
         tr.export();
     }
 }
@@ -158,18 +162,31 @@ unsafe extern "C" fn get_capability(
             })
             .collect();
 
-        if std::env::var_os("MLX_EP_CLAIM_DEBUG").is_some() {
+        // Claiming view: build the per-op fallback reasons for the declined nodes (only when
+        // observability is active, so this extra FFI never touches the traced-off fast path). The
+        // legacy `MLX_EP_CLAIM_DEBUG` env still forces the raw stderr dump for quick debugging.
+        let tr = crate::trace::tracer();
+        let mut rejected: Vec<(String, usize, String)> = Vec::new();
+        if tr.active() || std::env::var_os("MLX_EP_CLAIM_DEBUG").is_some() {
             use std::collections::BTreeMap;
-            let mut rejected: BTreeMap<String, usize> = BTreeMap::new();
+            let mut acc: BTreeMap<String, (usize, String)> = BTreeMap::new();
             for (&node, &ok) in nodes.iter().zip(supported.iter()) {
                 if !ok {
                     let view = NodeView::new(ep.ort_api, node);
-                    *rejected.entry(view.op_type()).or_default() += 1;
+                    let e = acc.entry(view.op_type()).or_insert((0, String::new()));
+                    e.0 += 1;
+                    if e.1.is_empty() {
+                        e.1 = crate::registry::decline_reason(&view);
+                    }
                 }
             }
-            let mut items: Vec<(String, usize)> = rejected.into_iter().collect();
-            items.sort_by(|a, b| b.1.cmp(&a.1));
-            eprintln!("[rust-mlx-ep] unclaimed op types: {items:?}");
+            rejected = acc.into_iter().map(|(op, (n, why))| (op, n, why)).collect();
+            rejected.sort_by(|a, b| b.1.cmp(&a.1));
+            if std::env::var_os("MLX_EP_CLAIM_DEBUG").is_some() {
+                let items: Vec<(&String, usize)> =
+                    rejected.iter().map(|(op, n, _)| (op, *n)).collect();
+                eprintln!("[rust-mlx-ep] unclaimed op types: {items:?}");
+            }
         }
 
         let clusters = build_convex_clusters(api, &nodes, &supported);
@@ -188,10 +205,10 @@ unsafe extern "C" fn get_capability(
             }
             claimed += cluster.len();
         }
-        eprintln!(
-            "[rust-mlx-ep] GetCapability: claimed {claimed} of {num} node(s) across {} fused subgraph(s)",
-            clusters.len()
-        );
+        // Claiming view: claimed/total nodes, fused-subgraph count (fragmentation signal), and the
+        // per-op fallback reasons — structured spans/counters + the session summary (near-zero cost
+        // and no stderr spam when tracing is off). Replaces the old unconditional eprintlns.
+        tr.record_claim(claimed, num, clusters.len(), &rejected);
         ptr::null_mut()
     }
 }
@@ -1243,11 +1260,13 @@ unsafe extern "C" fn compute(
         let plan_ptr: *mut Plan = &mut info.plan;
         let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &info.plan);
         if info.plan.compiled.enabled && seq_len == Some(1) {
+            // Cache state: replay (HIT) if the shapeless closure is already compiled, else first
+            // trace+compile (MISS). Decode is shapeless, so it never retraces (empty shape key).
+            let pre_valid = info.plan.compiled.valid;
             match crate::compiled::try_compiled(plan_ptr, Slot::Decode, info.ort_api, kctx, info.stream) {
                 Ok(true) => {
-                    eprintln!(
-                        "[rust-mlx-ep] Compute: subgraph run via mlx-c COMPILED decode ({node_count} node(s))"
-                    );
+                    let cache = if pre_valid { crate::trace::CacheState::Hit } else { crate::trace::CacheState::Miss };
+                    tr.record_compute_path(crate::trace::ComputePath::Decode, cache, "", node_count);
                     return ptr::null_mut();
                 }
                 Ok(false) => { /* not eligible — fall back to eager below */ }
@@ -1264,11 +1283,13 @@ unsafe extern "C" fn compute(
         // unified core in SHAPE-KEYED mode — it retraces per distinct prompt length and replays the
         // fused closure for repeats. Declines (=> eager) for any non-decoder / partial-rotary shape.
         if info.plan.prefill.enabled && matches!(seq_len, Some(s) if s > 1) {
+            let pre_valid = info.plan.prefill.valid;
             match crate::compiled::try_compiled(plan_ptr, Slot::Prefill, info.ort_api, kctx, info.stream) {
                 Ok(true) => {
-                    eprintln!(
-                        "[rust-mlx-ep] Compute: subgraph run via mlx-c COMPILED prefill ({node_count} node(s))"
-                    );
+                    // Shape-keyed on the query length S: a changed key means MLX retraced under us.
+                    let cache = if pre_valid { crate::trace::CacheState::Hit } else { crate::trace::CacheState::Miss };
+                    let key = seq_len.map(|s| format!("S{s}")).unwrap_or_default();
+                    tr.record_compute_path(crate::trace::ComputePath::Prefill, cache, &key, node_count);
                     return ptr::null_mut();
                 }
                 Ok(false) => { /* not eligible — fall back to eager below */ }
@@ -1284,6 +1305,7 @@ unsafe extern "C" fn compute(
         // into a shape-keyed compiled closure and replay it. Declines (=> eager) for attention /
         // control-flow subgraphs and on any trace/apply doubt.
         if info.plan.general.enabled {
+            let pre_valid = info.plan.general.valid;
             match crate::compiled::try_compiled(
                 plan_ptr,
                 Slot::General,
@@ -1292,9 +1314,11 @@ unsafe extern "C" fn compute(
                 info.stream,
             ) {
                 Ok(true) => {
-                    eprintln!(
-                        "[rust-mlx-ep] Compute: subgraph run via mlx-c COMPILED general ({node_count} node(s))"
-                    );
+                    let cache = if pre_valid { crate::trace::CacheState::Hit } else { crate::trace::CacheState::Miss };
+                    // Shape key from the primary dynamic input so a changed audio/frame size shows as
+                    // a RETRACE (only read when observability is active).
+                    let key = if tr.active() { compute_shape_key(info.ort_api, kctx) } else { String::new() };
+                    tr.record_compute_path(crate::trace::ComputePath::General, cache, &key, node_count);
                     return ptr::null_mut();
                 }
                 Ok(false) => { /* not eligible — fall back to eager below */ }
@@ -1309,7 +1333,7 @@ unsafe extern "C" fn compute(
         let mut tctx = TranslationContext::new(&mut info.plan, info.ort_api, kctx, info.stream);
         match tctx.execute() {
             Ok(()) => {
-                eprintln!("[rust-mlx-ep] Compute: subgraph run via mlx-c ({node_count} node(s))");
+                tr.record_compute_path(crate::trace::ComputePath::Eager, crate::trace::CacheState::Na, "", node_count);
                 ptr::null_mut()
             }
             Err(msg) => {
@@ -1318,6 +1342,19 @@ unsafe extern "C" fn compute(
                 (api.CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, c.as_ptr())
             }
         }
+    }
+}
+
+/// A cheap shape key from the primary (index-0) dynamic ctx input, used to classify a shape-keyed
+/// general-subgraph Compute as HIT vs RETRACE. Best-effort: an empty string when the input can't be
+/// read. Only called when observability is active.
+unsafe fn compute_shape_key(
+    ort_api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+) -> String {
+    match crate::engine::read_ctx_input_raw(ort_api, kctx, 0) {
+        Ok((_data, shape, _dtype)) => format!("{shape:?}"),
+        Err(_) => String::new(),
     }
 }
 

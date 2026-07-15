@@ -271,7 +271,11 @@ pub fn try_compiled(
     // `attempted` unset so a later call retries once the cache is warm. Every other outcome (compiled,
     // or a permanent ineligibility / compile failure) is terminal and marks `attempted`.
     if !slot.get(unsafe { &*plan_ptr }).attempted {
-        let terminal = build_closure(plan_ptr, slot, api, kctx, stream);
+        // Timing attribution: the one-time trace + `mlx_compile` (compile) phase.
+        let terminal = {
+            let _phase = crate::trace::tracer().phase("compile");
+            build_closure(plan_ptr, slot, api, kctx, stream)
+        };
         if terminal {
             slot.get_mut(unsafe { &mut *plan_ptr }).attempted = true;
         }
@@ -404,9 +408,17 @@ pub fn try_compiled(
             return Ok(false);
         }
     };
+    // Timing attribution: the synchronous GPU-inclusive eval phase of the compiled closure.
+    let tr = crate::trace::tracer();
+    let eval_t0 = if tr.active() { Some(std::time::Instant::now()) } else { None };
+    let _eval_region = tr.eval_region();
     if mlx::eval(&outs).is_err() {
         slot.get_mut(unsafe { &mut *plan_ptr }).valid = false;
         return Ok(false);
+    }
+    drop(_eval_region);
+    if let Some(t0) = eval_t0 {
+        tr.record_phase("eval", t0.elapsed());
     }
 
     let ext_len = slot.get(unsafe { &*plan_ptr }).ext_outputs.len();

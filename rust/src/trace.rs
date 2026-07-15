@@ -88,6 +88,98 @@ pub const GPU_CAPTURE_ENV: &str = "ONNX_GENAI_MLX_GPU_CAPTURE";
 /// Which eval (0-based) to GPU-capture (default 0). For decode, eval 0 is the
 /// prefill/warmup; set e.g. `5` to capture a representative steady-state decode step.
 pub const GPU_CAPTURE_EVAL_ENV: &str = "ONNX_GENAI_MLX_GPU_CAPTURE_EVAL";
+/// Set to `1` to print the human-readable end-of-run **session summary** (claim rate,
+/// per-path Compute breakdown, memory movement, time attribution) to stderr even when
+/// full JSON tracing is off. When JSON tracing IS on the summary is always emitted (to
+/// stderr AND as trace metadata). Unset + no JSON trace → nothing printed (zero cost).
+pub const VERBOSE_ENV: &str = "ONNX_GENAI_MLX_VERBOSE";
+
+/// Which execution path a fused subgraph's Compute took — the "execution-path view".
+/// Mirrors the dispatch order in [`crate::ep`]'s `compute`: compiled decode → compiled
+/// prefill → compiled general → eager translator.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ComputePath {
+    /// Shapeless compiled decode closure (single-token S==1).
+    Decode,
+    /// Shape-keyed compiled prefill closure (S>1).
+    Prefill,
+    /// Shape-keyed compiled general (static-shape CNN/audio) closure.
+    General,
+    /// Always-correct eager translator (no compiled closure fired).
+    Eager,
+}
+
+impl ComputePath {
+    /// Stable lowercase tag used in spans, counters and the summary.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ComputePath::Decode => "decode",
+            ComputePath::Prefill => "prefill",
+            ComputePath::General => "general",
+            ComputePath::Eager => "eager",
+        }
+    }
+}
+
+/// The compile-cache state of a compiled-path Compute — the "compile-cache view".
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CacheState {
+    /// Replayed an already-compiled closure without retracing (the steady-state win).
+    Hit,
+    /// First compile of this closure (trace → `mlx_compile`).
+    Miss,
+    /// Shape-keyed closure retraced because the input shape key changed (e.g. a new
+    /// prefill prompt length).
+    Retrace,
+    /// Not applicable (the eager path, which has no compiled closure).
+    Na,
+}
+
+impl CacheState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CacheState::Hit => "HIT",
+            CacheState::Miss => "MISS",
+            CacheState::Retrace => "RETRACE",
+            CacheState::Na => "n/a",
+        }
+    }
+}
+
+/// Cumulative, human-readable digest accumulated across every session in the process and
+/// emitted on EP teardown (the "clear view" summary). Cheap to update; only touched when
+/// tracing or the verbose flag is active.
+#[derive(Default)]
+struct Summary {
+    // ---- Claiming view (GetCapability) ----
+    getcap_calls: u64,
+    claimed_nodes: u64,
+    total_nodes: u64,
+    fused_subgraphs: u64,
+    /// op_type -> (declined count, last reason) for the nodes MLX did NOT claim.
+    rejected: std::collections::BTreeMap<String, (u64, String)>,
+    // ---- Execution-path view (Compute) ----
+    /// [decode, prefill, general, eager] call counts.
+    path_counts: [u64; 4],
+    cache_hit: u64,
+    cache_miss: u64,
+    cache_retrace: u64,
+    /// Last shape key seen per compiled path tag, to classify HIT vs RETRACE.
+    last_shape_key: HashMap<&'static str, String>,
+    // ---- Memory view ----
+    managed_wrap_count: u64,
+    managed_wrap_bytes: u64,
+    managed_wrap_aligned: u64,
+    copy_wrap_count: u64,
+    copy_wrap_bytes: u64,
+    delta_copyout_count: u64,
+    delta_copyout_bytes: u64,
+    full_copyout_count: u64,
+    full_copyout_bytes: u64,
+    // ---- Timing attribution ----
+    /// phase name (translate/compile/eval/copy) -> (total_us, count).
+    phase_us: std::collections::BTreeMap<&'static str, (u64, u64)>,
+}
 
 /// Process-wide tracer singleton. All subgraphs/sessions share one timeline and one
 /// output file, stamped with the real `pid` so the events merge into onnx-genai's
@@ -137,6 +229,10 @@ pub struct MlxTracer {
     op_times: Mutex<HashMap<String, (u64, u64)>>,
     /// IOReport GPU-utilisation sampler (`None` when unavailable). See [`ioreport`].
     gpu_util: Mutex<Option<ioreport::GpuUtil>>,
+    /// Human-readable end-of-run digest (claim/path/memory/timing). See [`Summary`].
+    summary: Mutex<Summary>,
+    /// Print the session summary to stderr even when JSON tracing is off (`ONNX_GENAI_MLX_VERBOSE`).
+    verbose: bool,
 }
 
 // The stored pointers are only ever used through the confined FFI helpers below and
@@ -194,6 +290,12 @@ impl MlxTracer {
         // Best-effort IOReport GPU-utilisation sampler (private framework, no sudo).
         let gpu_util = if trace_on { ioreport::GpuUtil::new() } else { None };
 
+        // The verbose human summary can be forced on independently of JSON tracing.
+        let verbose = trace_on
+            || std::env::var(VERBOSE_ENV)
+                .map(|v| v == "1")
+                .unwrap_or(false);
+
         MlxTracer {
             ctx,
             mem,
@@ -208,6 +310,8 @@ impl MlxTracer {
             capture_done: AtomicBool::new(false),
             op_times: Mutex::new(HashMap::new()),
             gpu_util: Mutex::new(gpu_util),
+            summary: Mutex::new(Summary::default()),
+            verbose,
         }
     }
 
@@ -215,6 +319,352 @@ impl MlxTracer {
     #[inline]
     pub fn is_enabled(&self) -> bool {
         self.ctx.is_enabled()
+    }
+
+    /// Whether ANY observability is active — JSON tracing OR the verbose summary. Used to
+    /// gate the cheap summary accumulators (which feed the stderr digest even when JSON
+    /// tracing is off). When neither is on this is a single bool load and everything below
+    /// early-returns, so a production run pays nothing.
+    #[inline]
+    pub fn active(&self) -> bool {
+        self.is_enabled() || self.verbose
+    }
+
+    /// Push one counter sample onto the shared buffer (rendered as a Chrome `"C"` event at
+    /// export). Stamped with the current trace clock. Callers gate on [`is_enabled`].
+    fn push_counter(&self, track: &str, key: &str, value: f64) {
+        let ts = self.ctx.clock().now_micros();
+        let mut c = match self.counters.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        c.push(CounterSample {
+            track: track.to_string(),
+            key: key.to_string(),
+            value,
+            ts,
+        });
+    }
+
+    /// **Claiming view** — record one GetCapability partition: how many nodes MLX claimed
+    /// of the total, into how many fused subgraphs (the fragmentation signal), and the
+    /// per-op-type fallback reasons for the declined nodes. Replaces the raw eprintlns.
+    ///
+    /// Emits a `mlx.getcapability` instant event + `mlx.claimed_nodes` / `mlx.unclaimed_nodes`
+    /// / `mlx.fused_subgraphs` counter tracks (JSON tracing only), and always folds the
+    /// numbers into the end-of-run summary (JSON tracing OR verbose). No-op otherwise.
+    pub fn record_claim(
+        &self,
+        claimed: usize,
+        total: usize,
+        subgraphs: usize,
+        rejected: &[(String, usize, String)],
+    ) {
+        if !self.active() {
+            return;
+        }
+        let unclaimed = total.saturating_sub(claimed);
+        {
+            let mut s = match self.summary.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            s.getcap_calls += 1;
+            s.claimed_nodes += claimed as u64;
+            s.total_nodes += total as u64;
+            s.fused_subgraphs += subgraphs as u64;
+            for (op, n, reason) in rejected {
+                let e = s.rejected.entry(op.clone()).or_insert((0, String::new()));
+                e.0 += *n as u64;
+                if !reason.is_empty() {
+                    e.1 = reason.clone();
+                }
+            }
+        }
+        if self.is_enabled() {
+            let mut args = Args::new()
+                .with("claimed", claimed as u64)
+                .with("total", total as u64)
+                .with("unclaimed", unclaimed as u64)
+                .with("fused_subgraphs", subgraphs as u64);
+            for (op, n, reason) in rejected {
+                args = args.with(
+                    format!("fallback_{op}"),
+                    format!("x{n}: {reason}"),
+                );
+            }
+            self.ctx.instant("mlx.getcapability", "ep.claim", Some(args));
+            self.push_counter("mlx.claimed_nodes", "nodes", claimed as f64);
+            self.push_counter("mlx.unclaimed_nodes", "nodes", unclaimed as f64);
+            self.push_counter("mlx.fused_subgraphs", "subgraphs", subgraphs as f64);
+        }
+    }
+
+    /// **Execution-path view** — record which path a Compute call fired (decode / prefill /
+    /// general / eager), its compile-cache state (HIT / MISS / RETRACE), the shape key, and
+    /// the node count. `shape_key` classifies HIT vs RETRACE for shape-keyed paths; pass an
+    /// empty key for the shapeless decode / eager paths.
+    ///
+    /// Returns the classified [`CacheState`] (so the caller can log it) after resolving
+    /// `Miss`→`Hit`/`Retrace` against the last shape key seen on this path. Emits a
+    /// `mlx.compute` instant + per-path counter (JSON tracing only) and folds counts into
+    /// the summary. No-op when neither tracing nor verbose is active.
+    pub fn record_compute_path(
+        &self,
+        path: ComputePath,
+        cache: CacheState,
+        shape_key: &str,
+        node_count: usize,
+    ) -> CacheState {
+        if !self.active() {
+            return cache;
+        }
+        let tag = path.as_str();
+        let resolved = {
+            let mut s = match self.summary.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let idx = match path {
+                ComputePath::Decode => 0,
+                ComputePath::Prefill => 1,
+                ComputePath::General => 2,
+                ComputePath::Eager => 3,
+            };
+            s.path_counts[idx] += 1;
+            // Classify the cache state. A caller reports MISS only when it actually (re)traced
+            // this call; HIT means it replayed. For a shape-keyed HIT whose shape key differs
+            // from the last one seen, MLX retraced under the hood → RETRACE.
+            let resolved = match cache {
+                CacheState::Hit if !shape_key.is_empty() => {
+                    let changed = s
+                        .last_shape_key
+                        .get(tag)
+                        .map(|k| k != shape_key)
+                        .unwrap_or(false);
+                    if changed {
+                        CacheState::Retrace
+                    } else {
+                        CacheState::Hit
+                    }
+                }
+                other => other,
+            };
+            if !shape_key.is_empty() {
+                s.last_shape_key.insert(tag, shape_key.to_string());
+            }
+            match resolved {
+                CacheState::Hit => s.cache_hit += 1,
+                CacheState::Miss => s.cache_miss += 1,
+                CacheState::Retrace => s.cache_retrace += 1,
+                CacheState::Na => {}
+            }
+            resolved
+        };
+        if self.is_enabled() {
+            let mut args = Args::new()
+                .with("path", tag)
+                .with("cache", resolved.as_str())
+                .with("nodes", node_count as u64);
+            if !shape_key.is_empty() {
+                args = args.with("shape_key", shape_key.to_string());
+            }
+            self.ctx.instant(format!("mlx.compute[{tag}]"), "ep.path", Some(args));
+            self.push_counter("mlx.compute_path", tag, 1.0);
+        }
+        resolved
+    }
+
+    /// **Memory view** — record one boundary input wrap. `aligned` is whether the ORT buffer
+    /// was page-aligned (so MLX takes the true zero-copy `newBufferWithBytesNoCopy` path);
+    /// an unaligned buffer falls back to MLX's internal allocate+copy. Folds bytes moved and
+    /// the zero-copy/copy split into the summary; emits a `mlx.mem_wrap_bytes` counter (JSON).
+    pub fn record_managed_wrap(&self, bytes: u64, aligned: bool) {
+        if !self.active() {
+            return;
+        }
+        {
+            let mut s = match self.summary.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            s.managed_wrap_count += 1;
+            s.managed_wrap_bytes += bytes;
+            if aligned {
+                s.managed_wrap_aligned += 1;
+            }
+        }
+        if self.is_enabled() {
+            self.push_counter("mlx.mem_wrap_bytes", "bytes", bytes as f64);
+        }
+    }
+
+    /// **Memory view** — record one boundary input that was COPIED (a `from_data` copy-wrap
+    /// of a constant/parameter into MLX-managed memory). Folds bytes into the summary.
+    pub fn record_copy_wrap(&self, bytes: u64) {
+        if !self.active() {
+            return;
+        }
+        let mut s = match self.summary.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        s.copy_wrap_count += 1;
+        s.copy_wrap_bytes += bytes;
+    }
+
+    /// **Memory view + timing** — record one boundary output copy-out: whether it was a delta
+    /// write (new-rows-only, the shared-KV win) or a full copy, the bytes moved, and the copy
+    /// wall time. Folds into the summary (`copy` phase + delta/full split); emits a
+    /// `mlx.copyout_bytes` counter (JSON tracing only).
+    pub fn record_copyout(&self, delta: bool, bytes: u64, dur: Duration) {
+        if !self.active() {
+            return;
+        }
+        {
+            let mut s = match self.summary.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            if delta {
+                s.delta_copyout_count += 1;
+                s.delta_copyout_bytes += bytes;
+            } else {
+                s.full_copyout_count += 1;
+                s.full_copyout_bytes += bytes;
+            }
+            let e = s.phase_us.entry("copy").or_insert((0, 0));
+            e.0 += dur.as_micros() as u64;
+            e.1 += 1;
+        }
+        if self.is_enabled() {
+            self.push_counter("mlx.copyout_bytes", if delta { "delta" } else { "full" }, bytes as f64);
+        }
+    }
+
+    /// **Timing attribution** — accumulate `dur` under `phase` (`translate` / `compile` /
+    /// `eval` / `copy`) for the end-of-run per-phase breakdown. Callers gate on [`active`].
+    pub fn record_phase(&self, phase: &'static str, dur: Duration) {
+        if !self.active() {
+            return;
+        }
+        let mut s = match self.summary.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let e = s.phase_us.entry(phase).or_insert((0, 0));
+        e.0 += dur.as_micros() as u64;
+        e.1 += 1;
+    }
+
+    /// **Timing attribution** — start a phase region: a Perfetto span (`mlx.<phase>`, cat
+    /// `ep.phase`) whose wall time is also folded into the summary on drop. Returns `None`
+    /// (zero cost) when neither tracing nor verbose is active, so the hot path is untouched.
+    #[inline]
+    pub fn phase(&self, phase: &'static str) -> Option<PhaseGuard> {
+        if !self.active() {
+            return None;
+        }
+        let span = self.ctx.span(format!("mlx.{phase}"), "ep.phase");
+        Some(PhaseGuard {
+            phase,
+            start: Instant::now(),
+            _span: span,
+        })
+    }
+
+    /// Emit the **session summary** — the concise, at-a-glance "clear view" digest of claim
+    /// rate, per-path Compute breakdown, memory movement and time attribution. Printed to
+    /// stderr (when tracing OR verbose) and, when JSON tracing is on, also embedded as a
+    /// `mlx.session_summary` trace-metadata instant. No-op when nothing was recorded.
+    pub fn log_summary(&self) {
+        if !self.active() {
+            return;
+        }
+        let s = match self.summary.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if s.getcap_calls == 0 && s.path_counts.iter().all(|&n| n == 0) {
+            return;
+        }
+
+        let mut out = String::new();
+        out.push_str("[rust-mlx-ep] ===== MLX EP session summary =====\n");
+
+        // Claiming view.
+        let claim_pct = if s.total_nodes > 0 {
+            (s.claimed_nodes as f64 / s.total_nodes as f64) * 100.0
+        } else {
+            0.0
+        };
+        out.push_str(&format!(
+            "  claim:   {}/{} nodes claimed ({claim_pct:.1}%) across {} fused subgraph(s), {} GetCapability call(s)\n",
+            s.claimed_nodes, s.total_nodes, s.fused_subgraphs, s.getcap_calls
+        ));
+        if !s.rejected.is_empty() {
+            let mut items: Vec<(&String, &(u64, String))> = s.rejected.iter().collect();
+            items.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+            out.push_str("           unclaimed (→ CPU):\n");
+            for (op, (n, reason)) in items.iter().take(8) {
+                let why = if reason.is_empty() { "no MLX handler / opset" } else { reason };
+                out.push_str(&format!("             - {op} x{n}: {why}\n"));
+            }
+        }
+
+        // Execution-path view.
+        out.push_str(&format!(
+            "  compute: decode={} prefill={} general={} eager={}  (cache: {} HIT / {} MISS / {} RETRACE)\n",
+            s.path_counts[0], s.path_counts[1], s.path_counts[2], s.path_counts[3],
+            s.cache_hit, s.cache_miss, s.cache_retrace
+        ));
+
+        // Memory view.
+        out.push_str(&format!(
+            "  memory:  managed-wrap {} ({} zero-copy aligned), {:.2} MiB borrowed; copy-wrap {}, {:.2} MiB\n",
+            s.managed_wrap_count, s.managed_wrap_aligned,
+            s.managed_wrap_bytes as f64 / (1024.0 * 1024.0),
+            s.copy_wrap_count, s.copy_wrap_bytes as f64 / (1024.0 * 1024.0)
+        ));
+        out.push_str(&format!(
+            "           copy-out: delta {} ({:.2} MiB) vs full {} ({:.2} MiB)\n",
+            s.delta_copyout_count, s.delta_copyout_bytes as f64 / (1024.0 * 1024.0),
+            s.full_copyout_count, s.full_copyout_bytes as f64 / (1024.0 * 1024.0)
+        ));
+
+        // Timing attribution.
+        if !s.phase_us.is_empty() {
+            out.push_str("  timing:  ");
+            let mut parts: Vec<String> = Vec::new();
+            for (phase, (us, calls)) in s.phase_us.iter() {
+                parts.push(format!("{phase}={}us (x{calls})", us));
+            }
+            out.push_str(&parts.join(", "));
+            out.push('\n');
+        }
+        out.push_str("[rust-mlx-ep] ===================================\n");
+
+        eprint!("{out}");
+
+        if self.is_enabled() {
+            let args = Args::new()
+                .with("claimed_nodes", s.claimed_nodes)
+                .with("total_nodes", s.total_nodes)
+                .with("claim_pct", format!("{claim_pct:.1}"))
+                .with("fused_subgraphs", s.fused_subgraphs)
+                .with("path_decode", s.path_counts[0])
+                .with("path_prefill", s.path_counts[1])
+                .with("path_general", s.path_counts[2])
+                .with("path_eager", s.path_counts[3])
+                .with("cache_hit", s.cache_hit)
+                .with("cache_miss", s.cache_miss)
+                .with("cache_retrace", s.cache_retrace)
+                .with("managed_wrap_bytes", s.managed_wrap_bytes)
+                .with("managed_wrap_aligned", s.managed_wrap_aligned)
+                .with("delta_copyout_bytes", s.delta_copyout_bytes)
+                .with("full_copyout_bytes", s.full_copyout_bytes);
+            self.ctx.instant("mlx.session_summary", "summary", Some(args));
+        }
     }
 
     /// Name the current OS thread's track once (idempotent per thread).
@@ -672,6 +1122,25 @@ impl Drop for Region {
             iv.end();
         }
         // `_span` records on its own Drop.
+    }
+}
+
+/// RAII guard for a **timing-attribution phase** (translate / compile / eval / copy). Emits a
+/// Perfetto span (`mlx.<phase>`, cat `ep.phase`) and, on drop, folds its wall time into the
+/// session summary's per-phase breakdown. Created by [`MlxTracer::phase`]; `None` (no guard)
+/// when tracing/verbose are both off, so the hot path pays nothing.
+#[must_use = "a PhaseGuard times its region only while alive; drop it at the end of the phase"]
+pub struct PhaseGuard {
+    phase: &'static str,
+    start: Instant,
+    _span: SpanGuard,
+}
+
+impl Drop for PhaseGuard {
+    fn drop(&mut self) {
+        // The tracer is a process-wide singleton; record against the summary on close.
+        tracer().record_phase(self.phase, self.start.elapsed());
+        // `_span` records its Perfetto span on its own Drop.
     }
 }
 
