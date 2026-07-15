@@ -212,11 +212,58 @@ def loop_datadependent_model() -> bytes:
     )
 
 
+def if_outer_initializer_squeeze_model() -> bytes:
+    """If whose taken branch consumes an OUTER-scope initializer (`axes1 = [1]`) as the Squeeze
+    `axes` input.
+
+    Regression for a use-after-free: enclosing-scope initializers were captured with a data pointer
+    into transient ORT graph storage (Constant-node-folded initializers are re-materialised per
+    query). Control-flow bodies are translated lazily at EXECUTE time, so by the time the branch's
+    Squeeze read its `axes` operand the pointer dangled and returned garbage — squeezing a non-size-1
+    axis and aborting the process. Both branches reference the shared outer `axes1` so either cond
+    exercises the path.
+    """
+    x = _t("x", DT.FLOAT, [2, 1, 4])
+    cond = _t("cond", DT.BOOL, [])
+    y = _t("y", DT.FLOAT, [2, 4])
+    axes1 = _const("axes1", np.array([1], np.int64))  # outer-scope initializer
+
+    t_out = _t("t_out", DT.FLOAT, [2, 4])
+    then_g = ir.Graph(
+        [], [t_out], nodes=[ir.Node("", "Squeeze", [x, axes1], outputs=[t_out])],
+        name="then_g", opset_imports={"": 18},
+    )
+    e_pre = _t("e_pre", DT.FLOAT, [2, 4])
+    e_out = _t("e_out", DT.FLOAT, [2, 4])
+    else_g = ir.Graph(
+        [], [e_out], nodes=[
+            ir.Node("", "Squeeze", [x, axes1], outputs=[e_pre]),
+            ir.Node("", "Neg", [e_pre], outputs=[e_out]),
+        ],
+        name="else_g", opset_imports={"": 18},
+    )
+    if_node = ir.Node(
+        "", "If", [cond], outputs=[y],
+        attributes=[ir.AttrGraph("then_branch", then_g), ir.AttrGraph("else_branch", else_g)],
+    )
+    return _model(ir.Graph(
+        [x, cond], [y], nodes=[if_node], name="ifoutinit",
+        opset_imports={"": 18}, initializers=[axes1],
+    ))
+
+
 # --- tests ---------------------------------------------------------------------------------------
 @pytest.mark.parametrize("cond", [True, False], ids=["cond-true", "cond-false"])
 def test_if_runtime_cond(cond: bool) -> None:
     check_claimed(if_model(),
                   {"x": np.array([10, 20, 30], FLOAT), "cond": np.array(cond)}, "If")
+
+
+@pytest.mark.parametrize("cond", [True, False], ids=["cond-true", "cond-false"])
+def test_if_branch_uses_outer_initializer(cond: bool) -> None:
+    x = np.arange(8, dtype=FLOAT).reshape(2, 1, 4)
+    check_claimed(if_outer_initializer_squeeze_model(),
+                  {"x": x, "cond": np.array(cond)}, "If")
 
 
 def test_scan_static_trip() -> None:

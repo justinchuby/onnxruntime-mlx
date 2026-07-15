@@ -680,6 +680,35 @@ unsafe fn collect_initializers(
     }
 }
 
+/// Ensure an `InitData`'s bytes live in owned (`Arc`-backed) storage. Entries that already own
+/// their bytes — or whose data is null / has an unknown element width — are cloned as-is. Enclosing
+/// scope initializers captured with `owned: None` point into transient ORT graph storage that does
+/// not survive to execute-time control-flow body translation, so their bytes are copied here.
+///
+/// # Safety
+/// `src.data` must point to at least `src.count * element_byte_size(src.dtype)` valid bytes for the
+/// duration of this call (true at compile time, when the enclosing initializers were just collected).
+unsafe fn own_init_data(src: &InitData) -> InitData {
+    if src.owned.is_some() || src.data.is_null() {
+        return src.clone();
+    }
+    let width = element_byte_size(src.dtype);
+    if width == 0 {
+        return src.clone();
+    }
+    let nbytes = src.count * width;
+    let owned: std::sync::Arc<Vec<u8>> =
+        std::sync::Arc::new(unsafe { std::slice::from_raw_parts(src.data as *const u8, nbytes) }.to_vec());
+    let data = owned.as_ptr() as *const c_void;
+    InitData {
+        data,
+        shape: src.shape.clone(),
+        dtype: src.dtype,
+        count: src.count,
+        owned: Some(owned),
+    }
+}
+
 /// Element byte width for an ONNX tensor element type (0 = unsupported). Mirrors ep.cc's
 /// `ElementByteSize`, used to copy control-flow body initializer bytes into owned storage.
 fn element_byte_size(t: ort::ONNXTensorElementDataType) -> usize {
@@ -788,7 +817,14 @@ unsafe fn build_subgraphs(
 
             // Body initializers layered over the enclosing ones (a body may shadow an outer name). Bytes
             // are COPIED into owned storage — the body graph handle is released when this walk returns.
-            let mut inits: HashMap<String, InitData> = enclosing_inits.clone();
+            // The enclosing initializers arrive with `owned: None`: their `data` pointer aims into
+            // transient ORT graph storage (Constant-node-folded initializers are re-materialised per
+            // query and are NOT stable to execute time). Control-flow bodies are translated lazily at
+            // EXECUTE time (the taken If branch, each Scan/Loop step), long after this compile-time walk,
+            // so any such pointer would dangle. Copy them into owned storage now so translate-time reads
+            // (shape/axes/indices operands like Squeeze `axes`) see the correct bytes at run time.
+            let mut inits: HashMap<String, InitData> =
+                enclosing_inits.iter().map(|(k, v)| (k.clone(), own_init_data(v))).collect();
             let mut num_init: usize = 0;
             (api.Graph_GetNumInitializers.unwrap())(body, &mut num_init);
             if num_init > 0 {
