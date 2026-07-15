@@ -1,11 +1,21 @@
-//! Rust spike: an MLX-native ONNX Runtime plugin execution provider.
+//! **onnxruntime-mlx** — an MLX-native ONNX Runtime plugin execution provider for Apple Silicon.
 //!
-//! Proves the two boundaries of a full Rust rewrite end-to-end:
-//!   1. the ORT plugin-EP C ABI, implemented from Rust (`extern "C"` vtables), and
-//!   2. mlx-c, bound DIRECTLY (bindgen, no mlx-rs crate) and driven from Rust.
+//! Loaded as a standalone `libonnxruntime_mlx_ep.dylib` by a stock ORT ≥ 1.27 via
+//! `RegisterExecutionProviderLibrary` (no ONNX Runtime fork). It translates fused ONNX subgraphs
+//! into MLX graphs and lets MLX compile/schedule the Metal work — one implementation covers prefill
+//! and decode with no hand-written `.metal` kernels.
 //!
-//! Scope: claims `Add` (fp32) and runs it through `mlx_add`. The existing
-//! `tests/ops` pytest harness is the oracle (`test_binary_fp32[Add-...]`).
+//! Boundaries, both implemented from Rust:
+//!   1. the ORT plugin-EP C ABI (`extern "C"` factory/EP vtables — see [`factory`], [`ep`]), and
+//!   2. mlx-c, bound directly via `bindgen` (no mlx-rs) and driven through a RAII layer ([`mlx`]).
+//!
+//! Architecture: a modular opset-aware op registry ([`registry`], `ops/*`) translates each claimed
+//! node ([`engine`]); a unified `CompiledSubgraph` core ([`compiled`]) traces the fused subgraph
+//! into an `mlx_closure` and `mlx_compile`s it (shapeless decode / shape-keyed general + prefill),
+//! falling back to the eager translator on any doubt. Observability is env-gated ([`trace`]).
+//!
+//! Ops the EP does not claim are left to ORT's CPU EP. Correctness is validated MLX-vs-ORT-CPU by
+//! the `tests/ops` suite and against ONNX's own backend node tests.
 
 mod compiled;
 mod engine;
