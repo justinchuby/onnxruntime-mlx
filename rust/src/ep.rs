@@ -153,6 +153,20 @@ unsafe extern "C" fn get_capability(
             })
             .collect();
 
+        if std::env::var_os("MLX_EP_CLAIM_DEBUG").is_some() {
+            use std::collections::BTreeMap;
+            let mut rejected: BTreeMap<String, usize> = BTreeMap::new();
+            for (&node, &ok) in nodes.iter().zip(supported.iter()) {
+                if !ok {
+                    let view = NodeView::new(ep.ort_api, node);
+                    *rejected.entry(view.op_type()).or_default() += 1;
+                }
+            }
+            let mut items: Vec<(String, usize)> = rejected.into_iter().collect();
+            items.sort_by(|a, b| b.1.cmp(&a.1));
+            eprintln!("[rust-mlx-ep] unclaimed op types: {items:?}");
+        }
+
         let clusters = build_convex_clusters(api, &nodes, &supported);
 
         let add_fuse = ep_api.EpGraphSupportInfo_AddNodesToFuse.unwrap();

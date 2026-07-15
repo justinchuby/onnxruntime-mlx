@@ -349,6 +349,15 @@ fn static_positive_shape(shape: &[i64], rank: usize) -> bool {
     shape.len() == rank && shape.iter().all(|&d| d > 0)
 }
 
+/// Like `static_positive_shape`, but permits a dynamic (symbolic / non-positive) leading batch dim.
+/// ORT reports a symbolic dim as `-1` at GetCapability time; the batch dim is only carried through
+/// (never used to size a kernel), so requiring it to be static needlessly rejects the whole conv/pool
+/// backbone of any dynamic-batch model. All non-batch dims (channels + spatial) must still be
+/// statically known and positive so the MLX conv/pool shapes are well-defined.
+fn static_positive_shape_dyn_batch(shape: &[i64], rank: usize) -> bool {
+    rank >= 1 && shape.len() == rank && shape[1..].iter().all(|&d| d > 0)
+}
+
 fn same_known_shape(actual: &[i64], expected: &[i64]) -> bool {
     if actual.len() != expected.len() {
         return false;
@@ -384,7 +393,7 @@ fn conv_claim(node: &NodeView) -> bool {
         return false;
     }
     let spatial_rank = x.shape.len() - 2;
-    if !static_positive_shape(&x.shape, spatial_rank + 2)
+    if !static_positive_shape_dyn_batch(&x.shape, spatial_rank + 2)
         || !static_positive_shape(&w.shape, spatial_rank + 2)
         || out.shape.len() != spatial_rank + 2
     {
@@ -456,7 +465,7 @@ fn conv_transpose_claim(node: &NodeView) -> bool {
     if !is_mlx_float(x.dtype)
         || w.dtype != x.dtype
         || out.dtype != x.dtype
-        || !static_positive_shape(&x.shape, 4)
+        || !static_positive_shape_dyn_batch(&x.shape, 4)
         || !static_positive_shape(&w.shape, 4)
         || out.shape.len() != 4
     {
@@ -529,7 +538,7 @@ fn pool_claim(node: &NodeView, average: bool) -> bool {
     };
     if !is_mlx_float(x.dtype)
         || out.dtype != x.dtype
-        || !static_positive_shape(&x.shape, 4)
+        || !static_positive_shape_dyn_batch(&x.shape, 4)
         || out.shape.len() != 4
         || node.string_attr("auto_pad", "NOTSET") != "NOTSET"
         || node.int_attr("ceil_mode", 0) != 0
@@ -598,7 +607,7 @@ fn global_pool_claim(node: &NodeView) -> bool {
         (Some(x), Some(out)) => {
             is_mlx_float(x.dtype)
                 && out.dtype == x.dtype
-                && static_positive_shape(&x.shape, 4)
+                && static_positive_shape_dyn_batch(&x.shape, 4)
                 && same_known_shape(&out.shape, &[x.shape[0], x.shape[1], 1, 1])
         }
         _ => false,
@@ -615,7 +624,7 @@ fn lp_pool_claim(node: &NodeView) -> bool {
     };
     if !is_mlx_float(x.dtype)
         || out.dtype != x.dtype
-        || !static_positive_shape(&x.shape, 4)
+        || !static_positive_shape_dyn_batch(&x.shape, 4)
         || out.shape.len() != 4
     {
         return false;
@@ -669,7 +678,7 @@ fn global_lp_pool_claim(node: &NodeView) -> bool {
     };
     is_mlx_float(x.dtype)
         && out.dtype == x.dtype
-        && static_positive_shape(&x.shape, 4)
+        && static_positive_shape_dyn_batch(&x.shape, 4)
         && node.int_attr("p", 2) > 0
         && same_known_shape(&out.shape, &[x.shape[0], x.shape[1], 1, 1])
 }
