@@ -120,6 +120,19 @@ transparently falls back to the CPU EP for that call, so you get a correct resul
 Internally, each session's compiled-graph cache is mutex-guarded, so there is no data race even under
 misuse.
 
+## Numerical accuracy
+
+Op outputs match the ORT CPU EP to ~1e-5 (float32), and are validated MLX-vs-CPU across the 900+
+`tests/ops` cases plus ONNX's own backend node tests. MLX and CPU use different math libraries, so
+results are *close* but not bit-identical: they can differ in the last ULP or two of float32.
+
+For autoregressive decoding this is worth understanding. A per-step argmax is stable for many tokens
+(early tokens are typically bit-identical to a CPU run), but any float32 reduction-order difference is
+amplified across a long greedy loop — once two candidate logits are within rounding of each other, MLX
+and CPU can pick different tokens and the sequences then diverge. This is expected floating-point
+behavior, not a bug; it does not indicate lower quality, only a different-but-equally-valid rounding.
+If you require bit-exact parity with a CPU reference over a long generation, run decode on the CPU EP.
+
 ## Layout
 
 ```
