@@ -108,6 +108,17 @@ unsafe extern "C" fn get_capability(
     graph: *const ort::OrtGraph,
     support: *mut ort::OrtEpGraphSupportInfo,
 ) -> *mut ort::OrtStatus {
+    let api = unsafe { (*this(p)).ort_api };
+    unsafe {
+        crate::guard_ffi_status(api, "get_capability", || get_capability_impl(p, graph, support))
+    }
+}
+
+unsafe fn get_capability_impl(
+    p: *mut ort::OrtEp,
+    graph: *const ort::OrtGraph,
+    support: *mut ort::OrtEpGraphSupportInfo,
+) -> *mut ort::OrtStatus {
     unsafe {
         let ep = &*this(p);
         let api = &*ep.ort_api;
@@ -445,6 +456,22 @@ fn bit_intersects(a: &[u64], b: &[u64]) -> bool {
 // ---------------------------------------------------------------------------
 
 unsafe extern "C" fn compile(
+    p: *mut ort::OrtEp,
+    graphs: *mut *const ort::OrtGraph,
+    fused_nodes: *mut *const ort::OrtNode,
+    count: usize,
+    node_compute_infos: *mut *mut ort::OrtNodeComputeInfo,
+    ep_context_nodes: *mut *mut ort::OrtNode,
+) -> *mut ort::OrtStatus {
+    let api = unsafe { (*this(p)).ort_api };
+    unsafe {
+        crate::guard_ffi_status(api, "compile", || {
+            compile_impl(p, graphs, fused_nodes, count, node_compute_infos, ep_context_nodes)
+        })
+    }
+}
+
+unsafe fn compile_impl(
     p: *mut ort::OrtEp,
     graphs: *mut *const ort::OrtGraph,
     fused_nodes: *mut *const ort::OrtNode,
@@ -1286,6 +1313,15 @@ unsafe extern "C" fn create_state(
 unsafe extern "C" fn release_state(_this: *mut ort::OrtNodeComputeInfo, _state: *mut c_void) {}
 
 unsafe extern "C" fn compute(
+    this: *mut ort::OrtNodeComputeInfo,
+    state: *mut c_void,
+    kctx: *mut ort::OrtKernelContext,
+) -> *mut ort::OrtStatus {
+    let api = unsafe { (*(state as *const SubgraphComputeInfo)).ort_api };
+    unsafe { crate::guard_ffi_status(api, "compute", || compute_impl(this, state, kctx)) }
+}
+
+unsafe fn compute_impl(
     _this: *mut ort::OrtNodeComputeInfo,
     state: *mut c_void,
     kctx: *mut ort::OrtKernelContext,

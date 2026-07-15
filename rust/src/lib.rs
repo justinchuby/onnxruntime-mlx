@@ -33,6 +33,34 @@ use std::ptr;
 use factory::MlxEpFactory;
 use sys::ort;
 
+/// Catch any panic at a C-ABI entry point so it can never unwind into ORT/MLX C++ (which is
+/// undefined behavior) or abort the host process. On a caught panic this returns a non-null
+/// `ORT_EP_FAIL` status, so ORT fails the call — and for EP compute, transparently falls back to
+/// the CPU EP — instead of taking the whole process down. The default panic hook still logs the
+/// panic to stderr. `api` is the ORT API used to build the status; it must be non-null for a
+/// status to be produced (all call sites derive it from a live factory/EP/session pointer).
+pub(crate) unsafe fn guard_ffi_status(
+    api: *const ort::OrtApi,
+    what: &'static str,
+    body: impl FnOnce() -> *mut ort::OrtStatus,
+) -> *mut ort::OrtStatus {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+        Ok(status) => status,
+        Err(_) => {
+            if api.is_null() {
+                return ptr::null_mut();
+            }
+            let msg = std::ffi::CString::new(format!(
+                "onnxruntime-mlx: recovered from a panic in {what} (host protected); the operation failed"
+            ))
+            .unwrap_or_else(|_| {
+                std::ffi::CString::new("onnxruntime-mlx: recovered from a panic").unwrap()
+            });
+            unsafe { ((*api).CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, msg.as_ptr()) }
+        }
+    }
+}
+
 /// ORT resolves this symbol via `dlsym` when a session calls
 /// `register_execution_provider_library`.
 ///
@@ -40,6 +68,36 @@ use sys::ort;
 /// Called by ORT with valid ABI pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn CreateEpFactories(
+    registration_name: *const c_char,
+    ort_api_base: *const ort::OrtApiBase,
+    default_logger: *const ort::OrtLogger,
+    factories: *mut *mut ort::OrtEpFactory,
+    max_factories: usize,
+    num_factories: *mut usize,
+) -> *mut ort::OrtStatus {
+    // Derive a status-capable API up front (outside the guard) so a caught panic can still be
+    // reported: prefer the requested version, fall back to the legacy v1 API for the status.
+    let api_for_status: *const ort::OrtApi = unsafe {
+        let get_api = (*ort_api_base).GetApi.unwrap();
+        let a = get_api(factory::ORT_API_VERSION);
+        if a.is_null() { get_api(1) } else { a }
+    };
+    unsafe {
+        guard_ffi_status(api_for_status, "CreateEpFactories", || {
+            CreateEpFactories_impl(
+                registration_name,
+                ort_api_base,
+                default_logger,
+                factories,
+                max_factories,
+                num_factories,
+            )
+        })
+    }
+}
+
+#[allow(non_snake_case)]
+unsafe fn CreateEpFactories_impl(
     registration_name: *const c_char,
     ort_api_base: *const ort::OrtApiBase,
     _default_logger: *const ort::OrtLogger,

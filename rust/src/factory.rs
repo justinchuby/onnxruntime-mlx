@@ -94,6 +94,24 @@ unsafe extern "C" fn get_supported_devices(
     max_ep_devices: usize,
     num_ep_devices: *mut usize,
 ) -> *mut ort::OrtStatus {
+    let api = unsafe { (*this(p)).ort_api };
+    unsafe {
+        crate::guard_ffi_status(api, "get_supported_devices", || {
+            get_supported_devices_impl(
+                p, devices, num_devices, ep_devices, max_ep_devices, num_ep_devices,
+            )
+        })
+    }
+}
+
+unsafe fn get_supported_devices_impl(
+    p: *mut ort::OrtEpFactory,
+    devices: *const *const ort::OrtHardwareDevice,
+    num_devices: usize,
+    ep_devices: *mut *mut ort::OrtEpDevice,
+    max_ep_devices: usize,
+    num_ep_devices: *mut usize,
+) -> *mut ort::OrtStatus {
     unsafe {
         let f = &*this(p);
         let ort_api = &*f.ort_api;
@@ -143,6 +161,23 @@ unsafe extern "C" fn get_supported_devices(
 }
 
 unsafe extern "C" fn create_ep(
+    p: *mut ort::OrtEpFactory,
+    devices: *const *const ort::OrtHardwareDevice,
+    ep_metadata: *const *const ort::OrtKeyValuePairs,
+    num_devices: usize,
+    session_options: *const ort::OrtSessionOptions,
+    logger: *const ort::OrtLogger,
+    ep: *mut *mut ort::OrtEp,
+) -> *mut ort::OrtStatus {
+    let api = unsafe { (*this(p)).ort_api };
+    unsafe {
+        crate::guard_ffi_status(api, "create_ep", || {
+            create_ep_impl(p, devices, ep_metadata, num_devices, session_options, logger, ep)
+        })
+    }
+}
+
+unsafe fn create_ep_impl(
     p: *mut ort::OrtEpFactory,
     _devices: *const *const ort::OrtHardwareDevice,
     _ep_metadata: *const *const ort::OrtKeyValuePairs,

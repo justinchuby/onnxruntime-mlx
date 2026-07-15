@@ -25,4 +25,9 @@ onnx-runtime-tracer = { path = "../../onnx-genai/crates/onnx-runtime-tracer", ve
 bindgen = "0.72"
 
 [profile.release]
-panic = "abort"
+# Unwind (not abort) so panics can be caught at every C-ABI boundary (see
+# `guard_ffi_status` in lib.rs and the trace_thunk catch_unwind): a plugin loaded into a
+# host process must degrade to an error, never take the host down. Every extern-"C" entry
+# that runs real logic is wrapped, and the MLX trace callback catches locally, so a panic
+# never unwinds across the FFI boundary (which would be UB).
+panic = "unwind"
