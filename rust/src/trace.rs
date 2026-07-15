@@ -164,8 +164,12 @@ struct Summary {
     cache_hit: u64,
     cache_miss: u64,
     cache_retrace: u64,
-    /// Last shape key seen per compiled path tag, to classify HIT vs RETRACE.
-    last_shape_key: HashMap<&'static str, String>,
+    /// The set of shape keys seen per compiled-path tag. A shape-keyed HIT whose key is in the
+    /// set is a genuine cache reuse; a key not yet seen (with the slot already compiled) is a real
+    /// RETRACE. A set (not a single "last key") is required because one path tag (e.g. `general`)
+    /// hosts MANY distinct fused subgraphs — a single last-key would thrash between them and
+    /// mislabel every alternating call as a RETRACE.
+    seen_shape_keys: HashMap<&'static str, std::collections::HashSet<String>>,
     // ---- Memory view ----
     managed_wrap_count: u64,
     managed_wrap_bytes: u64,
@@ -437,21 +441,23 @@ impl MlxTracer {
             // from the last one seen, MLX retraced under the hood → RETRACE.
             let resolved = match cache {
                 CacheState::Hit if !shape_key.is_empty() => {
-                    let changed = s
-                        .last_shape_key
+                    // Genuine reuse iff this exact key was already seen for this path tag; the slot
+                    // is compiled (pre_valid) but a NEW key means a real under-the-hood retrace.
+                    let seen = s
+                        .seen_shape_keys
                         .get(tag)
-                        .map(|k| k != shape_key)
+                        .map(|set| set.contains(shape_key))
                         .unwrap_or(false);
-                    if changed {
-                        CacheState::Retrace
-                    } else {
+                    if seen {
                         CacheState::Hit
+                    } else {
+                        CacheState::Retrace
                     }
                 }
                 other => other,
             };
             if !shape_key.is_empty() {
-                s.last_shape_key.insert(tag, shape_key.to_string());
+                s.seen_shape_keys.entry(tag).or_default().insert(shape_key.to_string());
             }
             match resolved {
                 CacheState::Hit => s.cache_hit += 1,
