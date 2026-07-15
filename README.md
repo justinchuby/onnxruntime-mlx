@@ -101,10 +101,27 @@ From Rust via **onnx-genai**: `ONNX_GENAI_EP=metal` +
 
 ## Performance (M1 Max, warm)
 
-The EP is a **prefill / TTFT accelerator**: MLX prefill runs **1.85–2.77× faster than the ORT CPU EP**
-(and the lead grows with prompt length). Decode is weight-bandwidth-bound — on small models the CPU
-`accuracy_level=4` int8 path is very fast, so decode stays competitive-to-CPU-favored there; the MLX
-decode edge widens on larger models. Unclaimed ops fall back to ORT CPU, so any graph still runs.
+Real end-to-end models, median of 10 runs, MLX EP vs the ORT **CPU** EP on the same machine — top-1
+identical and max abs diff ≤ 6e-5 in every case:
+
+| Model | Workload | CPU EP | MLX EP | Speedup |
+|---|---|---:|---:|---:|
+| Perch v2 | audio encoder (with DFT front-end) | 64.0 ms | 12.0 ms | **5.3×** |
+| Perch v2 (no DFT) | audio encoder | 56.5 ms | 12.0 ms | **4.7×** |
+| BirdNET | audio classifier (CNN) | 14.9 ms | 7.3 ms | **2.0×** |
+
+Feed-forward encoders (audio / CNN / vision) are the EP's sweet spot: the whole graph fuses into a
+single MLX closure that is traced + `mlx_compile`d once and replayed, so a static-shape model runs
+end-to-end on the GPU with one dispatch (e.g. Perch: 725/725 nodes claimed, 1 fused subgraph).
+
+For **LLMs**, the EP is primarily a **prefill / TTFT accelerator**: MLX prefill runs
+**1.85–2.77× faster than the CPU EP** and the lead grows with prompt length. Decode is
+weight-bandwidth-bound — on small models the CPU `accuracy_level=4` int8 path is very fast, so decode
+stays competitive-to-CPU-favored there; the MLX decode edge widens on larger models.
+
+Any op the EP doesn't claim falls back to the ORT CPU EP, so **every** graph still runs — you only
+ever gain. The audio numbers above are the public Hugging Face Perch v2 / BirdNET ONNX exports, timed
+as the median of 10 warm runs against the CPU EP on the same machine.
 
 ## Concurrency
 
