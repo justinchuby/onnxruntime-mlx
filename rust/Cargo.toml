@@ -19,7 +19,7 @@ crate-type = ["cdylib"]
 # `version` so `cargo publish` resolves it from crates.io (path is stripped at
 # publish time; publishing onnxruntime-mlx-ep requires this crate to be on
 # crates.io first).
-onnx-runtime-tracer = { path = "../../onnx-genai/crates/onnx-runtime-tracer", version = "0.1.0-dev.0", default-features = false }
+onnx-runtime-tracer = { path = "../../onnx-genai/crates/onnx-runtime-tracer", version = "0.1.0-dev.1", default-features = false }
 
 [build-dependencies]
 bindgen = "0.72"
