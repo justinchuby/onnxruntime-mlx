@@ -43,7 +43,7 @@ jobs:
           python-version: "3.12"
 
       - name: Python test deps
-        run: python -m pip install --upgrade "onnxruntime==${ORT_VERSION}" numpy onnx_ir pytest
+        run: python -m pip install --upgrade "onnxruntime==${ORT_VERSION}" numpy onnx onnx_ir pytest pytest-forked
 
       - name: Build the Rust EP (cargo)
         run: |
@@ -56,6 +56,25 @@ jobs:
           export ONNXRUNTIME_MLX_EP_LIB="$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib"
           export DYLD_LIBRARY_PATH="$ORT_HOME/lib"
           python -m pytest tests/ops -q
+
+      - name: ONNX backend node tests (informational — MLX EP vs ONNX reference)
+        # Runs ONNX's own curated per-node tests through the MLX EP. `--forked` isolates each
+        # case (a bad case can't take down the suite). NON-BLOCKING for now: a known residual set
+        # of ORT/ONNX-inherent cases is excluded in the harness, and a small genuine-MLX tail is
+        # still being triaged — this step reports the count without gating PRs. Flip
+        # `continue-on-error` off once the residual failures are closed.
+        continue-on-error: true
+        run: |
+          export ONNXRUNTIME_MLX_EP_LIB="$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib"
+          export DYLD_LIBRARY_PATH="$ORT_HOME/lib"
+          python -m pytest tests/backend -q -p no:cacheprovider --forked \
+            | tee /tmp/backend.out || true
+          {
+            echo "### ONNX backend node tests (MLX EP)"
+            echo '```'
+            tail -n 3 /tmp/backend.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   python-wheel:
     name: Python package smoke (macOS arm64)
