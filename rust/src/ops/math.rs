@@ -18,6 +18,22 @@ fn div_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     Ok(())
 }
 
+/// Pow: `base ** exp`. ONNX allows a differently-typed exponent (output keeps the base dtype), so we
+/// cast the exponent up to the base dtype before `mlx_power`. Only float bases are claimed (see
+/// `pow_claim`), which lets the EP serve type/opset combinations ORT's CPU kernel does not implement
+/// (e.g. `float32 ** uint32`, legacy opset-6 `Pow-1`).
+fn pow_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let a = ctx.resolve(&n.inputs[0])?;
+    let mut b = ctx.resolve(&n.inputs[1])?;
+    let at = ctx.dtype_of(a);
+    if ctx.dtype_of(b) != at {
+        b = ctx.astype(b, at)?;
+    }
+    let r = ctx.binary(mlx::mlx_power, a, b)?;
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
+
 fn relu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
     let zero = ctx.zeros_like(x)?;
@@ -89,6 +105,22 @@ fn tanh_claim(node: &NodeView) -> bool {
     float_unary_claim(node)
 }
 
+/// Pow: float base (fp32/fp16/bf16), output keeps the base dtype, exponent may be any numeric type
+/// (cast to the base dtype in the handler), scalar-or-suffix broadcast. Integer bases are left to ORT
+/// CPU (which serves them correctly).
+fn pow_claim(node: &NodeView) -> bool {
+    if node.num_inputs() != 2 || node.num_outputs() != 1 {
+        return false;
+    }
+    let (a, b, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(a), Some(b), Some(o)) => (a, b, o),
+        _ => return false,
+    };
+    is_mlx_float(a.dtype)
+        && a.dtype == out.dtype
+        && scalar_or_suffix_broadcast(&a.shape, &b.shape)
+}
+
 fn reg(
     registry: &mut OpRegistry,
     op_type: &'static str,
@@ -107,6 +139,7 @@ fn reg(
 
 pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Div", div_op, div_claim);
+    reg(registry, "Pow", pow_op, pow_claim);
     reg(registry, "Relu", relu_op, relu_claim);
     reg(registry, "Tanh", tanh_op, tanh_claim);
     reg(registry, "Exp", exp_op, float_unary_claim);

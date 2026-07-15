@@ -147,6 +147,11 @@ _EXCLUDE = [
     r"^test_bernoulli_",
     # RNN/LSTM/GRU batchwise layout: ORT CPU raises during session init (unsupported layout).
     r"^test_simple_rnn_batchwise_", r"^test_lstm_batchwise_", r"^test_gru_batchwise_",
+    # Legacy opset-6 PRelu (pytorch-converted): ORT removed its CPU kernel (only
+    # opset-7+ guaranteed) and the opset-6 Caffe2 per-channel broadcast semantics
+    # differ from numpy, so the MLX EP cannot faithfully serve them either.
+    # Modern `test_prelu_*` (opset-16, numpy broadcast) still run and pass.
+    r"test_PReLU_\dd(_multiparam)?_cpu$",
 ]
 for _pat in _EXCLUDE:
     try:
