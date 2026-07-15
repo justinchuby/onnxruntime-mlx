@@ -183,106 +183,155 @@ pub const GQA_VALID_PAST_KEY: &str = "__gqa_valid_past";
 /// (nodes + constant cache), the live ORT api/kernel-context (for constant host reads during the
 /// trace), and the mlx stream. `kctx` is refreshed before every apply (only read during the trace).
 ///
-/// It lives in a stable `Box` on the plan (`CompiledDecode::payload`) so its address — captured by
+/// It lives in a stable `Box` on the plan (`CompiledSubgraph::payload`) so its address — captured by
 /// the base closure at build time — stays valid for the plan's lifetime.
 pub struct TracePayload {
     pub plan: *mut Plan,
     pub ort_api: *const ort::OrtApi,
     pub kctx: *mut ort::OrtKernelContext,
     pub stream: mlxsys::mlx_stream,
+    /// Which `CompiledSubgraph` slot on the plan this closure is tracing (so the unified core writes
+    /// its discovered schema / transient handles back to the right slot).
+    pub slot: Slot,
 }
 
-/// Compiled-decode fast-path state (mirrors the C++ `Plan` compiled-decode members). For decode
-/// (query seq-len S==1) the graph STRUCTURE is invariant across steps: only input DATA and the KV
-/// length grow. We trace the subgraph into an `mlx_closure` over its dynamic inputs ONCE, compile it
-/// shapeless (so growing KV needs no recompile), and on each decode step just apply the compiled
-/// closure to the new inputs — fusing the ~393 per-token kernels into far fewer launches.
-pub struct CompiledDecode {
-    /// Env `ONNX_GENAI_MLX_NO_COMPILE` unset AND no control-flow node → the fast path is allowed.
-    pub enabled: bool,
-    /// Have we tried to build the compiled closure yet? (one-shot; failure => eager forever).
-    pub attempted: bool,
-    /// Is `closure` usable?
-    pub valid: bool,
-    /// The compiled decode closure.
-    pub closure: Option<crate::mlx::Closure>,
-    /// Ordered dynamic ctx inputs = closure inputs `[0..n)`.
-    pub dyn_inputs: Vec<DynInput>,
-    /// Pre-sliced RoPE cos/sin row inputs, appended AFTER `dyn_inputs`.
-    pub synth_ropes: Vec<SynthRope>,
-    /// External boundary outputs, in closure append order.
-    pub ext_outputs: Vec<OutRef>,
-    /// Ctx input to read the RoPE start (past KV length) from, and its sequence axis.
-    pub rope_past_ctx_index: i32,
-    pub rope_past_axis: i32,
-    /// This decode session drives a fixed-capacity SHARED KV buffer (present aliased onto past at a
-    /// runtime-owned max length) rather than the growing past/present contract. Detected once at
-    /// closure-build time; the trace then writes the new K/V in place and masks the buffer tail.
-    pub shared_kv: bool,
-    /// Ctx index of `attention_mask` — its width is the valid-keys count used to derive the RoPE
-    /// start (valid_past) at apply time in shared-buffer mode. `-1` when not shared / not found.
-    pub mask_ctx_index: i32,
-    /// GQA `present` KV outputs (shared-buffer mode) as `(present_output_name, past_input_ctx_index)`.
-    /// These are `present`-aliases-`past` outputs whose copy-out is a delta write of only the `S` new
-    /// rows (offset/count/past-pointer computed per apply). Populated once during the closure trace.
-    pub kv_present_names: Vec<(String, usize)>,
-    /// Transient MLX handles created during the one-time trace; the compiled graph references them
-    /// after the thunk returns, so they must outlive the trace (freed once with the plan).
-    pub trace_transient: Vec<Array>,
-    /// Stable payload for the trace thunk (self-referential to the enclosing plan).
-    pub payload: Option<Box<TracePayload>>,
+/// Selects one of the plan's `CompiledSubgraph` slots. Each slot carries a distinct [`CompiledConfig`]
+/// and its own compiled closure + schema, but shares the ONE core in [`crate::compiled`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Slot {
+    /// Decode (`plan.compiled`): shapeless, all decode features.
+    Decode,
+    /// General static-shape subgraph (`plan.general`): shape-keyed, no attention.
+    General,
 }
 
-impl CompiledDecode {
-    fn new() -> Self {
-        CompiledDecode {
-            enabled: false,
-            attempted: false,
-            valid: false,
-            closure: None,
-            dyn_inputs: Vec::new(),
-            synth_ropes: Vec::new(),
-            ext_outputs: Vec::new(),
-            rope_past_ctx_index: -1,
-            rope_past_axis: 2,
-            shared_kv: false,
-            mask_ctx_index: -1,
-            kv_present_names: Vec::new(),
-            trace_transient: Vec::new(),
-            payload: None,
+impl Slot {
+    #[inline]
+    pub fn get(self, plan: &Plan) -> &CompiledSubgraph {
+        match self {
+            Slot::Decode => &plan.compiled,
+            Slot::General => &plan.general,
+        }
+    }
+    #[inline]
+    pub fn get_mut(self, plan: &mut Plan) -> &mut CompiledSubgraph {
+        match self {
+            Slot::Decode => &mut plan.compiled,
+            Slot::General => &mut plan.general,
         }
     }
 }
 
-/// General-subgraph compiled fast path state (Phase 2). Unlike [`CompiledDecode`] (which is
-/// shapeless and decode/RoPE/KV-specialised), this traces ANY claimed static-shape subgraph into an
-/// `mlx_closure` over its dynamic ctx inputs and compiles it with `mlx_compile` (shape-keyed, so a
-/// changed input shape safely retraces). The fused closure turns the ~N per-call unfused primitive
-/// dispatches (dominant cost for CNN / audio graphs) into far fewer fused kernels. Any doubt at
-/// build or apply time flips `valid` off and the caller falls back to the eager translator.
-pub struct GeneralCompiled {
-    /// Fast path allowed for this plan (no control-flow, no attention/KV-alias op, kill-switch off).
+/// How `mlx_compile` keys the fused closure — the single knob that used to distinguish the two
+/// historical fast-path modules.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ShapeMode {
+    /// Compile SHAPELESS: a growing/changing input shape never retraces (decode's growing KV length,
+    /// which would otherwise recompile every token). One closure serves every step.
+    Shapeless,
+    /// Compile SHAPE-KEYED: `mlx_compile` keys on the input shapes/dtypes and transparently retraces
+    /// (re-invokes the thunk) when they change, so a different shape recompiles rather than
+    /// miscomputes (general static-shape subgraphs; prefill's varying query length).
+    ShapeKeyed,
+}
+
+/// Static configuration selecting how a [`CompiledSubgraph`] traces, compiles, and applies. The two
+/// historical fast paths — and the new prefill path — are now expressed as configurations of this
+/// ONE core (the point of the unification: one place to trace → compile → cache → apply, with the
+/// decode specialisations as composable opt-in features rather than a separate module):
+///   * decode  = `{ Shapeless,  kv_alias, rope_as_data, delta_copyout }`
+///   * general = `{ ShapeKeyed, contiguous_outputs }`
+///   * prefill = `{ ShapeKeyed, kv_alias, rope_as_data, delta_copyout }` (Phase 2)
+#[derive(Clone, Copy)]
+pub struct CompiledConfig {
+    /// Shapeless vs shape-keyed `mlx_compile` (see [`ShapeMode`]).
+    pub shape_mode: ShapeMode,
+    /// Support a fixed-capacity SHARED KV buffer (`present` aliased onto `past` at a runtime-owned max
+    /// length): GQA writes the new K/V in place at a data-driven valid-past offset and masks the
+    /// buffer tail, instead of the growing past/present concat. Detected per session at build time.
+    pub kv_alias: bool,
+    /// Feed the RoPE cos/sin rows (pre-sliced OUTSIDE the graph) and the `valid_past` offset as DATA
+    /// closure inputs, and trace RoPE in its slice-free `[hd,hd]` matmul form (`rope_dynamic`), so the
+    /// per-step position never bakes into the graph. Requires the decoder GQA shape (RoPE == head_dim).
+    pub rope_as_data: bool,
+    /// Copy back only the `S` new KV rows of a shared-buffer `present` (O(new-tokens) delta copy-out)
+    /// rather than the whole `[B,kv,cap,hd]` buffer.
+    pub delta_copyout: bool,
+    /// Materialise each boundary output to row-major contiguous in the trace (so a general
+    /// static-shape copy-out is a straight typed memcpy). The RoPE/KV paths leave it unset (they mirror
+    /// the decode trace exactly).
+    pub contiguous_outputs: bool,
+}
+
+impl CompiledConfig {
+    /// Decode: shapeless (growing KV never retraces) with all decode specialisations on.
+    pub const fn decode() -> Self {
+        CompiledConfig {
+            shape_mode: ShapeMode::Shapeless,
+            kv_alias: true,
+            rope_as_data: true,
+            delta_copyout: true,
+            contiguous_outputs: false,
+        }
+    }
+    /// General static-shape subgraph: shape-keyed, no attention/KV specialisation, contiguous outputs.
+    pub const fn general() -> Self {
+        CompiledConfig {
+            shape_mode: ShapeMode::ShapeKeyed,
+            kv_alias: false,
+            rope_as_data: false,
+            delta_copyout: false,
+            contiguous_outputs: true,
+        }
+    }
+}
+
+/// Unified compiled fast-path state: ONE parameterised core (`config`) plus the trace/compile/cache
+/// machinery that every mode shares. What used to be the decode-only `CompiledDecode` and the
+/// static-shape `GeneralCompiled` structs are now just two [`CompiledConfig`]s of this type (plus the
+/// Phase 2 prefill config). The RoPE/KV fields below are only populated when the matching feature
+/// flag is set; they stay empty/default for a plain general subgraph. Any doubt at build or apply
+/// time flips `valid` off and the caller falls back to the always-correct eager translator.
+pub struct CompiledSubgraph {
+    /// Static mode + opt-in features (see [`CompiledConfig`]).
+    pub config: CompiledConfig,
+    /// Kill-switch off AND no control-flow node AND (for general) no attention/host-eval op → allowed.
     pub enabled: bool,
     /// Have we tried to build the compiled closure yet? (one-shot; failure => eager forever).
     pub attempted: bool,
     /// Is `closure` usable?
     pub valid: bool,
-    /// The compiled subgraph closure.
+    /// The compiled closure.
     pub closure: Option<crate::mlx::Closure>,
     /// Ordered, de-duplicated dynamic ctx inputs = closure inputs `[0..n)`.
     pub dyn_inputs: Vec<DynInput>,
     /// External boundary outputs, in closure append order.
     pub ext_outputs: Vec<OutRef>,
-    /// Transient MLX handles created during a trace; the compiled graph references them after the
+    /// Transient MLX handles created during the trace; the compiled graph references them after the
     /// thunk returns, so they must outlive it (freed once with the plan).
     pub trace_transient: Vec<Array>,
     /// Stable payload for the trace thunk (self-referential to the enclosing plan).
     pub payload: Option<Box<TracePayload>>,
+    // ---- rope_as_data / kv_alias state (empty/default when those features are off) ----
+    /// Pre-sliced RoPE cos/sin row inputs, appended AFTER `dyn_inputs` (`rope_as_data`).
+    pub synth_ropes: Vec<SynthRope>,
+    /// Ctx input to read the RoPE start (past KV length) from, and its sequence axis (`rope_as_data`).
+    pub rope_past_ctx_index: i32,
+    pub rope_past_axis: i32,
+    /// This session drives a fixed-capacity SHARED KV buffer (detected once at build time; `kv_alias`).
+    pub shared_kv: bool,
+    /// Ctx index of `attention_mask` — its width gives the valid-keys count used to derive the RoPE
+    /// start (valid_past) at apply time in shared-buffer mode. `-1` when not shared / not found.
+    pub mask_ctx_index: i32,
+    /// GQA `present` KV outputs (shared-buffer mode) as `(present_output_name, past_input_ctx_index)`;
+    /// their copy-out is a delta write of only the `S` new rows (`delta_copyout`).
+    pub kv_present_names: Vec<(String, usize)>,
 }
 
-impl GeneralCompiled {
-    fn new() -> Self {
-        GeneralCompiled {
+impl CompiledSubgraph {
+    pub fn new(config: CompiledConfig) -> Self {
+        CompiledSubgraph {
+            config,
             enabled: false,
             attempted: false,
             valid: false,
@@ -291,6 +340,12 @@ impl GeneralCompiled {
             ext_outputs: Vec::new(),
             trace_transient: Vec::new(),
             payload: None,
+            synth_ropes: Vec::new(),
+            rope_past_ctx_index: -1,
+            rope_past_axis: 2,
+            shared_kv: false,
+            mask_ctx_index: -1,
+            kv_present_names: Vec::new(),
         }
     }
 }
@@ -300,10 +355,10 @@ impl GeneralCompiled {
 pub struct Plan {
     pub nodes: Vec<NodeDesc>,
     pub cache: HashMap<String, Array>,
-    /// Compiled-decode fast-path state (see [`CompiledDecode`]).
-    pub compiled: CompiledDecode,
-    /// General-subgraph compiled fast-path state (see [`GeneralCompiled`]).
-    pub general: GeneralCompiled,
+    /// Compiled-decode fast-path state (shapeless + decode features; see [`CompiledConfig::decode`]).
+    pub compiled: CompiledSubgraph,
+    /// General static-shape compiled fast-path state (see [`CompiledConfig::general`]).
+    pub general: CompiledSubgraph,
 }
 
 impl Plan {
@@ -311,8 +366,8 @@ impl Plan {
         Plan {
             nodes,
             cache: HashMap::new(),
-            compiled: CompiledDecode::new(),
-            general: GeneralCompiled::new(),
+            compiled: CompiledSubgraph::new(CompiledConfig::decode()),
+            general: CompiledSubgraph::new(CompiledConfig::general()),
         }
     }
 }
@@ -431,6 +486,10 @@ pub struct TranslationContext<'a> {
     /// (`contiguous_eval` — the host-computed Det/NonZero/Unique ops) is illegal and must fail the
     /// trace cleanly so the caller falls back to the eager translator instead of eval-ing a tracer.
     in_general_trace: bool,
+    /// Shared-buffer KV `present` outputs discovered during a COMPILED trace (`rope_dynamic`), as
+    /// `(present_output_name, past_input_ctx_index)`. Collected here (not written straight to a plan
+    /// slot) so the unified core can hand them to whichever `CompiledSubgraph` slot it is tracing.
+    compiled_kv_present: Vec<(String, usize)>,
 }
 
 impl<'a> TranslationContext<'a> {
@@ -453,6 +512,7 @@ impl<'a> TranslationContext<'a> {
             shared_kv: false,
             kv_deltas: HashMap::new(),
             in_general_trace: false,
+            compiled_kv_present: Vec::new(),
         }
     }
 
@@ -1149,9 +1209,9 @@ impl<'a> TranslationContext<'a> {
     /// apply time by `try_compiled_decode`.
     pub fn record_kv_present(&mut self, out_name: &str, offset: i64, count: i64, past_ctx_index: usize) {
         if self.rope_dynamic {
-            let names = &mut self.plan.compiled.kv_present_names;
-            if !names.iter().any(|(n, _)| n == out_name) {
-                names.push((out_name.to_string(), past_ctx_index));
+            if !self.compiled_kv_present.iter().any(|(n, _)| n == out_name) {
+                self.compiled_kv_present
+                    .push((out_name.to_string(), past_ctx_index));
             }
         } else {
             let alias_ptr = self
@@ -1172,24 +1232,23 @@ impl<'a> TranslationContext<'a> {
         self.env.get(GQA_VALID_PAST_KEY).copied()
     }
 
-    /// Construct a translation context in the compiled-decode TRACE mode (`rope_dynamic = true`).
-    /// Used only by [`crate::compiled`] while building the closure body.
-    pub(crate) fn new_trace(
-        plan: &'a mut Plan,
-        ort_api: *const ort::OrtApi,
-        kctx: *mut ort::OrtKernelContext,
-        stream: mlxsys::mlx_stream,
-    ) -> Self {
-        let shared_kv = plan.compiled.shared_kv;
-        let mut tc = TranslationContext::new(plan, ort_api, kctx, stream);
-        tc.rope_dynamic = true;
-        tc.shared_kv = shared_kv;
-        tc
+    /// Put this context into the compiled-decode/prefill TRACE mode (`rope_dynamic = true`), recording
+    /// whether the session drives a shared KV buffer. Used by the unified core while building the
+    /// closure body (replaces the old decode-only `new_trace`).
+    pub(crate) fn set_compiled_trace(&mut self, shared_kv: bool) {
+        self.rope_dynamic = true;
+        self.shared_kv = shared_kv;
     }
 
     /// Mark this context as a GENERAL compiled-subgraph trace (see [`Self::in_general_trace`]).
     pub(crate) fn set_general_trace(&mut self) {
         self.in_general_trace = true;
+    }
+
+    /// Take the shared-buffer KV `present` outputs discovered during the compiled trace, handing them
+    /// to the core so it can store them on the traced `CompiledSubgraph` slot. Leaves the list empty.
+    pub(crate) fn take_compiled_kv_present(&mut self) -> Vec<(String, usize)> {
+        std::mem::take(&mut self.compiled_kv_present)
     }
 
     /// Seed an env binding (the compiled-closure placeholders: dynamic ctx inputs + pre-sliced RoPE
@@ -1210,11 +1269,16 @@ impl<'a> TranslationContext<'a> {
     }
 
     /// Translate every node into MLX ops (no eval) and return the cast external boundary outputs as
-    /// a fresh vector — the body of the compiled-decode closure trace. Unlike [`Self::execute`] this
-    /// does NOT eval or copy out; the compiled closure defers evaluation to the single per-step eval.
+    /// a fresh vector — the body of a compiled closure trace (decode, prefill, or general). Unlike
+    /// [`Self::execute`] this does NOT eval or copy out; the compiled closure defers evaluation to the
+    /// single per-step eval. When `contiguous` is set each boundary output is additionally
+    /// materialised to row-major contiguous (mirroring [`Self::finish_boundary`]) so a general
+    /// static-shape copy-out is a straight typed memcpy; the RoPE/KV paths leave it unset to mirror
+    /// the decode trace exactly.
     pub(crate) fn run_trace(
         &mut self,
         ext_outputs: &[OutRef],
+        contiguous: bool,
     ) -> Result<VectorArray, MlxError> {
         let nodes = std::mem::take(&mut self.plan.nodes);
         let mut result = Ok(());
@@ -1234,37 +1298,7 @@ impl<'a> TranslationContext<'a> {
                 .env_get(&o.name)
                 .ok_or_else(|| format!("MLX: compiled trace missing output {}", o.name))?;
             let casted = self.astype(a, mlx_dtype_from_onnx(o.otype))?;
-            res.append(casted);
-        }
-        Ok(res)
-    }
-
-    /// Translate every node into MLX ops (no eval) and return the cast + contiguous external
-    /// boundary outputs — the body of the GENERAL compiled subgraph closure (any static-shape fused
-    /// subgraph, not just decode). Like [`Self::run_trace`] but not RoPE-specialised: it materialises
-    /// each boundary output to row-major contiguous (mirroring [`Self::finish_boundary`]) so the
-    /// per-call copy-out is a straight typed memcpy.
-    pub(crate) fn run_trace_general(
-        &mut self,
-        ext_outputs: &[OutRef],
-    ) -> Result<VectorArray, MlxError> {
-        let nodes = std::mem::take(&mut self.plan.nodes);
-        let mut result = Ok(());
-        for node in &nodes {
-            if let Err(e) = crate::registry::translate(self, node) {
-                result = Err(e);
-                break;
-            }
-        }
-        self.plan.nodes = nodes;
-        result?;
-        let mut res = VectorArray::new();
-        for o in ext_outputs {
-            let a = self
-                .env_get(&o.name)
-                .ok_or_else(|| format!("MLX: compiled trace missing output {}", o.name))?;
-            let casted = self.astype(a, mlx_dtype_from_onnx(o.otype))?;
-            let casted = self.contiguous(casted)?;
+            let casted = if contiguous { self.contiguous(casted)? } else { casted };
             res.append(casted);
         }
         Ok(res)

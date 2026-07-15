@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
 
-use crate::engine::{InitData, NodeDesc, OutRef, Plan, Src, SubgraphDesc, TensorRef, TranslationContext};
+use crate::engine::{InitData, NodeDesc, OutRef, Plan, Slot, Src, SubgraphDesc, TensorRef, TranslationContext};
 use crate::factory::ORT_API_VERSION;
 use crate::mlx::Stream;
 use crate::registry::{claimable, NodeView};
@@ -599,7 +599,7 @@ unsafe fn build_plan(
         let mut plan = Plan::new(nodes);
         plan.compiled.enabled = crate::compiled::compile_enabled(has_control_flow);
         plan.general.enabled =
-            crate::compiled_general::general_enabled(has_control_flow, &plan.nodes);
+            crate::compiled::general_enabled(has_control_flow, &plan.nodes);
         Ok(plan)
     }
 }
@@ -1241,7 +1241,7 @@ unsafe extern "C" fn compute(
         if info.plan.compiled.enabled
             && crate::compiled::detect_seq_len(info.ort_api, kctx, &info.plan) == Some(1)
         {
-            match crate::compiled::try_compiled_decode(plan_ptr, info.ort_api, kctx, info.stream) {
+            match crate::compiled::try_compiled(plan_ptr, Slot::Decode, info.ort_api, kctx, info.stream) {
                 Ok(true) => {
                     eprintln!(
                         "[rust-mlx-ep] Compute: subgraph run via mlx-c COMPILED decode ({node_count} node(s))"
@@ -1261,8 +1261,9 @@ unsafe extern "C" fn compute(
         // into a shape-keyed compiled closure and replay it. Declines (=> eager) for attention /
         // control-flow subgraphs and on any trace/apply doubt.
         if info.plan.general.enabled {
-            match crate::compiled_general::try_compiled_general(
+            match crate::compiled::try_compiled(
                 plan_ptr,
+                Slot::General,
                 info.ort_api,
                 kctx,
                 info.stream,

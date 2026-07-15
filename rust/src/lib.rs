@@ -8,7 +8,6 @@
 //! `tests/ops` pytest harness is the oracle (`test_binary_fp32[Add-...]`).
 
 mod compiled;
-mod compiled_general;
 mod engine;
 mod ep;
 mod factory;
