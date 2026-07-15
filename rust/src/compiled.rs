@@ -643,10 +643,14 @@ extern "C" fn trace_thunk(
             }
             1
         }
-        Err(_) => {
-            if crate::trace::tracer().active() {
-                eprintln!("[rust-mlx-ep] compiled trace panicked; falling back to eager");
-            }
+        Err(payload) => {
+            // A panic inside the trace thunk is unexpected (a bug), unlike the benign trace-failed
+            // decline above — never keep it silent, even with tracing off. The eager path below
+            // still produces a correct result.
+            let detail = crate::panic_payload_message(&payload);
+            eprintln!(
+                "[onnxruntime-mlx] WARNING: compiled trace panicked ({detail}); falling back to the eager path (result still correct)"
+            );
             1
         }
     }

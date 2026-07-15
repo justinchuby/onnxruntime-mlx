@@ -36,9 +36,10 @@ use sys::ort;
 /// Catch any panic at a C-ABI entry point so it can never unwind into ORT/MLX C++ (which is
 /// undefined behavior) or abort the host process. On a caught panic this returns a non-null
 /// `ORT_EP_FAIL` status, so ORT fails the call — and for EP compute, transparently falls back to
-/// the CPU EP — instead of taking the whole process down. The default panic hook still logs the
-/// panic to stderr. `api` is the ORT API used to build the status; it must be non-null for a
-/// status to be produced (all call sites derive it from a live factory/EP/session pointer).
+/// the CPU EP — instead of taking the whole process down. It ALSO logs the panic explicitly to
+/// stderr (with the panic message), so an error is never silent even if the host app installed a
+/// quiet/custom panic hook. `api` is the ORT API used to build the status; it must be non-null for
+/// a status to be produced (all call sites derive it from a live factory/EP/session pointer).
 pub(crate) unsafe fn guard_ffi_status(
     api: *const ort::OrtApi,
     what: &'static str,
@@ -46,18 +47,37 @@ pub(crate) unsafe fn guard_ffi_status(
 ) -> *mut ort::OrtStatus {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
         Ok(status) => status,
-        Err(_) => {
+        Err(payload) => {
+            let detail = panic_payload_message(&payload);
+            // Never be silent on a caught panic — surface it on stderr regardless of the host's
+            // panic hook, then hand ORT an error so it can recover on the CPU EP.
+            eprintln!(
+                "[onnxruntime-mlx] ERROR: caught a panic in {what}: {detail} — returning EP_FAIL; \
+                 ORT will fall back to the CPU EP (host process protected)."
+            );
             if api.is_null() {
                 return ptr::null_mut();
             }
             let msg = std::ffi::CString::new(format!(
-                "onnxruntime-mlx: recovered from a panic in {what} (host protected); the operation failed"
+                "onnxruntime-mlx: recovered from a panic in {what}: {detail} (host protected); the operation failed"
             ))
             .unwrap_or_else(|_| {
                 std::ffi::CString::new("onnxruntime-mlx: recovered from a panic").unwrap()
             });
             unsafe { ((*api).CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, msg.as_ptr()) }
         }
+    }
+}
+
+/// Best-effort human-readable message from a caught panic payload (the `Box<dyn Any>` from
+/// `catch_unwind`). Rust panics carry either a `&'static str` or a `String`; anything else is rare.
+pub(crate) fn panic_payload_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unrecoverable panic (non-string payload)".to_string()
     }
 }
 
