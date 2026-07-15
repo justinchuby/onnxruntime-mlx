@@ -131,7 +131,13 @@ unsafe extern "C" fn get_supported_devices(
         }
         *ep_devices.add(0) = ep_device;
         *num_ep_devices = 1;
-        eprintln!("[rust-mlx-ep] GetSupportedDevices: bound to {} device", if !gpu.is_null() { "GPU" } else { "CPU" });
+        // Device-bind notice: env-gated through the tracer so a normal (traced-off) run stays
+        // silent on stderr; surfaced as a trace instant + verbose/summary line otherwise.
+        let tr = crate::trace::tracer();
+        if tr.active() {
+            let dev = if !gpu.is_null() { "GPU" } else { "CPU" };
+            eprintln!("[rust-mlx-ep] GetSupportedDevices: bound to {dev} device");
+        }
         ptr::null_mut()
     }
 }

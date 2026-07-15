@@ -637,11 +637,17 @@ extern "C" fn trace_thunk(
     match result {
         Ok(Ok(())) => 0,
         Ok(Err(e)) => {
-            eprintln!("[rust-mlx-ep] compiled trace failed ({e}); falling back to eager");
+            // Correctness fallback (compiled trace failed → eager). Env-gated so a traced-off run
+            // stays silent; the eager path still produces the correct result.
+            if crate::trace::tracer().active() {
+                eprintln!("[rust-mlx-ep] compiled trace failed ({e}); falling back to eager");
+            }
             1
         }
         Err(_) => {
-            eprintln!("[rust-mlx-ep] compiled trace panicked; falling back to eager");
+            if crate::trace::tracer().active() {
+                eprintln!("[rust-mlx-ep] compiled trace panicked; falling back to eager");
+            }
             1
         }
     }
