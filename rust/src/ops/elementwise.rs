@@ -4,8 +4,8 @@
 
 use crate::engine::{mlx_dtype_from_onnx, MlxError, NodeDesc, TranslationContext};
 use crate::registry::{
-    is_mlx_float, is_signed_integer, scalar_or_suffix_broadcast, K_ANY_OPSET, NodeView,
-    OpRegistration, OpRegistry,
+    is_mlx_float, is_mlx_numeric, is_signed_integer, is_unsigned_integer,
+    scalar_or_suffix_broadcast, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -55,6 +55,138 @@ fn cast_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let r = ctx.astype(x, mlx_dtype_from_onnx(n.outputs[0].otype))?;
     ctx.bind(&n.outputs[0], r);
     Ok(())
+}
+
+// ---- variadic (1..N elementwise, numpy-broadcasting) --------------------------------------------
+
+/// Cast the produced array to the declared ONNX output dtype (no-op when it already matches) so a
+/// stray MLX promotion never widens the boundary tensor.
+fn bind_as_out(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    r: mlx::mlx_array,
+) -> Result<(), MlxError> {
+    let r = ctx.astype(r, mlx_dtype_from_onnx(n.outputs[0].otype))?;
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
+
+/// Fold the variadic inputs with `op` (`Max`/`Min`/`Sum`).
+fn fold_variadic(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    op: unsafe extern "C" fn(
+        *mut mlx::mlx_array,
+        mlx::mlx_array,
+        mlx::mlx_array,
+        mlx::mlx_stream,
+    ) -> i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let mut acc = ctx.resolve(&n.inputs[0])?;
+    for i in 1..n.inputs.len() {
+        let next = ctx.resolve(&n.inputs[i])?;
+        acc = ctx.binary(op, acc, next)?;
+    }
+    Ok(acc)
+}
+
+fn max_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let r = fold_variadic(ctx, n, mlx::mlx_maximum)?;
+    bind_as_out(ctx, n, r)
+}
+
+fn min_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let r = fold_variadic(ctx, n, mlx::mlx_minimum)?;
+    bind_as_out(ctx, n, r)
+}
+
+fn sum_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let r = fold_variadic(ctx, n, mlx::mlx_add)?;
+    bind_as_out(ctx, n, r)
+}
+
+/// Mean = Sum / N (the divisor is cast to the accumulator dtype to avoid float widening).
+fn mean_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let acc = fold_variadic(ctx, n, mlx::mlx_add)?;
+    let dt = ctx.dtype_of(acc);
+    let count = ctx.scalar_f32(n.inputs.len() as f32);
+    let count = ctx.astype(count, dt)?;
+    let r = ctx.binary(mlx::mlx_divide, acc, count)?;
+    bind_as_out(ctx, n, r)
+}
+
+// ---- comparisons / logical (bool output) --------------------------------------------------------
+
+macro_rules! binary_bool_handler {
+    ($name:ident, $mlx_op:expr) => {
+        fn $name(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+            let a = ctx.resolve(&n.inputs[0])?;
+            let b = ctx.resolve(&n.inputs[1])?;
+            let r = ctx.binary($mlx_op, a, b)?;
+            ctx.bind(&n.outputs[0], r);
+            Ok(())
+        }
+    };
+}
+
+binary_bool_handler!(equal_op, mlx::mlx_equal);
+binary_bool_handler!(greater_op, mlx::mlx_greater);
+binary_bool_handler!(less_op, mlx::mlx_less);
+binary_bool_handler!(greater_equal_op, mlx::mlx_greater_equal);
+binary_bool_handler!(less_equal_op, mlx::mlx_less_equal);
+binary_bool_handler!(and_op, mlx::mlx_logical_and);
+binary_bool_handler!(or_op, mlx::mlx_logical_or);
+// ONNX Xor over bools == elementwise not-equal.
+binary_bool_handler!(xor_op, mlx::mlx_not_equal);
+
+fn not_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let r = ctx.unary(mlx::mlx_logical_not, x)?;
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
+
+// ---- Mod / BitShift -----------------------------------------------------------------------------
+
+/// Mod: `fmod=0` → Python modulo (sign of divisor), served by `mlx_remainder`; `fmod=1` → C `fmod`
+/// (sign of dividend), computed as `a - trunc(a/b)*b`.
+fn mod_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let a = ctx.resolve(&n.inputs[0])?;
+    let b = ctx.resolve(&n.inputs[1])?;
+    let fmod = n.ints.get("fmod").copied().unwrap_or(0) != 0;
+    let r = if !fmod {
+        ctx.binary(mlx::mlx_remainder, a, b)?
+    } else {
+        let q = ctx.binary(mlx::mlx_divide, a, b)?;
+        let fl = ctx.unary(mlx::mlx_floor, q)?;
+        let cl = ctx.unary(mlx::mlx_ceil, q)?;
+        let dt = ctx.dtype_of(q);
+        let zero = ctx.scalar_f32(0.0);
+        let zero = ctx.astype(zero, dt)?;
+        let nonneg = ctx.binary(mlx::mlx_greater_equal, q, zero)?;
+        let trunc = ctx.where_(nonneg, fl, cl)?;
+        let prod = ctx.binary(mlx::mlx_multiply, trunc, b)?;
+        ctx.binary(mlx::mlx_subtract, a, prod)?
+    };
+    bind_as_out(ctx, n, r)
+}
+
+/// BitShift: `direction` = `LEFT` | `RIGHT` → `mlx_left_shift` / `mlx_right_shift`.
+fn bitshift_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let a = ctx.resolve(&n.inputs[0])?;
+    let b = ctx.resolve(&n.inputs[1])?;
+    let left = n
+        .strings
+        .get("direction")
+        .map(String::as_str)
+        .unwrap_or("LEFT")
+        == "LEFT";
+    let r = if left {
+        ctx.binary(mlx::mlx_left_shift, a, b)?
+    } else {
+        ctx.binary(mlx::mlx_right_shift, a, b)?
+    };
+    bind_as_out(ctx, n, r)
 }
 
 // ---- claim predicates ---------------------------------------------------------------------------
@@ -138,6 +270,153 @@ fn cast_claim(node: &NodeView) -> bool {
         && o.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
 }
 
+fn is_bool(t: ort::ONNXTensorElementDataType) -> bool {
+    t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL
+}
+
+/// Variadic `Max`/`Min`/`Sum`/`Mean`: 1..N inputs of one dtype, each numpy-broadcasting to the output
+/// shape. `allow_int` also admits signed/unsigned integers (Mean stays float-only since it divides).
+fn variadic_claim(node: &NodeView, allow_int: bool) -> bool {
+    if node.num_inputs() < 1 || node.num_outputs() != 1 {
+        return false;
+    }
+    let out = match node.output_info(0) {
+        Some(o) => o,
+        None => return false,
+    };
+    let ok_dtype = is_mlx_float(out.dtype)
+        || (allow_int && (is_signed_integer(out.dtype) || is_unsigned_integer(out.dtype)));
+    if !ok_dtype {
+        return false;
+    }
+    for i in 0..node.num_inputs() {
+        match node.input_info(i) {
+            Some(inf)
+                if inf.dtype == out.dtype
+                    && scalar_or_suffix_broadcast(&inf.shape, &out.shape) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn float_variadic_claim(node: &NodeView) -> bool {
+    variadic_claim(node, false)
+}
+
+fn numeric_variadic_claim(node: &NodeView) -> bool {
+    variadic_claim(node, true)
+}
+
+/// Comparison (`Equal`/`Greater`/`Less`/`GreaterOrEqual`/`LessOrEqual`): two same-dtype numeric (or,
+/// for Equal/bool, boolean) inputs, boolean output, scalar-or-suffix broadcast.
+fn comparison_claim(node: &NodeView, allow_bool: bool) -> bool {
+    if node.num_inputs() != 2 || node.num_outputs() != 1 {
+        return false;
+    }
+    let (a, b, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(a), Some(b), Some(o)) => (a, b, o),
+        _ => return false,
+    };
+    if a.dtype != b.dtype || !is_bool(out.dtype) {
+        return false;
+    }
+    (is_mlx_numeric(a.dtype) || (allow_bool && is_bool(a.dtype)))
+        && scalar_or_suffix_broadcast(&a.shape, &b.shape)
+}
+
+/// Ordered comparisons (Greater/Less/…): numeric inputs only.
+fn ordered_comparison_claim(node: &NodeView) -> bool {
+    comparison_claim(node, false)
+}
+
+/// Equal: numeric OR boolean inputs.
+fn equal_claim(node: &NodeView) -> bool {
+    comparison_claim(node, true)
+}
+
+/// Logical And/Or/Xor: two boolean inputs, boolean output, scalar-or-suffix broadcast.
+fn logical_binary_claim(node: &NodeView) -> bool {
+    if node.num_inputs() != 2 || node.num_outputs() != 1 {
+        return false;
+    }
+    let (a, b, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(a), Some(b), Some(o)) => (a, b, o),
+        _ => return false,
+    };
+    is_bool(a.dtype) && is_bool(b.dtype) && is_bool(out.dtype)
+        && scalar_or_suffix_broadcast(&a.shape, &b.shape)
+}
+
+/// Not: single boolean input/output.
+fn not_claim(node: &NodeView) -> bool {
+    if node.num_inputs() != 1 || node.num_outputs() != 1 {
+        return false;
+    }
+    match (node.input_info(0), node.output_info(0)) {
+        (Some(i), Some(o)) => is_bool(i.dtype) && is_bool(o.dtype),
+        _ => false,
+    }
+}
+
+/// Mod: two same-dtype inputs, scalar-or-suffix broadcast. `fmod=0` (Python modulo) serves float and
+/// integer; `fmod=1` (C fmod) is float-only (the truncation composition needs float floor/ceil).
+fn mod_claim(node: &NodeView) -> bool {
+    if node.num_inputs() != 2 || node.num_outputs() != 1 {
+        return false;
+    }
+    let (a, b, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(a), Some(b), Some(o)) => (a, b, o),
+        _ => return false,
+    };
+    if a.dtype != b.dtype || b.dtype != out.dtype {
+        return false;
+    }
+    if !scalar_or_suffix_broadcast(&a.shape, &b.shape) {
+        return false;
+    }
+    let fmod = node.int_attr("fmod", 0) != 0;
+    if fmod {
+        is_mlx_float(a.dtype)
+    } else {
+        is_mlx_float(a.dtype) || is_signed_integer(a.dtype) || is_unsigned_integer(a.dtype)
+    }
+}
+
+/// BitShift: two same-dtype unsigned-integer inputs/output (excluding uint64, which has no CopyOut
+/// path), scalar-or-suffix broadcast.
+fn bitshift_claim(node: &NodeView) -> bool {
+    if node.num_inputs() != 2 || node.num_outputs() != 1 {
+        return false;
+    }
+    let (a, b, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(a), Some(b), Some(o)) => (a, b, o),
+        _ => return false,
+    };
+    let u64_t = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64;
+    a.dtype == b.dtype
+        && b.dtype == out.dtype
+        && is_unsigned_integer(a.dtype)
+        && a.dtype != u64_t
+        && scalar_or_suffix_broadcast(&a.shape, &b.shape)
+}
+
+fn reg(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+) {
+    registry.register(OpRegistration {
+        domain: "",
+        op_type,
+        min_opset: K_ANY_OPSET,
+        max_opset: K_ANY_OPSET,
+        handler,
+        claim,
+    });
+}
+
 pub fn register(registry: &mut OpRegistry) {
     registry.register(OpRegistration {
         domain: "",
@@ -196,4 +475,27 @@ pub fn register(registry: &mut OpRegistry) {
         handler: sigmoid_op,
         claim: sigmoid_claim,
     });
+
+    // Variadic elementwise.
+    reg(registry, "Max", max_op, numeric_variadic_claim);
+    reg(registry, "Min", min_op, numeric_variadic_claim);
+    reg(registry, "Sum", sum_op, float_variadic_claim);
+    reg(registry, "Mean", mean_op, float_variadic_claim);
+
+    // Comparisons (bool output).
+    reg(registry, "Equal", equal_op, equal_claim);
+    reg(registry, "Greater", greater_op, ordered_comparison_claim);
+    reg(registry, "Less", less_op, ordered_comparison_claim);
+    reg(registry, "GreaterOrEqual", greater_equal_op, ordered_comparison_claim);
+    reg(registry, "LessOrEqual", less_equal_op, ordered_comparison_claim);
+
+    // Logical (bool).
+    reg(registry, "And", and_op, logical_binary_claim);
+    reg(registry, "Or", or_op, logical_binary_claim);
+    reg(registry, "Xor", xor_op, logical_binary_claim);
+    reg(registry, "Not", not_op, not_claim);
+
+    // Misc elementwise.
+    reg(registry, "Mod", mod_op, mod_claim);
+    reg(registry, "BitShift", bitshift_op, bitshift_claim);
 }
