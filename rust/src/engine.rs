@@ -34,6 +34,7 @@ pub struct InitData {
     #[allow(dead_code)]
     pub count: usize,
     /// Owned copy of the bytes (control-flow body initializers), keeping `data` valid.
+    #[allow(dead_code)] // RAII: backs the `data` pointer above; must outlive it even if not read.
     pub owned: Option<std::sync::Arc<Vec<u8>>>,
 }
 
@@ -92,6 +93,7 @@ pub struct DeltaWrite {
 /// time. Raw host bytes are copied into `data` (owned, kept alive for the plan's lifetime) so the
 /// handler can materialize an MLX array from it. Mirrors the C++ `CopyScalarAttrs` TENSOR path.
 #[derive(Clone)]
+#[allow(dead_code)] // Populated for TENSOR-valued attributes; consumed by upcoming handler waves.
 pub struct ConstTensor {
     pub data: Vec<u8>,
     pub shape: Vec<i64>,
@@ -124,6 +126,7 @@ pub struct NodeDesc {
     pub float_arrays: HashMap<String, Vec<f32>>,
     pub strings: HashMap<String, String>,
     /// TENSOR-valued attributes (Constant/ConstantOfShape `value`), keyed by attribute name.
+    #[allow(dead_code)] // Consumed by upcoming Constant/ConstantOfShape handler waves.
     pub tensors: HashMap<String, ConstTensor>,
     pub inputs: Vec<TensorRef>,
     pub outputs: Vec<OutRef>,
@@ -469,6 +472,7 @@ pub fn dtype_name(dt: mlxsys::mlx_dtype) -> &'static str {
 /// can be read as plain host integers. Faithful port of the C++ `HostBytes` / `RawHost`.
 pub struct HostBytes {
     pub data: *const c_void,
+    #[allow(dead_code)] // Retained for symmetry/debugging; reads use `count`+`dtype`.
     pub shape: Vec<i64>,
     pub count: usize,
     pub dtype: ort::ONNXTensorElementDataType,
@@ -1054,11 +1058,6 @@ impl<'a> TranslationContext<'a> {
         self.emit(|res, s| unsafe { mlxsys::mlx_stack_axis(res, vec.as_raw(), axis, s) })
     }
 
-    /// `full(shape, value, dtype)`.
-    pub fn full(&mut self, shape: &[i32], value: mlxsys::mlx_array, dtype: mlxsys::mlx_dtype) -> Result<mlxsys::mlx_array, MlxError> {
-        self.emit(|res, s| unsafe { mlxsys::mlx_full(res, shape.as_ptr(), shape.len(), value, dtype, s) })
-    }
-
     /// A kept 0-d complex64 scalar array (real, imag).
     pub fn scalar_complex(&mut self, re: f32, im: f32) -> mlxsys::mlx_array {
         self.keep(Array::from_raw(unsafe { mlxsys::mlx_array_new_complex(re, im) }))
@@ -1478,18 +1477,8 @@ pub(crate) fn read_ctx_input_raw(
     }
 }
 
-/// Create the ORT output tensor with the MLX result shape and memcpy on unified memory (no
-/// `TranslationContext` needed — used by the compiled-decode path).
-pub(crate) fn copy_out_raw(
-    ort_api: *const ort::OrtApi,
-    kctx: *mut ort::OrtKernelContext,
-    o: &OutRef,
-    a: mlxsys::mlx_array,
-) -> Result<(), MlxError> {
-    copy_out_raw_delta(ort_api, kctx, o, a, None)
-}
-
-/// As [`copy_out_raw`], but when `delta` is `Some` only the `count` rows at `offset` along
+/// Create the ORT output tensor with the MLX result shape and memcpy on unified memory; when
+/// `delta` is `Some` only the `count` rows at `offset` along `axis` are memcpy'd back (shared-buffer
 /// `axis` are memcpy'd back (shared-buffer KV `present`: the rest of the buffer already holds the
 /// correct `past` rows because `present` aliases `past` in ORT memory). The ORT output tensor is
 /// still created at the MLX array's FULL shape so ORT sees the whole `[B,kv,cap,hd]` present.

@@ -48,7 +48,8 @@ jobs:
       - name: Build the Rust EP (cargo)
         run: |
           cd rust
-          ORT_INCLUDE_DIR="$ORT_HOME/include" cargo build --release
+          # -D warnings: the tree is warning-clean; fail CI on any new dead-code / unused drift.
+          ORT_INCLUDE_DIR="$ORT_HOME/include" RUSTFLAGS="-D warnings" cargo build --release
           test -f target/release/libonnxruntime_mlx_ep.dylib
 
       - name: Op-correctness tests (pytest, MLX vs ORT CPU)
