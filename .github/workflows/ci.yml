@@ -58,6 +58,23 @@ jobs:
           export DYLD_LIBRARY_PATH="$ORT_HOME/lib"
           python -m pytest tests/ops -q
 
+      - name: Leak check (macOS `leaks` — RAII teardown gate)
+        # `leaks --atExit -- <cmd>` runs a stress loop of many independent EP sessions and inspects
+        # the heap at process exit, returning non-zero if ANY block leaked. MallocStackLogging=1
+        # attaches allocation stacks so a regression names the exact site. This gates the RAII
+        # teardown promise (0 leaks / 0 bytes) that motivates the rewrite — it once caught a real
+        # per-session mlx_stream leak. Gating (not informational): a new leak fails the build.
+        run: |
+          set -euo pipefail
+          export ONNXRUNTIME_MLX_EP_LIB="$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib"
+          export DYLD_LIBRARY_PATH="$ORT_HOME/lib"
+          export STRESS_ITERS=100
+          for s in stress_add stress_norm_attn stress_wave2; do
+            echo "::group::leaks $s"
+            MallocStackLogging=1 leaks --atExit -- python "rust/$s.py"
+            echo "::endgroup::"
+          done
+
       - name: ONNX backend node tests (informational — MLX EP vs ONNX reference)
         # Runs ONNX's own curated per-node tests through the MLX EP. `--forked` isolates each
         # case (a bad case can't take down the suite). NON-BLOCKING for now: a known residual set

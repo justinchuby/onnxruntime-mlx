@@ -36,10 +36,12 @@ against ORT's CPU EP, tolerance-gated).
 
 - **Correctness:** `test_binary_fp32[Add]` passes (MLX output == ORT CPU).
 - **Memory safety:** 500 back-to-back sessions under macOS `leaks` →
-  **0 leaks / 0 bytes**. The spike caught a real per-session `mlx_stream` leak
-  (499 leaks / 15968 bytes) that a 3-line `impl Drop for MlxEp` fixed — the
-  exact RAII win that motivates the rewrite (the C++ EP has hit this class of
-  bug repeatedly: teardown UAF, the MRR MTLBuffer leak, manual `ctx.Keep`).
+  **0 leaks / 0 bytes**, now enforced on every CI run (the `Leak check` gate runs
+  three multi-op stress loops under `leaks --atExit`). The spike caught a real
+  per-session `mlx_stream` leak (499 leaks / 15968 bytes) that a 3-line
+  `impl Drop for MlxEp` fixed — the exact RAII win that motivates the rewrite (the
+  C++ EP has hit this class of bug repeatedly: teardown UAF, the MRR MTLBuffer
+  leak, manual `ctx.Keep`).
 
 ## Build & run
 
