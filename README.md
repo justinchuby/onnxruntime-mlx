@@ -106,6 +106,20 @@ The EP is a **prefill / TTFT accelerator**: MLX prefill runs **1.85–2.77× fas
 `accuracy_level=4` int8 path is very fast, so decode stays competitive-to-CPU-favored there; the MLX
 decode edge widens on larger models. Unclaimed ops fall back to ORT CPU, so any graph still runs.
 
+## Concurrency
+
+MLX evaluation is **thread-affine** — a given `InferenceSession`'s MLX work must run on the thread
+that first drove it. The rule is simple:
+
+> **Use one `InferenceSession` per thread.** Do not call `Run()` on a single shared session from
+> multiple threads.
+
+Session-per-thread scales cleanly (each thread creates and runs its own session). If you *do* call a
+shared session from another thread, the EP detects it and returns a clean `EP_FAIL` — ORT then
+transparently falls back to the CPU EP for that call, so you get a correct result instead of a crash.
+Internally, each session's compiled-graph cache is mutex-guarded, so there is no data race even under
+misuse.
+
 ## Layout
 
 ```

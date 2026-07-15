@@ -1239,7 +1239,16 @@ struct SubgraphComputeInfo {
     base: ort::OrtNodeComputeInfo,
     ort_api: *const ort::OrtApi,
     stream: mlx::mlx_stream,
-    plan: Plan,
+    // ORT permits concurrent Run() on one InferenceSession, and CreateState hands every Run the
+    // SAME SubgraphComputeInfo. `plan` is mutated by Compute (the compiled-closure cache is filled
+    // on cache-MISS; the eager translator writes intermediates), so it must be serialized to avoid
+    // mutable aliasing / a data race. MLX drives a single default stream, so this node is serial
+    // regardless — one session per thread remains the path to real cross-request parallelism.
+    plan: std::sync::Mutex<Plan>,
+    // First thread to run Compute "owns" this session's MLX stream. MLX 0.6.0 eval is thread-affine:
+    // a foreign-thread eval aborts the HOST process. We detect a cross-thread Run here and return a
+    // clean OrtStatus instead of letting MLX take the process down. Concurrency = session-per-thread.
+    owner_thread: std::sync::Mutex<Option<std::thread::ThreadId>>,
 }
 
 impl SubgraphComputeInfo {
@@ -1257,7 +1266,8 @@ impl SubgraphComputeInfo {
             base,
             ort_api,
             stream,
-            plan,
+            plan: std::sync::Mutex::new(plan),
+            owner_thread: std::sync::Mutex::new(None),
         })
     }
 }
@@ -1281,10 +1291,40 @@ unsafe extern "C" fn compute(
     kctx: *mut ort::OrtKernelContext,
 ) -> *mut ort::OrtStatus {
     unsafe {
-        let info = &mut *(state as *mut SubgraphComputeInfo);
+        let info = &*(state as *const SubgraphComputeInfo);
         let api = &*info.ort_api;
 
-        let node_count = info.plan.nodes.len();
+        // Thread-affinity guard: MLX 0.6.0 eval is bound to the thread that first drove this
+        // session's stream. A Run from any other thread would abort the host process inside MLX, so
+        // bind the owner on first Compute and reject a cross-thread Run with a clean OrtStatus.
+        let cur_thread = std::thread::current().id();
+        {
+            let mut owner = info.owner_thread.lock().unwrap_or_else(|e| e.into_inner());
+            match *owner {
+                None => *owner = Some(cur_thread),
+                Some(t) if t == cur_thread => {}
+                Some(t) => {
+                    let msg = format!(
+                        "onnxruntime-mlx: this InferenceSession first ran on thread {t:?} but Run() \
+                         was called from {cur_thread:?}. MLX eval is thread-affine — use one \
+                         InferenceSession per thread for concurrent inference."
+                    );
+                    let c = CString::new(msg).unwrap_or_else(|_| {
+                        CString::new("onnxruntime-mlx: cross-thread Run() is not supported").unwrap()
+                    });
+                    return (api.CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, c.as_ptr());
+                }
+            }
+        }
+
+        // Serialize per-subgraph state: ORT allows concurrent Run() on one session, but the
+        // compiled-closure cache (plan.compiled/prefill/general) is mutated on cache-MISS and the
+        // eager translator writes intermediates into `plan` — concurrent Compute on the same node
+        // must not alias it. `plan_ptr` stays valid for the whole call while the guard is held.
+        let mut plan_guard = info.plan.lock().unwrap_or_else(|e| e.into_inner());
+        let plan_ptr: *mut Plan = &mut *plan_guard;
+
+        let node_count = (*plan_ptr).nodes.len();
         let tr = crate::trace::tracer();
         tr.note_thread("mlx.ep.compute");
         let _region = tr.subgraph_region(node_count);
@@ -1293,12 +1333,11 @@ unsafe extern "C" fn compute(
         // Compiled-decode fast path: handle single-token (S==1) decode via the once-compiled
         // shapeless closure; prefill (S>1) is handled by the shape-keyed prefill path below, and
         // ineligible plans fall through to the eager translator.
-        let plan_ptr: *mut Plan = &mut info.plan;
-        let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &info.plan);
-        if info.plan.compiled.enabled && seq_len == Some(1) {
+        let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &*plan_ptr);
+        if (*plan_ptr).compiled.enabled && seq_len == Some(1) {
             // Cache state: replay (HIT) if the shapeless closure is already compiled, else first
             // trace+compile (MISS). Decode is shapeless, so it never retraces (empty shape key).
-            let pre_valid = info.plan.compiled.valid;
+            let pre_valid = (*plan_ptr).compiled.valid;
             match crate::compiled::try_compiled(plan_ptr, Slot::Decode, info.ort_api, kctx, info.stream) {
                 Ok(true) => {
                     let cache = if pre_valid { crate::trace::CacheState::Hit } else { crate::trace::CacheState::Miss };
@@ -1318,8 +1357,8 @@ unsafe extern "C" fn compute(
         // length S>1. `S` bakes into the trace (causal-mask extent, KV write width), so this uses the
         // unified core in SHAPE-KEYED mode — it retraces per distinct prompt length and replays the
         // fused closure for repeats. Declines (=> eager) for any non-decoder / partial-rotary shape.
-        if info.plan.prefill.enabled && matches!(seq_len, Some(s) if s > 1) {
-            let pre_valid = info.plan.prefill.valid;
+        if (*plan_ptr).prefill.enabled && matches!(seq_len, Some(s) if s > 1) {
+            let pre_valid = (*plan_ptr).prefill.valid;
             match crate::compiled::try_compiled(plan_ptr, Slot::Prefill, info.ort_api, kctx, info.stream) {
                 Ok(true) => {
                     // Shape-keyed on the query length S: a changed key means MLX retraced under us.
@@ -1340,8 +1379,8 @@ unsafe extern "C" fn compute(
         // General compiled fast path: trace + fuse ANY claimed static-shape subgraph (CNN / audio)
         // into a shape-keyed compiled closure and replay it. Declines (=> eager) for attention /
         // control-flow subgraphs and on any trace/apply doubt.
-        if info.plan.general.enabled {
-            let pre_valid = info.plan.general.valid;
+        if (*plan_ptr).general.enabled {
+            let pre_valid = (*plan_ptr).general.valid;
             match crate::compiled::try_compiled(
                 plan_ptr,
                 Slot::General,
@@ -1366,7 +1405,7 @@ unsafe extern "C" fn compute(
             }
         }
 
-        let mut tctx = TranslationContext::new(&mut info.plan, info.ort_api, kctx, info.stream);
+        let mut tctx = TranslationContext::new(&mut *plan_ptr, info.ort_api, kctx, info.stream);
         match tctx.execute() {
             Ok(()) => {
                 tr.record_compute_path(crate::trace::ComputePath::Eager, crate::trace::CacheState::Na, "", node_count);
