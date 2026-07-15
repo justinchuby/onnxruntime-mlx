@@ -593,6 +593,8 @@ unsafe fn build_plan(
         let has_control_flow = any_control_flow(&nodes);
         let mut plan = Plan::new(nodes);
         plan.compiled.enabled = crate::compiled::compile_enabled(has_control_flow);
+        plan.general.enabled =
+            crate::compiled_general::general_enabled(has_control_flow, &plan.nodes);
         Ok(plan)
     }
 }
@@ -1245,6 +1247,31 @@ unsafe extern "C" fn compute(
                 Err(msg) => {
                     let c = CString::new(format!("MLX compiled decode failed: {msg}"))
                         .unwrap_or_else(|_| CString::new("MLX compiled decode failed").unwrap());
+                    return (api.CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, c.as_ptr());
+                }
+            }
+        }
+
+        // General compiled fast path: trace + fuse ANY claimed static-shape subgraph (CNN / audio)
+        // into a shape-keyed compiled closure and replay it. Declines (=> eager) for attention /
+        // control-flow subgraphs and on any trace/apply doubt.
+        if info.plan.general.enabled {
+            match crate::compiled_general::try_compiled_general(
+                plan_ptr,
+                info.ort_api,
+                kctx,
+                info.stream,
+            ) {
+                Ok(true) => {
+                    eprintln!(
+                        "[rust-mlx-ep] Compute: subgraph run via mlx-c COMPILED general ({node_count} node(s))"
+                    );
+                    return ptr::null_mut();
+                }
+                Ok(false) => { /* not eligible — fall back to eager below */ }
+                Err(msg) => {
+                    let c = CString::new(format!("MLX compiled general failed: {msg}"))
+                        .unwrap_or_else(|_| CString::new("MLX compiled general failed").unwrap());
                     return (api.CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, c.as_ptr());
                 }
             }

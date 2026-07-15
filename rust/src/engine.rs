@@ -254,6 +254,47 @@ impl CompiledDecode {
     }
 }
 
+/// General-subgraph compiled fast path state (Phase 2). Unlike [`CompiledDecode`] (which is
+/// shapeless and decode/RoPE/KV-specialised), this traces ANY claimed static-shape subgraph into an
+/// `mlx_closure` over its dynamic ctx inputs and compiles it with `mlx_compile` (shape-keyed, so a
+/// changed input shape safely retraces). The fused closure turns the ~N per-call unfused primitive
+/// dispatches (dominant cost for CNN / audio graphs) into far fewer fused kernels. Any doubt at
+/// build or apply time flips `valid` off and the caller falls back to the eager translator.
+pub struct GeneralCompiled {
+    /// Fast path allowed for this plan (no control-flow, no attention/KV-alias op, kill-switch off).
+    pub enabled: bool,
+    /// Have we tried to build the compiled closure yet? (one-shot; failure => eager forever).
+    pub attempted: bool,
+    /// Is `closure` usable?
+    pub valid: bool,
+    /// The compiled subgraph closure.
+    pub closure: Option<crate::mlx::Closure>,
+    /// Ordered, de-duplicated dynamic ctx inputs = closure inputs `[0..n)`.
+    pub dyn_inputs: Vec<DynInput>,
+    /// External boundary outputs, in closure append order.
+    pub ext_outputs: Vec<OutRef>,
+    /// Transient MLX handles created during a trace; the compiled graph references them after the
+    /// thunk returns, so they must outlive it (freed once with the plan).
+    pub trace_transient: Vec<Array>,
+    /// Stable payload for the trace thunk (self-referential to the enclosing plan).
+    pub payload: Option<Box<TracePayload>>,
+}
+
+impl GeneralCompiled {
+    fn new() -> Self {
+        GeneralCompiled {
+            enabled: false,
+            attempted: false,
+            valid: false,
+            closure: None,
+            dyn_inputs: Vec::new(),
+            ext_outputs: Vec::new(),
+            trace_transient: Vec::new(),
+            payload: None,
+        }
+    }
+}
+
 /// Persistent per-subgraph MLX state: the topo-ordered nodes plus the persistent cache of
 /// wrapped/repacked constant arrays (keyed by name, reused across runs — freed with the plan).
 pub struct Plan {
@@ -261,6 +302,8 @@ pub struct Plan {
     pub cache: HashMap<String, Array>,
     /// Compiled-decode fast-path state (see [`CompiledDecode`]).
     pub compiled: CompiledDecode,
+    /// General-subgraph compiled fast-path state (see [`GeneralCompiled`]).
+    pub general: GeneralCompiled,
 }
 
 impl Plan {
@@ -269,6 +312,7 @@ impl Plan {
             nodes,
             cache: HashMap::new(),
             compiled: CompiledDecode::new(),
+            general: GeneralCompiled::new(),
         }
     }
 }
@@ -382,6 +426,11 @@ pub struct TranslationContext<'a> {
     /// rows at `offset` need copying back (the rest already alias correct `past` rows). Empty on the
     /// growing path so its copy-out stays a full, bit-for-bit-unchanged memcpy.
     kv_deltas: HashMap<String, DeltaWrite>,
+    /// True while translating inside the GENERAL compiled-subgraph closure trace. In this mode the
+    /// dynamic inputs are shapeless tracer placeholders with no host data, so any mid-graph host eval
+    /// (`contiguous_eval` — the host-computed Det/NonZero/Unique ops) is illegal and must fail the
+    /// trace cleanly so the caller falls back to the eager translator instead of eval-ing a tracer.
+    in_general_trace: bool,
 }
 
 impl<'a> TranslationContext<'a> {
@@ -403,6 +452,7 @@ impl<'a> TranslationContext<'a> {
             rope_dynamic: false,
             shared_kv: false,
             kv_deltas: HashMap::new(),
+            in_general_trace: false,
         }
     }
 
@@ -946,6 +996,13 @@ impl<'a> TranslationContext<'a> {
     /// read its host bytes mid-graph (the host-computed ops: Det / NonZero / Unique). The kept handle
     /// stays alive for the rest of the run.
     pub fn contiguous_eval(&mut self, a: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+        if self.in_general_trace {
+            // A host-computed op (Det/NonZero/Unique) needs the input's DATA, but in a general
+            // compiled trace the inputs are shapeless tracer placeholders with no data. Fail the
+            // trace so `try_compiled_general` falls back to the eager translator (which evals real
+            // data). Never eval a tracer here — that would abort inside MLX.
+            return Err("MLX: host eval not permitted in general compiled trace".to_string());
+        }
         let r = self.contiguous(a)?;
         let mut v = VectorArray::new();
         v.append(r);
@@ -1130,6 +1187,11 @@ impl<'a> TranslationContext<'a> {
         tc
     }
 
+    /// Mark this context as a GENERAL compiled-subgraph trace (see [`Self::in_general_trace`]).
+    pub(crate) fn set_general_trace(&mut self) {
+        self.in_general_trace = true;
+    }
+
     /// Seed an env binding (the compiled-closure placeholders: dynamic ctx inputs + pre-sliced RoPE
     /// rows). `raw` is a borrowed handle owned by the trace arena.
     pub(crate) fn seed(&mut self, name: String, raw: mlxsys::mlx_array) {
@@ -1172,6 +1234,37 @@ impl<'a> TranslationContext<'a> {
                 .env_get(&o.name)
                 .ok_or_else(|| format!("MLX: compiled trace missing output {}", o.name))?;
             let casted = self.astype(a, mlx_dtype_from_onnx(o.otype))?;
+            res.append(casted);
+        }
+        Ok(res)
+    }
+
+    /// Translate every node into MLX ops (no eval) and return the cast + contiguous external
+    /// boundary outputs — the body of the GENERAL compiled subgraph closure (any static-shape fused
+    /// subgraph, not just decode). Like [`Self::run_trace`] but not RoPE-specialised: it materialises
+    /// each boundary output to row-major contiguous (mirroring [`Self::finish_boundary`]) so the
+    /// per-call copy-out is a straight typed memcpy.
+    pub(crate) fn run_trace_general(
+        &mut self,
+        ext_outputs: &[OutRef],
+    ) -> Result<VectorArray, MlxError> {
+        let nodes = std::mem::take(&mut self.plan.nodes);
+        let mut result = Ok(());
+        for node in &nodes {
+            if let Err(e) = crate::registry::translate(self, node) {
+                result = Err(e);
+                break;
+            }
+        }
+        self.plan.nodes = nodes;
+        result?;
+        let mut res = VectorArray::new();
+        for o in ext_outputs {
+            let a = self
+                .env_get(&o.name)
+                .ok_or_else(|| format!("MLX: compiled trace missing output {}", o.name))?;
+            let casted = self.astype(a, mlx_dtype_from_onnx(o.otype))?;
+            let casted = self.contiguous(casted)?;
             res.append(casted);
         }
         Ok(res)
