@@ -127,15 +127,20 @@ unsafe extern "C" fn get_capability(
         // GetCapability BEFORE the parent graph that owns the node. If this graph is the body of a
         // control-flow node we can translate WHOLE, decline ALL body nodes here (so ORT leaves the body
         // intact); we then claim the CF node itself at the parent level and translate its body in Compile
-        // via Node_GetSubgraphs. If the parent is a CF op we cannot translate, fall through to normal
-        // claiming so the body ops still run on MLX. Mirrors the C++ GetCapability CF path.
-        let mut in_translatable_cf_body = false;
+        // via Node_GetSubgraphs.
+        //
+        // If the parent CF op is one we CANNOT translate wholesale, we must ALSO decline every body node:
+        // ORT would otherwise fuse the claimed body nodes into a node in the EP's private domain and
+        // splice it back into the subgraph, but nested subgraphs carry no opset import for that domain,
+        // yielding an INVALID_GRAPH ("No opset import for domain 'MLXExecutionProvider'") at session
+        // creation (e.g. the Loop that function-inlined SequenceMap expands to). Such body ops simply
+        // run on ORT's CPU control flow instead.
+        let mut in_cf_body = false;
         if let Some(get_parent) = api.Graph_GetParentNode {
             let mut parent: *const ort::OrtNode = ptr::null();
             let st = get_parent(graph, &mut parent);
             if st.is_null() && !parent.is_null() {
-                let pview = NodeView::new(ep.ort_api, parent);
-                in_translatable_cf_body = claimable(&pview);
+                in_cf_body = true;
             } else if !st.is_null() {
                 release_status(api, st);
             }
@@ -145,7 +150,7 @@ unsafe extern "C" fn get_capability(
         let supported: Vec<bool> = nodes
             .iter()
             .map(|&node| {
-                if in_translatable_cf_body {
+                if in_cf_body {
                     return false;
                 }
                 let view = NodeView::new(ep.ort_api, node);
