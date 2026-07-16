@@ -111,22 +111,27 @@ identical and max abs diff ≤ 6e-5 in every case:
 | Perch v2 | audio encoder (with DFT front-end) | 64.0 ms | 12.0 ms | **5.3×** |
 | Perch v2 (no DFT) | audio encoder | 56.5 ms | 12.0 ms | **4.7×** |
 | BirdNET | audio classifier (CNN) | 14.9 ms | 7.3 ms | **2.0×** |
+| gemma-4-E2B | vision encoder (fp16 ViT) | 267 ms | 47 ms | **5.7×** |
 
 Feed-forward encoders (audio / CNN / vision) are the EP's sweet spot: the whole graph fuses into a
 single MLX closure that is traced + `mlx_compile`d once and replayed, so a static-shape model runs
 end-to-end on the GPU with one dispatch (e.g. Perch: 725/725 nodes claimed, 1 fused subgraph).
 
-For **LLMs**, the EP is primarily a **prefill / TTFT accelerator**. Qwen2.5-0.5B, same machine, warm:
+For **LLMs**, the EP accelerates both prefill / TTFT and — on larger quantized decoders — decode.
+Qwen2.5-0.5B, same machine, warm:
 
 | Phase | CPU EP | MLX EP | Result |
 |---|---:|---:|---|
 | Prefill / TTFT (~280-token prompt) | 294 ms | 74 ms | **MLX 4.0× faster** |
 | Decode (per-token throughput) | 211 tok/s | 105 tok/s | CPU-favored on this small model |
 
-The prefill lead grows with prompt length. Decode is weight-bandwidth-bound: on a small 0.5B model the
-CPU `accuracy_level=4` int8 MatMulNBits path is very fast and wins per-token, so today MLX is the
-clear choice for prompt-heavy / TTFT-sensitive workloads (decode on larger models not yet benchmarked
-here).
+The prefill lead grows with prompt length. On a small 0.5B model decode is weight-bandwidth-bound and
+the CPU `accuracy_level=4` int8 MatMulNBits path wins per-token — but on a larger **q4f16** decoder the
+MLX path pulls ahead: the **gemma-4-E2B** decoder (Gemma3n, 15 layers, int4 weights + fp16 activations)
+runs a decode step (1 token, 64 past) in **33 ms vs 111 ms on CPU — 3.3×** once its fp16 MatMulNBits,
+`num_heads`-inferred RotaryEmbedding, and 11-input GroupQueryAttention (external rotary +
+attention_bias) all run on MLX.
+
 
 Any op the EP doesn't claim falls back to the ORT CPU EP, so **every** graph still runs correctly —
 the EP is a safe drop-in. The audio numbers above are the public Hugging Face Perch v2 / BirdNET ONNX
