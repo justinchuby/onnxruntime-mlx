@@ -1,0 +1,103 @@
+name: Bench
+
+# Perf-regression guard for op changes: builds the PR and the base (main) EP dylibs
+# on the SAME Apple-silicon runner, benchmarks both with the PR's harness, and posts a
+# sticky PR comment with the per-op median-time delta. Informational (never gates) —
+# shared-runner timings are noisy, so it flags direction, not absolutes.
+on:
+  pull_request:
+    paths:
+      # Anything that can change what/how an op is claimed or translated.
+      - "rust/src/**"
+      - "rust/build.rs"
+      - "rust/Cargo.toml"
+      - "rust/Cargo.lock"
+      - "bench/**"
+      - "tests/ops/_models.py"
+      - ".github/workflows/bench.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  bench:
+    name: Op benchmark (macOS arm64)
+    runs-on: macos-14
+    env:
+      ORT_VERSION: "1.27.0"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0 # need the base commit to build the comparison dylib
+
+      - name: Install mlx-c (hard dependency)
+        run: brew install mlx-c
+
+      - name: Install Rust toolchain (rustup — no third-party action, supply-chain hardening)
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Provision ONNX Runtime ${{ env.ORT_VERSION }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz" \
+            | tar xz
+          echo "ORT_HOME=$PWD/onnxruntime-osx-arm64-${ORT_VERSION}" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Python deps
+        run: python -m pip install --upgrade "onnxruntime==${ORT_VERSION}" numpy onnx onnx_ir
+
+      - name: Build PR EP dylib
+        run: |
+          set -euo pipefail
+          ( cd rust && ORT_INCLUDE_DIR="$ORT_HOME/include" cargo build --release )
+          cp rust/target/release/libonnxruntime_mlx_ep.dylib "$RUNNER_TEMP/pr.dylib"
+
+      - name: Build base (main) EP dylib in a worktree
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
+          ( cd "$RUNNER_TEMP/base/rust" && ORT_INCLUDE_DIR="$ORT_HOME/include" cargo build --release )
+          cp "$RUNNER_TEMP/base/rust/target/release/libonnxruntime_mlx_ep.dylib" "$RUNNER_TEMP/base.dylib"
+
+      - name: Run benchmark (PR harness against both dylibs)
+        run: |
+          set -euo pipefail
+          export DYLD_LIBRARY_PATH="$ORT_HOME/lib"
+          # Same harness + same cases for both builds → the delta is apples-to-apples even if the PR
+          # changed the case set (a new case the base dylib can't claim just shows as a fallback).
+          ONNXRUNTIME_MLX_EP_LIB="$RUNNER_TEMP/base.dylib" python bench/bench.py --out base.json --label "base (main)"
+          ONNXRUNTIME_MLX_EP_LIB="$RUNNER_TEMP/pr.dylib"   python bench/bench.py --out pr.json   --label "PR"
+
+      - name: Build comparison report
+        run: |
+          python bench/compare.py --base base.json --pr pr.json --threshold 10 > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Find our previous sticky comment (keyed on the hidden marker) and edit it in place,
+          # else create a fresh one — keeps the PR to a single, always-current perf comment.
+          CID="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                   --jq '.[] | select(.body | contains("<!-- mlx-ep-bench -->")) | .id' | head -n1 || true)"
+          if [ -n "$CID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$CID" -F body=@comment.md >/dev/null
+            echo "updated comment $CID"
+          else
+            gh pr comment "$PR" --body-file comment.md
+            echo "created new comment"
+          fi
