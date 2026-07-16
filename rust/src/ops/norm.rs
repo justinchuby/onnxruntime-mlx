@@ -446,6 +446,12 @@ fn skip_rms_norm_claim(node: &NodeView) -> bool {
     if !is_mlx_float(x.dtype) || out.dtype != x.dtype {
         return false;
     }
+    // The handler produces only out[0] (normalized) and the optional out[last] (residual sum);
+    // reject if mean (out[1]) or inv-std (out[2]) are requested — mlx_fast_rms_norm doesn't compute
+    // them, so claiming would leave those outputs unbound (mirrors skip_layer_norm_claim).
+    if node.output_present(1) || node.output_present(2) {
+        return false;
+    }
     matches!(tensor_dtype(node, 1), Some(t) if t == x.dtype)
         && matches!(tensor_dtype(node, 2), Some(t) if t == x.dtype)
 }
