@@ -281,3 +281,70 @@ def test_bf16_interior_matches_ref(mode):
         nmode="round_prefer_floor",
     )
     m.assert_matches_ref(model, {"x": data}, [ref], rtol=1e-2, atol=1e-2)
+
+
+# --- dynamic (symbolic) spatial dims --------------------------------------------------------------
+# FPN / super-resolution / GAN exports declare Resize inputs as [N, C, -1, -1] (symbolic H/W) with
+# CONSTANT scales or sizes. The claim accepts dynamic spatial dims; the shape-keyed general path
+# resolves the concrete extent at trace time, so these must run ON MLX (not fall back) and match CPU.
+# (Runtime/data-dependent sizes — e.g. FCN's Shape-derived sizes — stay on CPU and aren't covered.)
+
+
+def _dyn_resize(dt, channels: int, *, scales=None, sizes=None, mode: str, ctm: str) -> bytes:
+    ir_dt = _IR_OF[np.dtype(dt)]
+    dims: list[int | str] = [1, channels, "H", "W"]
+    x = ir.Value(name="x", type=ir.TensorType(ir_dt), shape=ir.Shape(dims))
+    inputs = [x, initz("", np.array([], np.float32))]
+    inits = []
+    if scales is not None:
+        inputs.append(initz("scales", scales))
+        inits.append(initz("scales", scales))
+    else:
+        inputs.append(initz("", np.array([], np.float32)))
+        inputs.append(initz("sizes", sizes))
+        inits.append(initz("sizes", sizes))
+    out = ir.Value(
+        name="o", type=ir.TensorType(ir_dt), shape=ir.Shape([1, channels, "OH", "OW"])
+    )
+    node = ir.Node(
+        "",
+        "Resize",
+        inputs,
+        attributes=[ir.AttrString("mode", mode), ir.AttrString("coordinate_transformation_mode", ctm)],
+        outputs=[out],
+    )
+    graph = ir.Graph([x], [out], nodes=[node], initializers=inits, opset_imports={"": 19}, name="mlx_Resize_dyn")
+    return ir.to_proto(ir.Model(graph, ir_version=10)).SerializeToString()
+
+
+def _assert_resize_claimed(model: bytes, feeds, tol, capfd, monkeypatch) -> None:
+    monkeypatch.setenv("MLX_EP_CLAIM_DEBUG", "1")
+    m.assert_matches_cpu(model, feeds, **tol)
+    err = capfd.readouterr().err
+    for line in err.splitlines():
+        if "unclaimed" in line:
+            assert "unclaimed Resize " not in line, f"Resize declined with dynamic spatial: {line}"
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float16], ids=["fp32", "fp16"])
+@pytest.mark.parametrize(
+    "mode,ctm", [("nearest", "asymmetric"), ("linear", "pytorch_half_pixel")], ids=["nearest", "linear"]
+)
+def test_resize_dynamic_spatial_scales(dtype, mode, ctm, capfd, monkeypatch) -> None:
+    # constant 2x spatial scales, dynamic H/W input
+    scales = np.array([1, 1, 2, 2], np.float32)
+    model = _dyn_resize(dtype, 3, scales=scales, mode=mode, ctm=ctm)
+    x = np.random.default_rng(1).random((1, 3, 7, 5)).astype(dtype)
+    _assert_resize_claimed(model, {"x": x}, _TOL[np.dtype(dtype)], capfd, monkeypatch)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float16], ids=["fp32", "fp16"])
+@pytest.mark.parametrize(
+    "mode,ctm", [("nearest", "asymmetric"), ("linear", "pytorch_half_pixel")], ids=["nearest", "linear"]
+)
+def test_resize_dynamic_spatial_sizes(dtype, mode, ctm, capfd, monkeypatch) -> None:
+    # constant target sizes, dynamic H/W input
+    sizes = np.array([1, 3, 10, 12], np.int64)
+    model = _dyn_resize(dtype, 3, sizes=sizes, mode=mode, ctm=ctm)
+    x = np.random.default_rng(2).random((1, 3, 7, 5)).astype(dtype)
+    _assert_resize_claimed(model, {"x": x}, _TOL[np.dtype(dtype)], capfd, monkeypatch)

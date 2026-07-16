@@ -1026,16 +1026,15 @@ fn resize_claim(node: &NodeView) -> bool {
         (Some(input), Some(output)) => (input, output),
         _ => return false,
     };
+    let rank = input.shape.len();
+    // Spatial dims MAY be dynamic (<=0): the concrete input size is resolved at trace time from
+    // `ctx.shape_of`, so we only require the resize TARGET to be statically determinable (constant
+    // `scales`/`sizes`) and the batch/channel dims to be untouched. Rank must be known and match.
     if !is_mlx_float(input.dtype)
         || output.dtype != input.dtype
-        || input.shape.is_empty()
-        || input.shape.len() > 4
-        || input.shape.len() != output.shape.len()
-        || input
-            .shape
-            .iter()
-            .chain(output.shape.iter())
-            .any(|&d| d < 1)
+        || rank == 0
+        || rank > 4
+        || output.shape.len() != rank
     {
         return false;
     }
@@ -1072,33 +1071,51 @@ fn resize_claim(node: &NodeView) -> bool {
     if has_scales == has_sizes {
         return false;
     }
-    let computed = if has_sizes {
-        match node.read_const_int64(3) {
-            Some(sizes) if sizes.len() == input.shape.len() => sizes,
+    // For rank>=3 the batch/channel axes (0,1) must NOT be resized — MLX resize here is
+    // spatial-only, and a batch/channel target can't be verified against a dynamic input dim.
+    let bc = if rank >= 3 { 2 } else { 0 };
+    if has_sizes {
+        // Constant `sizes` give the exact (static) output extents directly.
+        let sizes = match node.read_const_int64(3) {
+            Some(s) if s.len() == rank && s.iter().all(|&v| v >= 1) => s,
             _ => return false,
-        }
-    } else {
-        match node.read_const_f32(2) {
-            Some(scales)
-                if scales.len() == input.shape.len() && scales.iter().all(|&s| s > 0.0) =>
-            {
-                scales
-                    .iter()
-                    .zip(input.shape.iter())
-                    .map(|(&scale, &size)| (scale as f64 * size as f64).floor() as i64)
-                    .collect()
+        };
+        for ax in 0..bc {
+            // Batch/channel: input dim must be static and unchanged.
+            if input.shape[ax] <= 0 || sizes[ax] != input.shape[ax] {
+                return false;
             }
-            _ => return false,
         }
-    };
-    if computed
-        .iter()
-        .zip(output.shape.iter())
-        .any(|(&a, &b)| a < 1 || a != b)
-    {
-        return false;
+        for ax in bc..rank {
+            // Where the output spatial dim is statically known, it must equal the requested size.
+            if output.shape[ax] > 0 && output.shape[ax] != sizes[ax] {
+                return false;
+            }
+        }
+        true
+    } else {
+        // Constant `scales`: the concrete output is `floor(scale * input)` computed at trace time.
+        let scales = match node.read_const_f32(2) {
+            Some(s) if s.len() == rank && s.iter().all(|&v| v > 0.0) => s,
+            _ => return false,
+        };
+        for ax in 0..bc {
+            // Batch/channel scale must be exactly 1 (no resize).
+            if (scales[ax] - 1.0).abs() > f32::EPSILON {
+                return false;
+            }
+        }
+        for ax in bc..rank {
+            // Where both input and output spatial dims are static, verify the computed extent.
+            if input.shape[ax] > 0 && output.shape[ax] > 0 {
+                let computed = (scales[ax] as f64 * input.shape[ax] as f64).floor() as i64;
+                if computed != output.shape[ax] {
+                    return false;
+                }
+            }
+        }
+        true
     }
-    input.shape.len() < 3 || (computed[0] == input.shape[0] && computed[1] == input.shape[1])
 }
 
 fn where_claim(node: &NodeView) -> bool {

@@ -411,9 +411,12 @@ def _assert_dynamic_on_mlx(model: bytes, feeds, op_type: str, tol, capfd, monkey
     monkeypatch.setenv("MLX_EP_CLAIM_DEBUG", "1")
     m.assert_matches_cpu(model, feeds, **tol)
     err = capfd.readouterr().err
+    # MLX_EP_CLAIM_DEBUG prints one line per declined op-type: "... unclaimed <Op> xN (<reason>): [...]".
     for line in err.splitlines():
-        if "unclaimed op types" in line:
-            assert op_type not in line, f"{op_type} was declined with dynamic spatial: {line}"
+        if "unclaimed" in line:
+            assert f"unclaimed {op_type} " not in line, (
+                f"{op_type} was declined with dynamic spatial: {line}"
+            )
 
 
 DYN_CONV_CASES = [
