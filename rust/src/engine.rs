@@ -966,13 +966,15 @@ impl<'a> TranslationContext<'a> {
     }
 
     /// Softmax over the last axis (precise), used by the Softmax handler.
-    pub fn softmax_last_axis(
+    /// Softmax over a single (already-normalized, or negative) axis via `mlx_softmax_axis`.
+    pub fn softmax_axis(
         &mut self,
         a: mlxsys::mlx_array,
+        axis: i32,
     ) -> Result<mlxsys::mlx_array, MlxError> {
         let mut res = Array::new();
         let mut raw = res.as_raw();
-        let rc = unsafe { mlxsys::mlx_softmax_axis(&mut raw, a, -1, true, self.stream) };
+        let rc = unsafe { mlxsys::mlx_softmax_axis(&mut raw, a, axis, true, self.stream) };
         res = Array::from_raw(raw);
         if rc != 0 {
             return Err("mlx_softmax_axis failed".to_string());

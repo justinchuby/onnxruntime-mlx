@@ -45,7 +45,12 @@ fn sigmoid_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError
 
 fn softmax_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
-    let r = ctx.softmax_last_axis(x)?;
+    // ONNX opset>=13 `axis` = the (per-axis) softmax axis; negative counts from the end. The claim
+    // only accepts non-last axes for opset>=13, so the simple per-axis meaning always applies here.
+    let rank = ctx.ndim(x) as i64;
+    let axis_attr = n.ints.get("axis").copied().unwrap_or(-1);
+    let axis = if axis_attr < 0 { axis_attr + rank } else { axis_attr } as i32;
+    let r = ctx.softmax_axis(x, axis)?;
     ctx.bind(&n.outputs[0], r);
     Ok(())
 }
@@ -257,8 +262,18 @@ fn softmax_claim(node: &NodeView) -> bool {
         return false;
     }
     let rank = i.shape.len() as i64;
+    if rank == 0 {
+        return false;
+    }
     let axis = node.int_attr("axis", -1);
-    rank > 0 && (axis == -1 || axis == rank - 1)
+    let norm = if axis < 0 { axis + rank } else { axis };
+    if norm < 0 || norm >= rank {
+        return false;
+    }
+    // Last-axis softmax is correct for every opset. A non-last axis only carries the simple
+    // per-axis meaning from opset 13 onward; before that `axis` coerces the tensor to 2D (softmax
+    // over ALL trailing axes), which we don't implement — leave those to CPU.
+    norm == rank - 1 || node.since_version() >= 13
 }
 
 /// Cast conversions MLX's `mlx_astype` produces bit-identically to ORT CPU:

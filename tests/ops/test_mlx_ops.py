@@ -74,7 +74,21 @@ def test_softmax_fp32() -> None:
     m.assert_matches_cpu(model, {"x": x}, rtol=2e-3, atol=2e-3)
 
 
-# --- Cast ---------------------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "shape,axis",
+    [((2, 3, 4), 1), ((1, 16, 4, 8400 // 100), 1), ((2, 5, 6), 0), ((2, 3, 4), -2)],
+    ids=["3d-axis1", "dfl-like-axis1", "axis0", "neg-axis"],
+)
+def test_softmax_nonlast_axis(shape, axis) -> None:
+    # opset>=13 per-axis softmax over a non-last axis (e.g. YOLOv8's DFL head uses axis=1).
+    x = np.random.default_rng(2).standard_normal(shape).astype(np.float32)
+    model = m.make_model(
+        "Softmax",
+        [m.tensor("x", DT.FLOAT, list(shape))],
+        [m.tensor("out", DT.FLOAT, list(shape))],
+        attributes={"axis": axis},
+    )
+    m.assert_matches_cpu(model, {"x": x}, rtol=2e-3, atol=2e-3)
 @pytest.mark.parametrize(
     "src,dst,x",
     [
