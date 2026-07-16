@@ -25,11 +25,7 @@ jobs:
           rustc --version && cargo --version
 
       # The EP crate depends on the pure-Rust `onnx-runtime-tracer` (observability
-      # only) at ../../onnx-genai/crates/onnx-runtime-tracer — a sibling of the repo
-      # root. Clone it so cargo can resolve the path dependency (public repo).
-      - name: Provide onnx-genai sibling (pure-Rust tracer dependency)
-        run: git clone --depth 1 https://github.com/justinchuby/onnx-genai ../onnx-genai
-
+      # only) — resolved from crates.io, no sibling checkout needed.
       - name: Provision ONNX Runtime ${{ env.ORT_VERSION }}
         run: |
           set -euo pipefail
@@ -109,9 +105,6 @@ jobs:
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
           rustc --version && cargo --version
-
-      - name: Provide onnx-genai sibling (pure-Rust tracer dependency)
-        run: git clone --depth 1 https://github.com/justinchuby/onnx-genai ../onnx-genai
 
       - name: Provision ONNX Runtime ${{ env.ORT_VERSION }}
         run: |

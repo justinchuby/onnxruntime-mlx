@@ -39,9 +39,6 @@ jobs:
           rustup default stable
           rustc --version && cargo --version
 
-      - name: Provide onnx-genai sibling (pure-Rust tracer dependency)
-        run: git clone --depth 1 https://github.com/justinchuby/onnx-genai ../onnx-genai
-
       - name: Provision ONNX Runtime ${{ env.ORT_VERSION }}
         run: |
           set -euo pipefail

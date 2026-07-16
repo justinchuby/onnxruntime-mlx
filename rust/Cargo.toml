@@ -20,13 +20,9 @@ name = "onnxruntime_mlx_ep"
 crate-type = ["cdylib"]
 
 [dependencies]
-# Pure-Rust Chrome/Perfetto tracer. `default-features = false` drops the
-# `perfetto` (prost) feature — we export Chrome Trace JSON only. Kept as a `path`
-# dependency for local dev (sibling onnx-genai checkout) with a matching
-# `version` so `cargo publish` resolves it from crates.io (path is stripped at
-# publish time; publishing onnxruntime-ep-mlx requires this crate to be on
-# crates.io first).
-onnx-runtime-tracer = { path = "../../onnx-genai/crates/onnx-runtime-tracer", version = "0.1.0-dev.2", default-features = false }
+# Pure-Rust Chrome/Perfetto tracer, from crates.io. `default-features = false`
+# drops the `perfetto` (prost) feature — we export Chrome Trace JSON only.
+onnx-runtime-tracer = { version = "0.1.0-dev.2", default-features = false }
 
 [build-dependencies]
 bindgen = "0.72"
