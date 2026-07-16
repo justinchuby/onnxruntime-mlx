@@ -17,7 +17,6 @@ import json
 import os
 
 import numpy as np
-import onnx_ir as ir
 import onnxruntime as ort
 import pytest
 from onnx_ir import DataType as DT
@@ -233,7 +232,7 @@ def _rope_ai_model(
 
 
 def _rope_ms_model(
-    *, B, S, N, hd, max_seq, interleaved, rot_dim, layout, pos_offset
+    *, B, S, N, hd, max_seq, interleaved, rot_dim, layout, pos_offset, infer_heads=False
 ) -> tuple[bytes, dict[str, np.ndarray]]:
     """com.microsoft RotaryEmbedding: [input, position_ids, cos, sin]."""
     rng = np.random.default_rng(abs(hash(("ms", B, S, N, hd, interleaved, rot_dim, layout, pos_offset))) & 0xFFFFFFFF)
@@ -256,7 +255,8 @@ def _rope_ms_model(
         pos_val = m.tensor("pos", DT.INT64, [1])
     attrs = {"interleaved": interleaved}
     if layout != "4d":
-        attrs["num_heads"] = N
+        # num_heads=0 exercises the Gemma3n "infer heads from the cos cache" path.
+        attrs["num_heads"] = 0 if infer_heads else N
     if rot_dim:
         attrs["rotary_embedding_dim"] = rot_dim
     inputs = [
@@ -339,6 +339,27 @@ def test_rotary_embedding_ms(case: tuple) -> None:
     model, feeds = _rope_ms_model(
         B=B, S=S, N=N, hd=hd, max_seq=S + 16, interleaved=interleaved,
         rot_dim=rot_dim, layout=layout, pos_offset=pos_offset,
+    )
+    if not _cpu_can_run(model, feeds):
+        pytest.skip("ORT CPU cannot run this com.microsoft RotaryEmbedding form")
+    check(model, feeds)
+
+# num_heads=0: 3-D input with the head count inferred from the cos cache (Gemma3n decoder form).
+# name, B, S, N, hd, interleaved, pos_offset
+ROPE_MS_INFER_CASES = [
+    ("3d-infer-gather", 1, 6, 8, 32, 0, None),
+    ("3d-infer-interleaved", 1, 6, 8, 32, 1, None),
+    ("3d-infer-kv1head", 1, 5, 1, 32, 0, None),
+    ("3d-infer-offset", 1, 4, 4, 16, 0, 3),
+]
+
+
+@pytest.mark.parametrize("case", ROPE_MS_INFER_CASES, ids=[c[0] for c in ROPE_MS_INFER_CASES])
+def test_rotary_embedding_ms_infer_heads(case: tuple) -> None:
+    name, B, S, N, hd, interleaved, pos_offset = case
+    model, feeds = _rope_ms_model(
+        B=B, S=S, N=N, hd=hd, max_seq=S + 16, interleaved=interleaved,
+        rot_dim=0, layout="3d", pos_offset=pos_offset, infer_heads=True,
     )
     if not _cpu_can_run(model, feeds):
         pytest.skip("ORT CPU cannot run this com.microsoft RotaryEmbedding form")

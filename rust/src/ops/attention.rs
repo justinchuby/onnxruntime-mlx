@@ -843,20 +843,30 @@ fn rotary_embedding_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     let xs = ctx.shape_of(x);
     let rank = xs.len();
 
+    let cos_cache = ctx.resolve(&n.inputs[ci])?;
+    let sin_cache = ctx.resolve(&n.inputs[si])?;
+
     let (b, nh, s, hd, x4) = if rank == 4 {
         (xs[0], xs[1], xs[2], xs[3], x)
     } else {
         let b = xs[0];
         let s = xs[1];
-        let nh = attr_int(n, "num_heads", 0) as i32;
-        let hd = xs[2] / nh;
+        let nh_attr = attr_int(n, "num_heads", 0) as i32;
+        // num_heads=0 (Gemma3n form): infer the head size from the cos cache. With
+        // rotary_embedding_dim=0 (full-head rotary) head_size = 2 * cos_cache_last_dim, so
+        // num_heads = hidden / head_size.
+        let hd = if nh_attr > 0 {
+            xs[2] / nh_attr
+        } else {
+            let cos_shape = ctx.shape_of(cos_cache);
+            2 * cos_shape[cos_shape.len() - 1]
+        };
+        let nh = xs[2] / hd;
         let r = ctx.reshape(x, &[b, s, nh, hd])?;
         let x4 = ctx.transpose(r, &[0, 2, 1, 3])?; // [B,N,S,hd]
         (b, nh, s, hd, x4)
     };
 
-    let cos_cache = ctx.resolve(&n.inputs[ci])?;
-    let sin_cache = ctx.resolve(&n.inputs[si])?;
     let has_pos = present(n, pi);
     // The fused mlx_fast_rope path derives each position as `offset + s`, i.e. it assumes the
     // per-row positions are contiguous. That only holds for the [1] offset form (positions =
@@ -1273,12 +1283,32 @@ fn rotary_embedding_claim(node: &NodeView) -> ClaimResult {
     let rank = xshape.len();
     if rank == 3 {
         let nh = node.int_attr("num_heads", 0);
-        require!(
-            nh > 0 && xshape[2] > 0 && xshape[2] % nh == 0,
-            "rank-3 input hidden dimension {} must divide evenly by positive num_heads {}",
-            xshape[2],
-            nh
-        );
+        if nh > 0 {
+            require!(
+                xshape[2] > 0 && xshape[2] % nh == 0,
+                "rank-3 input hidden dimension {} must divide evenly by positive num_heads {}",
+                xshape[2],
+                nh
+            );
+        } else {
+            // num_heads=0 (Gemma3n form): infer head size from the cos cache. Only the full-head
+            // rotary case (rotary_embedding_dim=0) lets us derive head_size = 2 * cos_last_dim.
+            let red = node.int_attr("rotary_embedding_dim", 0);
+            require!(
+                red == 0,
+                "rank-3 RotaryEmbedding with num_heads=0 needs rotary_embedding_dim=0 (full-head \
+                 rotary) to infer the head size; got rotary_embedding_dim={red}"
+            );
+            let half = cshape.last().copied().unwrap_or(0);
+            let head = 2 * half;
+            require!(
+                head > 0 && xshape[2] > 0 && xshape[2] % head == 0,
+                "rank-3 input hidden dimension {} must divide evenly by the inferred head size {} \
+                 (2 × cos-cache last dim); num_heads=0",
+                xshape[2],
+                head
+            );
+        }
     } else {
         require!(rank == 4, "input must have rank 3 or 4, got rank {}", rank);
     }
