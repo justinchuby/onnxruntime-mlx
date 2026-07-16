@@ -43,7 +43,7 @@ jobs:
           python-version: "3.12"
 
       - name: Python test deps
-        run: python -m pip install --upgrade "onnxruntime==${ORT_VERSION}" numpy onnx onnx_ir pytest pytest-forked
+        run: python -m pip install --upgrade "onnxruntime==${ORT_VERSION}" numpy onnx onnx_ir pytest
 
       - name: Build the Rust EP (cargo)
         run: |
@@ -75,18 +75,17 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: ONNX backend node tests (informational — MLX EP vs ONNX reference)
-        # Runs ONNX's own curated per-node tests through the MLX EP. `--forked` isolates each
-        # case (a bad case can't take down the suite). NON-BLOCKING for now: a known residual set
-        # of ORT/ONNX-inherent cases is excluded in the harness, and a small genuine-MLX tail is
-        # still being triaged — this step reports the count without gating PRs. Flip
-        # `continue-on-error` off once the residual failures are closed.
-        continue-on-error: true
+      - name: ONNX backend node tests (MLX EP vs ONNX reference — gating)
+        # Runs ONNX's own curated per-node tests through the MLX EP. Run IN-PROCESS (no
+        # pytest-forked): fork() does not preserve a live Metal/MLX device context, so forking the
+        # test process yields spurious, non-deterministic failures (and is ~50× slower). In-process
+        # the suite is clean and deterministic (~5s). This GATES the build — any op the EP
+        # incorrectly claims surfaces here as a real reference mismatch. The harness excludes a set
+        # of ORT/ONNX-inherent cases (see `_EXCLUDE`); everything else must match ONNX's reference.
         run: |
           export ONNXRUNTIME_MLX_EP_LIB="$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib"
           export DYLD_LIBRARY_PATH="$ORT_HOME/lib"
-          python -m pytest tests/backend -q -p no:cacheprovider --forked \
-            | tee /tmp/backend.out || true
+          python -m pytest tests/backend -q -p no:cacheprovider | tee /tmp/backend.out
           {
             echo "### ONNX backend node tests (MLX EP)"
             echo '```'
