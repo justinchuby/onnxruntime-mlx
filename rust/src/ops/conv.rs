@@ -69,6 +69,15 @@ fn present(n: &NodeDesc, i: usize) -> bool {
 fn conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x0 = ctx.resolve(&n.inputs[0])?;
     let spatial_rank = ctx.ndim(x0) as i32 - 2;
+    // The claim permits dynamic (symbolic) spatial dims; the general compiled path is shape-keyed so
+    // the concrete extent is known here. Guard against a genuinely-unresolvable (<=0) spatial dim so
+    // the EP declines gracefully to CPU rather than emitting a mis-sized conv.
+    {
+        let xs = ctx.shape_of(x0);
+        if (0..spatial_rank as usize).any(|i| xs[i + 2] <= 0) {
+            return Err(format!("Conv: non-positive spatial dim at trace time: {xs:?}"));
+        }
+    }
     let strides = attr_or(n, "strides", spatial_rank as usize, 1);
     let dilations = attr_or(n, "dilations", spatial_rank as usize, 1);
     let group = n.ints.get("group").copied().unwrap_or(1) as i32;
@@ -263,6 +272,13 @@ fn pool_op(ctx: &mut TranslationContext, n: &NodeDesc, average: bool) -> Result<
         average && n.ints.get("count_include_pad").copied().unwrap_or(0) != 0;
 
     let x0 = ctx.resolve(&n.inputs[0])?;
+    // Guard against a genuinely-unresolvable (<=0) spatial dim at trace time (see `conv_op`).
+    {
+        let xs = ctx.shape_of(x0);
+        if xs.len() != 4 || xs[2] <= 0 || xs[3] <= 0 {
+            return Err(format!("Pool: non-positive spatial dim at trace time: {xs:?}"));
+        }
+    }
     // `auto_pad` (SAME_UPPER/SAME_LOWER/VALID) → explicit pads from the static input spatial shape
     // (dilations are 1 for the claimed pool forms); NOTSET reads the `pads` attribute.
     let auto_pad = n.strings.get("auto_pad").map(String::as_str).unwrap_or("NOTSET");
@@ -451,11 +467,28 @@ fn static_positive_shape_dyn_batch(shape: &[i64], rank: usize) -> bool {
     rank >= 1 && shape.len() == rank && shape[1..].iter().all(|&d| d > 0)
 }
 
+/// Conv/pool input-shape validity that additionally permits dynamic (symbolic / non-positive)
+/// SPATIAL dims (H/W), on top of the dynamic batch dim already allowed by
+/// `static_positive_shape_dyn_batch`. Only the channel dim (index 1) must be statically known and
+/// positive — it drives group / channel-divisibility and kernel checks. Batch (index 0) and every
+/// spatial dim (index 2..) may be `-1`: the general compiled path is shape-keyed, so at TRACE time
+/// `ctx.shape_of` resolves the concrete spatial extent and the handler computes any auto_pad from it.
+fn channels_static_dyn_batch_spatial(shape: &[i64], rank: usize) -> bool {
+    rank >= 2 && shape.len() == rank && shape[1] > 0
+}
+
+/// Compare an actual (ONNX-declared) shape against an expected shape, treating any non-positive
+/// (dynamic / symbolic) dim on EITHER side as a wildcard. Dynamic spatial convs declare `-1` output
+/// dims and we cannot precompute the expected spatial extent (pads may depend on the runtime shape),
+/// so both sides carry wildcards that must be skipped.
 fn same_known_shape(actual: &[i64], expected: &[i64]) -> bool {
     if actual.len() != expected.len() {
         return false;
     }
-    actual.iter().zip(expected).all(|(&a, &e)| a <= 0 || a == e)
+    actual
+        .iter()
+        .zip(expected)
+        .all(|(&a, &e)| a <= 0 || e <= 0 || a == e)
 }
 
 fn optional_bias_is_valid(node: &NodeView, dtype: crate::sys::ort::ONNXTensorElementDataType, channels: i64) -> bool {
@@ -486,12 +519,13 @@ fn conv_claim(node: &NodeView) -> bool {
         return false;
     }
     let spatial_rank = x.shape.len() - 2;
-    if !static_positive_shape_dyn_batch(&x.shape, spatial_rank + 2)
+    if !channels_static_dyn_batch_spatial(&x.shape, spatial_rank + 2)
         || !static_positive_shape(&w.shape, spatial_rank + 2)
         || out.shape.len() != spatial_rank + 2
     {
         return false;
     }
+    let spatial_dynamic = (0..spatial_rank).any(|i| x.shape[i + 2] <= 0);
     if node.string_attr("auto_pad", "NOTSET") != "NOTSET" && node.ints_attr("pads").0 {
         // ONNX forbids specifying both a non-NOTSET auto_pad and an explicit pads attribute.
         return false;
@@ -508,16 +542,21 @@ fn conv_claim(node: &NodeView) -> bool {
     // spatial shape; NOTSET reads the `pads` attribute. SAME_* pads may be asymmetric — `conv_op`
     // routes those through `mlx_conv_general` just like explicit asymmetric pads.
     let auto_pad = node.string_attr("auto_pad", "NOTSET");
-    let pads = if auto_pad == "NOTSET" {
+    let pads: Option<Vec<i64>> = if auto_pad == "NOTSET" {
+        // Explicit pads are static regardless of dynamic spatial dims.
         match read_pads(node, spatial_rank) {
-            Some(v) => v,
+            Some(v) => Some(v),
             None => return false,
         }
+    } else if spatial_dynamic {
+        // auto_pad + dynamic spatial: pads depend on the runtime spatial extent, so they cannot be
+        // precomputed here. `conv_op` resolves them at trace time from the concrete `ctx.shape_of`.
+        None
     } else {
         let in_sp: Vec<i64> = (0..spatial_rank).map(|i| x.shape[i + 2]).collect();
         let kernel: Vec<i64> = (0..spatial_rank).map(|i| w.shape[i + 2]).collect();
         match auto_pad_pads(&auto_pad, &in_sp, &kernel, &strides, &dilations) {
-            Some(v) => v,
+            Some(v) => Some(v),
             None => return false,
         }
     };
@@ -548,12 +587,21 @@ fn conv_claim(node: &NodeView) -> bool {
     }
     let mut expected = vec![x.shape[0], out_channels];
     for i in 0..spatial_rank {
-        let effective_kernel = dilations[i] * (w.shape[i + 2] - 1) + 1;
-        let padded = x.shape[i + 2] + pads[i] + pads[i + spatial_rank];
-        if padded < effective_kernel {
-            return false;
+        let in_dim = x.shape[i + 2];
+        match &pads {
+            // Static input spatial dim with resolved pads → precompute the expected output extent.
+            Some(pads) if in_dim > 0 => {
+                let effective_kernel = dilations[i] * (w.shape[i + 2] - 1) + 1;
+                let padded = in_dim + pads[i] + pads[i + spatial_rank];
+                if padded < effective_kernel {
+                    return false;
+                }
+                expected.push((padded - effective_kernel) / strides[i] + 1);
+            }
+            // Dynamic spatial dim (or unresolved auto_pad pads) → the output extent is dynamic too;
+            // push a wildcard so `same_known_shape` skips it. The handler resolves it at trace time.
+            _ => expected.push(-1),
         }
-        expected.push((padded - effective_kernel) / strides[i] + 1);
     }
     same_known_shape(&out.shape, &expected)
 }
@@ -643,12 +691,13 @@ fn pool_claim(node: &NodeView, average: bool) -> bool {
     };
     if !is_mlx_float(x.dtype)
         || out.dtype != x.dtype
-        || !static_positive_shape_dyn_batch(&x.shape, 4)
+        || !channels_static_dyn_batch_spatial(&x.shape, 4)
         || out.shape.len() != 4
         || node.int_attr("ceil_mode", 0) != 0
     {
         return false;
     }
+    let spatial_dynamic = x.shape[2] <= 0 || x.shape[3] <= 0;
     let (kernel_present, kernel) = node.ints_attr("kernel_shape");
     if !kernel_present || kernel.len() != 2 || kernel[0] <= 0 || kernel[1] <= 0 {
         return false;
@@ -667,17 +716,21 @@ fn pool_claim(node: &NodeView, average: bool) -> bool {
     // `auto_pad` (SAME_UPPER/SAME_LOWER/VALID) resolves to explicit pads from the static input
     // spatial shape (kernel_shape is the window); NOTSET reads the `pads` attribute.
     let auto_pad = node.string_attr("auto_pad", "NOTSET");
-    let pads = if auto_pad == "NOTSET" {
+    let pads: Option<Vec<i64>> = if auto_pad == "NOTSET" {
         match read_pads(node, 2) {
-            Some(v) => v,
+            Some(v) => Some(v),
             None => return false,
         }
     } else if node.ints_attr("pads").0 {
         return false; // ONNX forbids both auto_pad and an explicit pads attribute
+    } else if spatial_dynamic {
+        // auto_pad + dynamic spatial: pads depend on the runtime spatial extent; `pool_op` resolves
+        // them at trace time from the concrete `ctx.shape_of`.
+        None
     } else {
         let in_sp = [x.shape[2], x.shape[3]];
         match auto_pad_pads(&auto_pad, &in_sp, &kernel, &strides, &dilations) {
-            Some(v) => v,
+            Some(v) => Some(v),
             None => return false,
         }
     };
@@ -689,17 +742,25 @@ fn pool_claim(node: &NodeView, average: bool) -> bool {
     } else if node.int_attr("storage_order", 0) != 0 {
         return false;
     }
-    let padded_h = x.shape[2] + pads[0] + pads[2];
-    let padded_w = x.shape[3] + pads[1] + pads[3];
-    if padded_h < kernel[0] || padded_w < kernel[1] {
-        return false;
-    }
-    let expected = vec![
-        x.shape[0],
-        x.shape[1],
-        (padded_h - kernel[0]) / strides[0] + 1,
-        (padded_w - kernel[1]) / strides[1] + 1,
-    ];
+    let expected = match &pads {
+        // Static spatial with resolved pads → validate the derived output extent.
+        Some(pads) if !spatial_dynamic => {
+            let padded_h = x.shape[2] + pads[0] + pads[2];
+            let padded_w = x.shape[3] + pads[1] + pads[3];
+            if padded_h < kernel[0] || padded_w < kernel[1] {
+                return false;
+            }
+            vec![
+                x.shape[0],
+                x.shape[1],
+                (padded_h - kernel[0]) / strides[0] + 1,
+                (padded_w - kernel[1]) / strides[1] + 1,
+            ]
+        }
+        // Dynamic spatial → output spatial dims are dynamic; wildcard them. `pool_op` resolves the
+        // concrete window math at trace time.
+        _ => vec![x.shape[0], x.shape[1], -1, -1],
+    };
     same_known_shape(&out.shape, &expected)
 }
 

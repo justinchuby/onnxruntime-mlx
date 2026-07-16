@@ -386,3 +386,106 @@ def test_global_pool(dtype: ir.DataType, op_type: str) -> None:
         m.tensor("out", dtype, [x_shape[0], x_shape[1], 1, 1]),
     )
     m.assert_matches_cpu(model, {"x": _sample(x_shape, dtype)}, **_tolerance(dtype))
+
+# --- dynamic (symbolic) spatial dims ------------------------------------------------------------
+# FCN-ResNet50 / TinyYOLOv3 declare Conv/MaxPool inputs as [N, C, -1, -1] (symbolic H/W). The claim
+# predicates accept dynamic spatial dims; the shape-keyed general path resolves the concrete extent
+# at trace time, so these must run ON MLX (not silently fall back) and still match ORT CPU.
+
+
+def _dyn_tensor(name: str, dtype: ir.DataType, channels: int, spatial_rank: int) -> ir.Value:
+    """A conv/pool input with static batch+channels and symbolic (dynamic) spatial dims."""
+    dims: list[int | str] = [1, channels]
+    dims += [f"{name}_dim{i}" for i in range(spatial_rank)]
+    return ir.Value(name=name, type=ir.TensorType(dtype), shape=ir.Shape(dims))
+
+
+def _dyn_out(name: str, dtype: ir.DataType, channels: int, spatial_rank: int) -> ir.Value:
+    dims: list[int | str] = [1, channels]
+    dims += [f"{name}_o{i}" for i in range(spatial_rank)]
+    return ir.Value(name=name, type=ir.TensorType(dtype), shape=ir.Shape(dims))
+
+
+def _assert_dynamic_on_mlx(model: bytes, feeds, op_type: str, tol, capfd, monkeypatch) -> None:
+    """Run through the EP, assert `op_type` was CLAIMED (not declined) and output matches CPU."""
+    monkeypatch.setenv("MLX_EP_CLAIM_DEBUG", "1")
+    m.assert_matches_cpu(model, feeds, **tol)
+    err = capfd.readouterr().err
+    for line in err.splitlines():
+        if "unclaimed op types" in line:
+            assert op_type not in line, f"{op_type} was declined with dynamic spatial: {line}"
+
+
+DYN_CONV_CASES = [
+    pytest.param((1, 3, 10, 12), (4, 3, 3, 3), (1, 1), (0, 0, 0, 0), "NOTSET", id="conv2d-dyn"),
+    pytest.param((1, 4, 9, 11), (6, 4, 3, 3), (2, 2), (1, 1, 1, 1), "NOTSET", id="conv2d-dyn-strided"),
+    pytest.param((1, 3, 8, 8), (4, 3, 3, 3), (1, 1), None, "SAME_UPPER", id="conv2d-dyn-same_upper"),
+    pytest.param((1, 3, 7, 9), (4, 3, 3, 3), (2, 2), None, "SAME_LOWER", id="conv2d-dyn-same_lower"),
+    pytest.param((1, 3, 8, 8), (4, 3, 3, 3), (1, 1), None, "VALID", id="conv2d-dyn-valid"),
+]
+
+
+@pytest.mark.parametrize("dtype", [DT.FLOAT, DT.FLOAT16], ids=["fp32", "fp16"])
+@pytest.mark.parametrize("x_shape,weight_shape,strides,pads,auto_pad", DYN_CONV_CASES)
+def test_conv_dynamic_spatial(
+    dtype: ir.DataType,
+    x_shape: tuple[int, int, int, int],
+    weight_shape: tuple[int, int, int, int],
+    strides: tuple[int, int],
+    pads: tuple[int, int, int, int] | None,
+    auto_pad: str,
+    capfd,
+    monkeypatch,
+) -> None:
+    weight = _initializer("weight", _sample(weight_shape, dtype))
+    attributes = [ir.AttrInt64s("strides", strides)]
+    if auto_pad == "NOTSET":
+        attributes.append(ir.AttrInt64s("pads", pads))
+    else:
+        attributes.append(ir.AttrString("auto_pad", auto_pad))
+    model = _model(
+        "Conv",
+        [_dyn_tensor("x", dtype, x_shape[1], 2), weight],
+        _dyn_out("out", dtype, weight_shape[0], 2),
+        initializers=[weight],
+        attributes=attributes,
+    )
+    _assert_dynamic_on_mlx(
+        model, {"x": _sample(x_shape, dtype)}, "Conv", _tolerance(dtype), capfd, monkeypatch
+    )
+
+
+DYN_POOL_CASES = [
+    pytest.param((1, 3, 10, 12), (2, 2), (2, 2), (0, 0, 0, 0), "NOTSET", id="maxpool-dyn"),
+    pytest.param((1, 3, 9, 11), (3, 3), (2, 2), (1, 1, 1, 1), "NOTSET", id="maxpool-dyn-pad"),
+    pytest.param((1, 3, 8, 8), (2, 2), (2, 2), None, "SAME_UPPER", id="maxpool-dyn-same_upper"),
+    pytest.param((1, 3, 8, 8), (2, 2), (1, 1), None, "VALID", id="maxpool-dyn-valid"),
+]
+
+
+@pytest.mark.parametrize("dtype", [DT.FLOAT, DT.FLOAT16], ids=["fp32", "fp16"])
+@pytest.mark.parametrize("x_shape,kernel,strides,pads,auto_pad", DYN_POOL_CASES)
+def test_max_pool_dynamic_spatial(
+    dtype: ir.DataType,
+    x_shape: tuple[int, int, int, int],
+    kernel: tuple[int, int],
+    strides: tuple[int, int],
+    pads: tuple[int, int, int, int] | None,
+    auto_pad: str,
+    capfd,
+    monkeypatch,
+) -> None:
+    attributes = [ir.AttrInt64s("kernel_shape", kernel), ir.AttrInt64s("strides", strides)]
+    if auto_pad == "NOTSET":
+        attributes.append(ir.AttrInt64s("pads", pads))
+    else:
+        attributes.append(ir.AttrString("auto_pad", auto_pad))
+    model = _model(
+        "MaxPool",
+        [_dyn_tensor("x", dtype, x_shape[1], 2)],
+        _dyn_out("out", dtype, x_shape[1], 2),
+        attributes=attributes,
+    )
+    _assert_dynamic_on_mlx(
+        model, {"x": _sample(x_shape, dtype)}, "MaxPool", _tolerance(dtype), capfd, monkeypatch
+    )
