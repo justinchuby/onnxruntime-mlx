@@ -70,12 +70,23 @@ fn conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x0 = ctx.resolve(&n.inputs[0])?;
     let spatial_rank = ctx.ndim(x0) as i32 - 2;
     let strides = attr_or(n, "strides", spatial_rank as usize, 1);
-    let pads = attr_or(n, "pads", 2 * spatial_rank as usize, 0);
     let dilations = attr_or(n, "dilations", spatial_rank as usize, 1);
     let group = n.ints.get("group").copied().unwrap_or(1) as i32;
 
+    let auto_pad = n.strings.get("auto_pad").map(String::as_str).unwrap_or("NOTSET");
     let x = to_channels_last(ctx, x0, spatial_rank)?;
     let w0 = ctx.resolve(&n.inputs[1])?;
+    let pads: Vec<i64> = if auto_pad == "NOTSET" {
+        attr_or(n, "pads", 2 * spatial_rank as usize, 0)
+    } else {
+        let sr = spatial_rank as usize;
+        let xs = ctx.shape_of(x0);
+        let ws = ctx.shape_of(w0);
+        let in_sp: Vec<i64> = (0..sr).map(|i| xs[i + 2] as i64).collect();
+        let kernel: Vec<i64> = (0..sr).map(|i| ws[i + 2] as i64).collect();
+        auto_pad_pads(auto_pad, &in_sp, &kernel, &strides, &dilations)
+            .ok_or_else(|| format!("Conv: unsupported auto_pad '{auto_pad}'"))?
+    };
     let weight = conv_weight_to_mlx(ctx, w0, spatial_rank)?;
 
     // Symmetric pads (`pads[i] == pads[i + spatial_rank]`) use the fast symmetric conv1d/conv2d
@@ -248,11 +259,21 @@ fn sum_axes34(ctx: &mut TranslationContext, a: mlx::mlx_array, keepdims: bool) -
 fn pool_op(ctx: &mut TranslationContext, n: &NodeDesc, average: bool) -> Result<(), MlxError> {
     let kernel = n.int_arrays.get("kernel_shape").cloned().unwrap_or_default();
     let strides = attr_or(n, "strides", 2, 1);
-    let pads = attr_or(n, "pads", 4, 0);
     let count_include_pad =
         average && n.ints.get("count_include_pad").copied().unwrap_or(0) != 0;
 
     let x0 = ctx.resolve(&n.inputs[0])?;
+    // `auto_pad` (SAME_UPPER/SAME_LOWER/VALID) → explicit pads from the static input spatial shape
+    // (dilations are 1 for the claimed pool forms); NOTSET reads the `pads` attribute.
+    let auto_pad = n.strings.get("auto_pad").map(String::as_str).unwrap_or("NOTSET");
+    let pads: Vec<i64> = if auto_pad == "NOTSET" {
+        attr_or(n, "pads", 4, 0)
+    } else {
+        let xs = ctx.shape_of(x0);
+        let in_sp = [xs[2] as i64, xs[3] as i64];
+        auto_pad_pads(auto_pad, &in_sp, &kernel, &strides, &[1, 1])
+            .ok_or_else(|| format!("Pool: unsupported auto_pad '{auto_pad}'"))?
+    };
     let x = to_channels_last(ctx, x0, 2)?;
     let dt = ctx.dtype_of(x);
     let pad_value = if average { 0.0f32 } else { f32::NEG_INFINITY };
@@ -379,6 +400,44 @@ fn read_pads(node: &NodeView, spatial_rank: usize) -> Option<Vec<i64>> {
     Some(pads)
 }
 
+/// Resolve an ONNX `auto_pad` mode to explicit begin/end pads from statically known spatial dims.
+/// Returns ONNX pad layout `[begin_0..begin_{r-1}, end_0..end_{r-1}]`, or `None` for an
+/// unrecognized mode. `VALID` yields zero pads; `SAME_UPPER`/`SAME_LOWER` size the total pad so the
+/// output is `ceil(input/stride)`, putting the extra unit of an odd total at the end (`UPPER`) or
+/// the begin (`LOWER`). Asymmetric SAME_* pads are fine — `conv_op` routes them through
+/// `mlx_conv_general` exactly like explicit asymmetric pads.
+fn auto_pad_pads(
+    auto_pad: &str,
+    in_spatial: &[i64],
+    kernel: &[i64],
+    strides: &[i64],
+    dilations: &[i64],
+) -> Option<Vec<i64>> {
+    let r = in_spatial.len();
+    match auto_pad {
+        "VALID" => Some(vec![0; 2 * r]),
+        "SAME_UPPER" | "SAME_LOWER" => {
+            let mut begin = vec![0i64; r];
+            let mut end = vec![0i64; r];
+            for i in 0..r {
+                let eff_k = dilations[i] * (kernel[i] - 1) + 1;
+                let out = (in_spatial[i] + strides[i] - 1) / strides[i]; // ceil(in/stride)
+                let total = ((out - 1) * strides[i] + eff_k - in_spatial[i]).max(0);
+                if auto_pad == "SAME_LOWER" {
+                    end[i] = total / 2;
+                    begin[i] = total - end[i];
+                } else {
+                    begin[i] = total / 2;
+                    end[i] = total - begin[i];
+                }
+            }
+            begin.extend(end);
+            Some(begin)
+        }
+        _ => None,
+    }
+}
+
 fn static_positive_shape(shape: &[i64], rank: usize) -> bool {
     shape.len() == rank && shape.iter().all(|&d| d > 0)
 }
@@ -433,7 +492,8 @@ fn conv_claim(node: &NodeView) -> bool {
     {
         return false;
     }
-    if node.string_attr("auto_pad", "NOTSET") != "NOTSET" {
+    if node.string_attr("auto_pad", "NOTSET") != "NOTSET" && node.ints_attr("pads").0 {
+        // ONNX forbids specifying both a non-NOTSET auto_pad and an explicit pads attribute.
         return false;
     }
     let strides = match read_spatial_attribute(node, "strides", spatial_rank, 1) {
@@ -444,9 +504,22 @@ fn conv_claim(node: &NodeView) -> bool {
         Some(v) => v,
         None => return false,
     };
-    let pads = match read_pads(node, spatial_rank) {
-        Some(v) => v,
-        None => return false,
+    // `auto_pad` (SAME_UPPER/SAME_LOWER/VALID) resolves to explicit pads from the static input
+    // spatial shape; NOTSET reads the `pads` attribute. SAME_* pads may be asymmetric — `conv_op`
+    // routes those through `mlx_conv_general` just like explicit asymmetric pads.
+    let auto_pad = node.string_attr("auto_pad", "NOTSET");
+    let pads = if auto_pad == "NOTSET" {
+        match read_pads(node, spatial_rank) {
+            Some(v) => v,
+            None => return false,
+        }
+    } else {
+        let in_sp: Vec<i64> = (0..spatial_rank).map(|i| x.shape[i + 2]).collect();
+        let kernel: Vec<i64> = (0..spatial_rank).map(|i| w.shape[i + 2]).collect();
+        match auto_pad_pads(&auto_pad, &in_sp, &kernel, &strides, &dilations) {
+            Some(v) => v,
+            None => return false,
+        }
     };
     // Asymmetric pads (`pads[i] != pads[i + spatial_rank]`) are supported: `conv_op` routes them
     // through `mlx_conv_general`, which takes separate `padding_lo`/`padding_hi` vectors. Only the
@@ -572,7 +645,6 @@ fn pool_claim(node: &NodeView, average: bool) -> bool {
         || out.dtype != x.dtype
         || !static_positive_shape_dyn_batch(&x.shape, 4)
         || out.shape.len() != 4
-        || node.string_attr("auto_pad", "NOTSET") != "NOTSET"
         || node.int_attr("ceil_mode", 0) != 0
     {
         return false;
@@ -585,10 +657,6 @@ fn pool_claim(node: &NodeView, average: bool) -> bool {
         Some(v) => v,
         None => return false,
     };
-    let pads = match read_pads(node, 2) {
-        Some(v) => v,
-        None => return false,
-    };
     let dilations = match read_spatial_attribute(node, "dilations", 2, 1) {
         Some(v) => v,
         None => return false,
@@ -596,6 +664,23 @@ fn pool_claim(node: &NodeView, average: bool) -> bool {
     if dilations[0] != 1 || dilations[1] != 1 {
         return false;
     }
+    // `auto_pad` (SAME_UPPER/SAME_LOWER/VALID) resolves to explicit pads from the static input
+    // spatial shape (kernel_shape is the window); NOTSET reads the `pads` attribute.
+    let auto_pad = node.string_attr("auto_pad", "NOTSET");
+    let pads = if auto_pad == "NOTSET" {
+        match read_pads(node, 2) {
+            Some(v) => v,
+            None => return false,
+        }
+    } else if node.ints_attr("pads").0 {
+        return false; // ONNX forbids both auto_pad and an explicit pads attribute
+    } else {
+        let in_sp = [x.shape[2], x.shape[3]];
+        match auto_pad_pads(&auto_pad, &in_sp, &kernel, &strides, &dilations) {
+            Some(v) => v,
+            None => return false,
+        }
+    };
     if average {
         let cip = node.int_attr("count_include_pad", 0);
         if cip != 0 && cip != 1 {

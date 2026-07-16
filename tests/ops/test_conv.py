@@ -300,6 +300,82 @@ def test_max_pool(dtype: ir.DataType) -> None:
     m.assert_matches_cpu(model, {"x": _sample(x_shape, dtype)}, **_tolerance(dtype))
 
 
+def _auto_pad_output_shape(
+    x_shape: tuple[int, ...],
+    kernel: tuple[int, ...],
+    strides: tuple[int, ...],
+    auto_pad: str,
+    channels: int,
+    dilations: tuple[int, ...] = (1, 1),
+) -> tuple[int, ...]:
+    spatial = []
+    for i in range(len(strides)):
+        h, k, s, d = x_shape[i + 2], kernel[i], strides[i], dilations[i]
+        if auto_pad == "VALID":
+            spatial.append((h - (d * (k - 1) + 1)) // s + 1)
+        else:  # SAME_UPPER / SAME_LOWER -> ceil(h / s)
+            spatial.append((h + s - 1) // s)
+    return (x_shape[0], channels, *spatial)
+
+
+AUTO_PAD_CASES = [
+    pytest.param((1, 3, 8, 8), (1, 1), "SAME_UPPER", id="same_upper-s1"),
+    pytest.param((1, 3, 8, 8), (2, 2), "SAME_UPPER", id="same_upper-s2"),
+    pytest.param((1, 3, 7, 7), (2, 2), "SAME_LOWER", id="same_lower-s2-odd"),
+    pytest.param((1, 3, 9, 8), (1, 1), "SAME_LOWER", id="same_lower-s1"),
+    pytest.param((1, 3, 8, 8), (1, 1), "VALID", id="valid"),
+]
+
+
+@pytest.mark.parametrize("dtype", [DT.FLOAT], ids=["fp32"])
+@pytest.mark.parametrize("x_shape,strides,auto_pad", AUTO_PAD_CASES)
+def test_conv_auto_pad(
+    dtype: ir.DataType,
+    x_shape: tuple[int, ...],
+    strides: tuple[int, ...],
+    auto_pad: str,
+) -> None:
+    weight_shape = (4, x_shape[1], 3, 3)
+    weight = _initializer("weight", _sample(weight_shape, dtype))
+    output_shape = _auto_pad_output_shape(
+        x_shape, weight_shape[2:], strides, auto_pad, weight_shape[0]
+    )
+    model = _model(
+        "Conv",
+        [m.tensor("x", dtype, list(x_shape)), weight],
+        m.tensor("out", dtype, list(output_shape)),
+        initializers=[weight],
+        attributes=[
+            ir.AttrInt64s("strides", strides),
+            ir.AttrString("auto_pad", auto_pad),
+        ],
+    )
+    m.assert_matches_cpu(model, {"x": _sample(x_shape, dtype)}, **_tolerance(dtype))
+
+
+@pytest.mark.parametrize("dtype", [DT.FLOAT], ids=["fp32"])
+@pytest.mark.parametrize("x_shape,strides,auto_pad", AUTO_PAD_CASES)
+def test_max_pool_auto_pad(
+    dtype: ir.DataType,
+    x_shape: tuple[int, ...],
+    strides: tuple[int, ...],
+    auto_pad: str,
+) -> None:
+    kernel = (2, 2)
+    output_shape = _auto_pad_output_shape(x_shape, kernel, strides, auto_pad, x_shape[1])
+    model = _model(
+        "MaxPool",
+        [m.tensor("x", dtype, list(x_shape))],
+        m.tensor("out", dtype, list(output_shape)),
+        attributes=[
+            ir.AttrInt64s("kernel_shape", kernel),
+            ir.AttrInt64s("strides", strides),
+            ir.AttrString("auto_pad", auto_pad),
+        ],
+    )
+    m.assert_matches_cpu(model, {"x": _sample(x_shape, dtype)}, **_tolerance(dtype))
+
+
 @pytest.mark.parametrize("dtype", [DT.FLOAT, DT.FLOAT16], ids=["fp32", "fp16"])
 @pytest.mark.parametrize("op_type", ["GlobalAveragePool", "GlobalMaxPool"])
 def test_global_pool(dtype: ir.DataType, op_type: str) -> None:
