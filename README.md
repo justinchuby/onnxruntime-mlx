@@ -123,7 +123,8 @@ For **LLMs**, the EP is primarily a **prefill / TTFT accelerator**. Qwen2.5-0.5B
 
 The prefill lead grows with prompt length. Decode is weight-bandwidth-bound: on a small 0.5B model the
 CPU `accuracy_level=4` int8 MatMulNBits path is very fast and wins per-token, so today MLX is the
-clear choice for prompt-heavy / TTFT-sensitive workloads; the decode gap narrows on larger models.
+clear choice for prompt-heavy / TTFT-sensitive workloads (decode on larger models not yet benchmarked
+here).
 
 Any op the EP doesn't claim falls back to the ORT CPU EP, so **every** graph still runs correctly —
 the EP is a safe drop-in. The audio numbers above are the public Hugging Face Perch v2 / BirdNET ONNX
