@@ -109,7 +109,34 @@ def test_simplified_layer_norm():
     m.assert_matches_cpu(model, {"x": x, "s": scale}, rtol=1e-4, atol=1e-5)
 
 
-# --- SkipLayerNormalization (com.microsoft) ---------------------------------------------------
+def test_simplified_layer_norm_default_domain(capfd, monkeypatch):
+    """SPECIAL CASE: Microsoft's exporter sometimes stamps the com.microsoft contrib op
+    SimplifiedLayerNormalization into the DEFAULT domain (domain ""). We register it there too, so
+    it must be CLAIMED (not fall back) and match CPU. (gemma-4-E2B vision encoder has 113 of these.)"""
+    rng = np.random.default_rng(4)
+    x = rng.standard_normal((2, 4, 8)).astype(np.float32)
+    scale = rng.standard_normal((8,)).astype(np.float32)
+    model = build(
+        "SimplifiedLayerNormalization",
+        [m.tensor("x", DT.FLOAT, [2, 4, 8]), m.tensor("s", DT.FLOAT, [8])],
+        [m.tensor("o", DT.FLOAT, [2, 4, 8])],
+        attrs=[ir.AttrFloat32("epsilon", 1e-5), ir.AttrInt64("axis", -1)],
+        domain="",  # the mis-stamped default domain
+    )
+    try:
+        ort.InferenceSession(model, providers=["CPUExecutionProvider"])
+    except Exception as exc:  # noqa: BLE001 - schema availability probe
+        if "not a registered" in str(exc):
+            pytest.skip("SimplifiedLayerNormalization not in this ORT build")
+        raise
+    monkeypatch.setenv("MLX_EP_CLAIM_DEBUG", "1")
+    m.assert_matches_cpu(model, {"x": x, "s": scale}, rtol=1e-4, atol=1e-5)
+    err = capfd.readouterr().err
+    for line in err.splitlines():
+        if "unclaimed" in line:
+            assert "unclaimed SimplifiedLayerNormalization " not in line, (
+                f"default-domain SimplifiedLayerNormalization was declined: {line}"
+            )
 @pytest.mark.parametrize("dt", DTYPES)
 def test_skip_layer_norm(dt):
     rng = np.random.default_rng(4)

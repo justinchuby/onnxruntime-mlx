@@ -857,6 +857,21 @@ pub fn register_norm(registry: &mut OpRegistry) {
         simplified_layer_norm_op,
         simplified_layer_norm_claim,
     );
+    // SPECIAL CASE / UPSTREAM BUG WORKAROUND: SimplifiedLayerNormalization is a `com.microsoft`
+    // CONTRIB op, but Microsoft's exporter accidentally stamps some graphs with it in the DEFAULT
+    // ONNX domain (domain "") instead of com.microsoft (seen in gemma-3n / RoBERTa ONNX from
+    // onnx-community). It is the exact same op with the exact same semantics
+    // (Y = rms_norm(X) * scale over the last axis), so we register it under "" as well — otherwise
+    // every one of these norms (113 in the gemma-4-E2B vision encoder) fragments the graph onto CPU.
+    // This is NOT a real default-domain op; it only exists there because of that mis-stamping.
+    reg(
+        registry,
+        "",
+        "SimplifiedLayerNormalization",
+        K_ANY_OPSET,
+        simplified_layer_norm_op,
+        simplified_layer_norm_claim,
+    );
     reg(
         registry,
         "com.microsoft",
