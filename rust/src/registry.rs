@@ -137,26 +137,115 @@ pub fn claimable(node: &NodeView) -> bool {
 ///   * no registry entry for the (domain, op, opset) → "no MLX handler (op/opset)";
 ///   * an entry exists but the predicate declined → inspect the node for the common causes
 ///     (fp64 / other unsupported dtype) and otherwise report a generic "claim predicate declined".
-pub fn decline_reason(node: &NodeView) -> String {
-    let entry = registry().find_entry(&node.domain(), &node.op_type(), node.since_version());
-    if entry.is_none() {
-        return "no MLX handler (op/opset)".to_string();
+/// A short ORT element-type name for diagnostics.
+fn ort_dtype_name(t: ort::ONNXTensorElementDataType) -> &'static str {
+    #[allow(non_upper_case_globals)]
+    match t {
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => "fp32",
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => "fp16",
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16 => "bf16",
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE => "fp64",
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8 => "int8",
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16 => "int16",
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 => "int32",
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => "int64",
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8 => "uint8",
+        ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL => "bool",
+        _ => "other",
     }
-    // The op is registered but this concrete node was rejected. Probe the cheapest common cause.
-    let mut has_fp64 = false;
+}
+
+/// A human-readable, **actionable** reason a specific node was not claimed — meant to give a
+/// developer a concrete idea of how to make it claimable. Best-effort re-diagnosis (the claim
+/// predicate itself only returns a bool): reports the definite cause when knowable (no handler /
+/// fp64), an op-specific constraint hint for the ops that commonly fragment real models, then a
+/// dynamic-shape / generic fallback that points at the op's claim predicate.
+pub fn decline_reason(node: &NodeView) -> String {
+    let op = node.op_type();
+    let entry = registry().find_entry(&node.domain(), &op, node.since_version());
+    if entry.is_none() {
+        let dom = node.domain();
+        let where_ = if dom.is_empty() { String::new() } else { format!(" (domain {dom})") };
+        return format!(
+            "no MLX handler for {op}{where_} at opset {} — add a claim+handler in rust/src/ops/ and register it",
+            node.since_version()
+        );
+    }
+
+    // Definite cause: fp64 anywhere (MLX has no float64).
     for i in 0..node.num_inputs() {
         if let Some(info) = node.input_info(i) {
             #[allow(non_upper_case_globals)]
             if info.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE {
-                has_fp64 = true;
+                return format!("input[{i}] is fp64 — MLX has no float64; cast the model to fp32/fp16");
             }
         }
     }
-    if has_fp64 {
-        "dtype fp64 → CPU".to_string()
-    } else {
-        "claim predicate declined (shape/dtype/attr)".to_string()
+
+    // Op-specific constraint hints (mirror each op's claim predicate) — the ops that most often
+    // fragment real graphs. Each says what IS accepted so the fix is obvious.
+    match op.as_str() {
+        "Resize" => {
+            return "Resize: only static (constant) `sizes`/`scales` are claimed; this node's are \
+                    runtime/dynamic — precompute them or export a static-shape model"
+                .to_string();
+        }
+        "Softmax" | "LogSoftmax" if node.since_version() < 13 => {
+            let axis = node.int_attr("axis", -1);
+            return format!(
+                "{op} opset<13 with axis={axis} coerces to 2D (reduces over ALL trailing axes), \
+                 which is unimplemented — re-export at opset>=13 (per-axis softmax)"
+            );
+        }
+        "Cast" | "CastLike" => {
+            let from = node.input_info(0).map(|i| ort_dtype_name(i.dtype)).unwrap_or("?");
+            let to = node.output_info(0).map(|o| ort_dtype_name(o.dtype)).unwrap_or("?");
+            return format!(
+                "Cast {from}->{to}: this dtype pair isn't claimed (bool/uint/fp64 and non-verified \
+                 pairs stay on CPU) — see cast_claim in rust/src/ops/elementwise.rs"
+            );
+        }
+        "Loop" => {
+            return "Loop: only static carried-state loops (explicit trip-count + passthrough cond, \
+                    no scan outputs) are unrolled; this one uses scan outputs / dynamic control — CPU"
+                .to_string();
+        }
+        "Tile" => {
+            return "Tile: only a constant `repeats` input is claimed; this node's is runtime — CPU"
+                .to_string();
+        }
+        "Pad" => {
+            return "Pad: only constant, non-negative `pads` with mode=constant are claimed \
+                    (runtime pads, negative/cropping pads, or reflect/edge modes → CPU)"
+                .to_string();
+        }
+        "NonMaxSuppression" | "TopK" | "RoiAlign" | "NonZero" => {
+            return format!("{op}: no MLX primitive — data-dependent op, stays on CPU (post-processing)");
+        }
+        _ => {}
     }
+
+    // Generic: a dynamic/unknown dim on an input the predicate needs static (best-effort).
+    for i in 0..node.num_inputs() {
+        if let Some(info) = node.input_info(i) {
+            if !info.shape.is_empty() && info.shape.iter().any(|&d| d <= 0) {
+                return format!(
+                    "input[{i}] shape {:?} has a dynamic/unknown dim the {op} claim needs static — \
+                     give it a static shape, or extend the claim to resolve it at trace time",
+                    info.shape
+                );
+            }
+        }
+    }
+
+    // Fallback: point at the predicate. Include the input dtype so dtype-form declines are visible.
+    let dtypes: Vec<&str> = (0..node.num_inputs())
+        .filter_map(|i| node.input_info(i).map(|s| ort_dtype_name(s.dtype)))
+        .collect();
+    format!(
+        "{op}: an attribute/shape/dtype form the claim predicate rejects (inputs: {dtypes:?}) — \
+         inspect {op}'s claim in rust/src/ops/ (or run with MLX_EP_CLAIM_DEBUG)"
+    )
 }
 
 // ---- Claim-time node view -----------------------------------------------------------------------
@@ -195,6 +284,15 @@ impl NodeView {
         unsafe {
             let mut p: *const c_char = std::ptr::null();
             (self.api().Node_GetOperatorType.unwrap())(self.node, &mut p);
+            self.cstr(p)
+        }
+    }
+
+    /// The node's graph name (e.g. `/model.22/dfl/Softmax`), for locating a specific node.
+    pub fn name(&self) -> String {
+        unsafe {
+            let mut p: *const c_char = std::ptr::null();
+            (self.api().Node_GetName.unwrap())(self.node, &mut p);
             self.cstr(p)
         }
     }

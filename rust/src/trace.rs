@@ -362,7 +362,7 @@ impl MlxTracer {
         claimed: usize,
         total: usize,
         subgraphs: usize,
-        rejected: &[(String, usize, String)],
+        rejected: &[(String, usize, String, Vec<String>)],
     ) {
         if !self.active() {
             return;
@@ -377,7 +377,7 @@ impl MlxTracer {
             s.claimed_nodes += claimed as u64;
             s.total_nodes += total as u64;
             s.fused_subgraphs += subgraphs as u64;
-            for (op, n, reason) in rejected {
+            for (op, n, reason, _names) in rejected {
                 let e = s.rejected.entry(op.clone()).or_insert((0, String::new()));
                 e.0 += *n as u64;
                 if !reason.is_empty() {
@@ -391,11 +391,16 @@ impl MlxTracer {
                 .with("total", total as u64)
                 .with("unclaimed", unclaimed as u64)
                 .with("fused_subgraphs", subgraphs as u64);
-            for (op, n, reason) in rejected {
-                args = args.with(
-                    format!("fallback_{op}"),
-                    format!("x{n}: {reason}"),
-                );
+            for (op, n, reason, names) in rejected {
+                // Per declined op-type: count + reason, plus the concrete node names (so an unclaimed
+                // node is locatable in the graph — an ellipsis when more than the captured cap).
+                let mut val = format!("x{n}: {reason}");
+                if !names.is_empty() {
+                    let shown = names.join(", ");
+                    let more = if *n as usize > names.len() { ", …" } else { "" };
+                    val = format!("{val} — nodes: [{shown}{more}]");
+                }
+                args = args.with(format!("fallback_{op}"), val);
             }
             self.ctx.instant("mlx.getcapability", "ep.claim", Some(args));
             self.push_counter("mlx.claimed_nodes", "nodes", claimed as f64);

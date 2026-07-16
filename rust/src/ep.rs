@@ -177,26 +177,36 @@ unsafe fn get_capability_impl(
         // observability is active, so this extra FFI never touches the traced-off fast path). The
         // legacy `MLX_EP_CLAIM_DEBUG` env still forces the raw stderr dump for quick debugging.
         let tr = crate::trace::tracer();
-        let mut rejected: Vec<(String, usize, String)> = Vec::new();
+        let mut rejected: Vec<(String, usize, String, Vec<String>)> = Vec::new();
         if tr.active() || std::env::var_os("MLX_EP_CLAIM_DEBUG").is_some() {
             use std::collections::BTreeMap;
-            let mut acc: BTreeMap<String, (usize, String)> = BTreeMap::new();
+            // Per op-type: (count, first-reason, up to a few node names for locating them).
+            let mut acc: BTreeMap<String, (usize, String, Vec<String>)> = BTreeMap::new();
             for (&node, &ok) in nodes.iter().zip(supported.iter()) {
                 if !ok {
                     let view = NodeView::new(ep.ort_api, node);
-                    let e = acc.entry(view.op_type()).or_insert((0, String::new()));
+                    let e = acc.entry(view.op_type()).or_insert((0, String::new(), Vec::new()));
                     e.0 += 1;
                     if e.1.is_empty() {
                         e.1 = crate::registry::decline_reason(&view);
                     }
+                    if e.2.len() < 16 {
+                        let nm = view.name();
+                        if !nm.is_empty() {
+                            e.2.push(nm);
+                        }
+                    }
                 }
             }
-            rejected = acc.into_iter().map(|(op, (n, why))| (op, n, why)).collect();
+            rejected = acc
+                .into_iter()
+                .map(|(op, (n, why, names))| (op, n, why, names))
+                .collect();
             rejected.sort_by(|a, b| b.1.cmp(&a.1));
             if std::env::var_os("MLX_EP_CLAIM_DEBUG").is_some() {
-                let items: Vec<(&String, usize)> =
-                    rejected.iter().map(|(op, n, _)| (op, *n)).collect();
-                eprintln!("[rust-mlx-ep] unclaimed op types: {items:?}");
+                for (op, n, why, names) in &rejected {
+                    eprintln!("[rust-mlx-ep] unclaimed {op} x{n} ({why}): {names:?}");
+                }
             }
         }
 

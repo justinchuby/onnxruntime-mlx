@@ -30,8 +30,13 @@ The EP's key runtime events are surfaced as structured, env-gated tracer events
 
 1. **Claiming view** (`ep.claim`) — `mlx.getcapability` instant per GetCapability
    with `claimed` / `total` / `unclaimed` / `fused_subgraphs` (fragmentation
-   signal) plus per-op `fallback_<Op>` reasons; counters `mlx.claimed_nodes`,
-   `mlx.unclaimed_nodes`, `mlx.fused_subgraphs`.
+   signal) plus, for every declined op-type, a `fallback_<Op>` arg carrying the
+   count, an **actionable reason** (what IS accepted / how to fix it — e.g.
+   *"Resize: only static `sizes`/`scales` are claimed … export a static-shape
+   model"*), and the concrete **node names** so you can locate each one in the
+   graph (`… — nodes: [Resize_156, Resize_140]`). Counters `mlx.claimed_nodes`,
+   `mlx.unclaimed_nodes`, `mlx.fused_subgraphs`. (Set `MLX_EP_CLAIM_DEBUG=1` to
+   also dump the same per-node breakdown to stderr without a full trace.)
 2. **Execution-path view** (`ep.path`) — `mlx.compute[<path>]` instant per Compute
    naming the path (`decode` / `prefill` / `general` / `eager`), the compile-cache
    state (`HIT` / `MISS` / `RETRACE`), the `shape_key`, and node count; counter
