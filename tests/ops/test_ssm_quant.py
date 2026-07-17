@@ -395,3 +395,50 @@ def test_linear_attention_qwen35_scalar_decay(with_past: bool, dyn_time: bool) -
     if not _cpu_supports(model, feeds):
         pytest.skip("ORT CPU lacks com.microsoft.LinearAttention (per-head-scalar decay) in this build")
     m.assert_matches_cpu(model, feeds, rtol=2e-3, atol=2e-3)
+
+
+# Real Qwen3.5-0.8B GatedDeltaNet dims: 16 query/value heads, d_k == d_v == 128, per-head SCALAR
+# decay. The `gated_delta` rule at T > chunk_size (64) takes the CHUNKED prefill path (batched
+# matmuls); every other rule and the T == 1 decode step stay on the recurrent unroll.
+#
+# DECODE (T == 1) covers all four rules — the recurrent state is bounded for a single step, so all
+# match ORT CPU to ~1e-7.
+@pytest.mark.parametrize("rule", _LINATTN_RULES)
+@pytest.mark.parametrize("dyn_time", [False, True], ids=["static_T", "dynamic_T"])
+def test_linear_attention_qwen35_real_decode(rule: str, dyn_time: bool) -> None:
+    model, feeds = _linear_attention_model(
+        rule, B=1, T=1, q_heads=16, kv_heads=16, d_k=128, d_v=128,
+        with_past=True, scalar_decay=True, dyn_time=dyn_time,
+    )
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU lacks com.microsoft.LinearAttention (per-head-scalar decay) in this build")
+    m.assert_matches_cpu(model, feeds, rtol=2e-3, atol=2e-3)
+
+
+# PREFILL (T == 128: two full chunks; T == 200: non-multiple of the 64-wide chunk, exercising the
+# zero padding, plus a carried past_state). `gated_delta` here is the deliverable: the chunked path.
+# `gated` / `linear` stay on the recurrent path (bounded state) and guard against regressions.
+#
+# The `delta` rule is intentionally excluded from the large-T prefill cases: it applies NO decay, so
+# its recurrent state grows without bound (outputs reach magnitude ~1e5 at T=128 and ~1e6 at T=200
+# with these random inputs). ORT CPU evaluates the contrib kernel with a different internal
+# (chunked) summation order than any recurrent unroll, and at that magnitude fp32 rounding alone
+# exceeds a 2e-3 gate — so the comparison is not physically meaningful for `delta` at large T. Its
+# correctness is covered by the bounded T == 1 decode case above and the small-dim op tests.
+@pytest.mark.parametrize("rule", ["linear", "gated", "gated_delta"])
+@pytest.mark.parametrize(
+    "T,with_past",
+    [(128, False), (200, True)],
+    ids=["prefill_T128", "prefill_T200_past"],
+)
+@pytest.mark.parametrize("dyn_time", [False, True], ids=["static_T", "dynamic_T"])
+def test_linear_attention_qwen35_real_prefill(
+    rule: str, T: int, with_past: bool, dyn_time: bool
+) -> None:
+    model, feeds = _linear_attention_model(
+        rule, B=1, T=T, q_heads=16, kv_heads=16, d_k=128, d_v=128,
+        with_past=with_past, scalar_decay=True, dyn_time=dyn_time,
+    )
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU lacks com.microsoft.LinearAttention (per-head-scalar decay) in this build")
+    m.assert_matches_cpu(model, feeds, rtol=2e-3, atol=2e-3)

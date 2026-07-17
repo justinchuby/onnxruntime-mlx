@@ -14,6 +14,7 @@ use crate::registry::{
 use crate::sys::mlx;
 use crate::sys::ort;
 use crate::{deny, require};
+use std::os::raw::c_char;
 
 const T_INT64: ort::ONNXTensorElementDataType =
     ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;
@@ -321,6 +322,237 @@ fn repeat_axis(
     ctx.emit(|res, s| unsafe { mlx::mlx_repeat_axis(res, a, repeats, axis, s) })
 }
 
+// ---- chunked gated-delta helpers ----------------------------------------------------------------
+
+const CHUNK_SIZE: i32 = 64;
+
+/// Zero-pad `a` at the END of `axis` by `high` elements, then force contiguous (chunk reshapes and
+/// the batched matmuls below all require a dense buffer). `high == 0` still returns a contiguous
+/// copy so a subsequent `reshape` never sees a strided view.
+fn pad_axis_end(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    axis: i32,
+    high: i32,
+    dt: mlx::mlx_dtype,
+) -> Result<mlx::mlx_array, MlxError> {
+    if high == 0 {
+        return ctx.contiguous(a);
+    }
+    let zero = la_scalar(ctx, 0.0, dt)?;
+    let axes = [axis];
+    let lo = [0i32];
+    let hi = [high];
+    let mode = b"constant\0";
+    let out = ctx.emit(|res, s| unsafe {
+        mlx::mlx_pad(
+            res,
+            a,
+            axes.as_ptr(),
+            1,
+            lo.as_ptr(),
+            1,
+            hi.as_ptr(),
+            1,
+            zero,
+            mode.as_ptr() as *const c_char,
+            s,
+        )
+    })?;
+    ctx.contiguous(out)
+}
+
+fn tril(ctx: &mut TranslationContext, a: mlx::mlx_array, k: i32) -> Result<mlx::mlx_array, MlxError> {
+    ctx.emit(|res, s| unsafe { mlx::mlx_tril(res, a, k, s) })
+}
+
+fn exp_arr(ctx: &mut TranslationContext, a: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+    ctx.emit(|res, s| unsafe { mlx::mlx_exp(res, a, s) })
+}
+
+/// Transpose the last two axes of a rank-N array (N in {4,5}).
+fn transpose_last2(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    rank: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let mut axes: Vec<i32> = (0..rank).collect();
+    axes.swap((rank - 1) as usize, (rank - 2) as usize);
+    ctx.transpose(a, &axes)
+}
+
+/// Select chunk `i` along axis 2 of a rank-5 `[B,H,nc,C,X]` tensor, returning `[B,H,C,X]`.
+fn chunk5(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    i: i32,
+    b: i32,
+    h: i32,
+    c: i32,
+    x: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let s = ctx.slice(a, &[0, 0, i, 0, 0], &[b, h, i + 1, c, x])?;
+    ctx.reshape(s, &[b, h, c, x])
+}
+
+/// Select chunk `i` along axis 2 of a rank-4 `[B,H,nc,C]` tensor, returning `[B,H,C]`.
+fn chunk4(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    i: i32,
+    b: i32,
+    h: i32,
+    c: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let s = ctx.slice(a, &[0, 0, i, 0], &[b, h, i + 1, c])?;
+    ctx.reshape(s, &[b, h, c])
+}
+
+/// Chunked gated-delta / delta linear attention (chunk_size = 64). A faithful MLX port of HF
+/// Qwen3.5's `torch_chunk_gated_delta_rule`; numerically identical to the recurrent unroll (the
+/// ground-truth handler), but expressed as batched matmuls so PREFILL fills the GPU. All ops are
+/// static-shape (the C-axis forward-substitution is a fixed 64-iteration loop), so the whole thing
+/// is captured inside `mlx_compile`.
+///
+/// Inputs are already in `[B,H,T,·]` head layout with GQA tiling applied and the query pre-scaled.
+/// `g_bht` is the per-head SCALAR decay `[B,H,T]` (zeros for the `delta` rule); `beta_bht` is
+/// `[B,H,T]`. `state` is the initial `[B,H,d_k,d_v]` recurrent state.
+#[allow(clippy::too_many_arguments)]
+fn linear_attention_chunked(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    q4: mlx::mlx_array,
+    k4: mlx::mlx_array,
+    v4: mlx::mlx_array,
+    g_bht: mlx::mlx_array,
+    beta_bht: mlx::mlx_array,
+    mut state: mlx::mlx_array,
+    b: i32,
+    h: i32,
+    d_k: i32,
+    d_v: i32,
+    t_len: i32,
+    dt: mlx::mlx_dtype,
+) -> Result<(), MlxError> {
+    let c = CHUNK_SIZE;
+    let pad = (c - t_len % c) % c;
+    let tp = t_len + pad;
+    let nc = tp / c;
+
+    // Pad time to a chunk multiple (query/key/value with zeros; beta/g with zeros too).
+    let q = pad_axis_end(ctx, q4, 2, pad, dt)?; // [B,H,tp,d_k]
+    let k = pad_axis_end(ctx, k4, 2, pad, dt)?; // [B,H,tp,d_k]
+    let v = pad_axis_end(ctx, v4, 2, pad, dt)?; // [B,H,tp,d_v]
+    let beta = pad_axis_end(ctx, beta_bht, 2, pad, dt)?; // [B,H,tp]
+    let g = pad_axis_end(ctx, g_bht, 2, pad, dt)?; // [B,H,tp]
+
+    // v_beta / k_beta on the flat (unchunked) tensors, then reshape everything into chunks.
+    let beta_col = ctx.expand_dims(beta, 3)?; // [B,H,tp,1]
+    let v_beta = ctx.mul(v, beta_col)?; // [B,H,tp,d_v]
+    let k_beta = ctx.mul(k, beta_col)?; // [B,H,tp,d_k]
+
+    let q_c = ctx.reshape(q, &[b, h, nc, c, d_k])?;
+    let k_c = ctx.reshape(k, &[b, h, nc, c, d_k])?;
+    let k_beta_c = ctx.reshape(k_beta, &[b, h, nc, c, d_k])?;
+    let v_beta_c = ctx.reshape(v_beta, &[b, h, nc, c, d_v])?;
+    let g_c = ctx.reshape(g, &[b, h, nc, c])?; // [B,H,nc,C]
+
+    // Cumulative decay within each chunk and the pairwise decay matrix.
+    let g_cum = ctx.emit(|res, s| unsafe { mlx::mlx_cumsum(res, g_c, 3, false, true, s) })?; // [B,H,nc,C]
+    let gi = ctx.expand_dims(g_cum, 4)?; // [B,H,nc,C,1]
+    let gj = ctx.expand_dims(g_cum, 3)?; // [B,H,nc,1,C]
+    let diff = ctx.sub(gi, gj)?; // [B,H,nc,C,C]
+    let low = tril(ctx, diff, 0)?;
+    let dexp = exp_arr(ctx, low)?;
+    let decay_mask = tril(ctx, dexp, 0)?; // [B,H,nc,C,C]
+
+    // Upper-triangular (incl. diagonal) boolean mask, broadcast over batch/chunk.
+    let ones_cc = ctx.emit(|res, s| unsafe {
+        mlx::mlx_ones(res, [c, c].as_ptr(), 2, mlx::mlx_dtype__MLX_BOOL, s)
+    })?;
+    let mask = ctx.emit(|res, s| unsafe { mlx::mlx_triu(res, ones_cc, 0, s) })?;
+    let zero = la_scalar(ctx, 0.0, dt)?;
+
+    // attn = -((k_beta @ key^T) * decay_mask) with the upper triangle (incl. diagonal) zeroed.
+    let k_t = transpose_last2(ctx, k_c, 5)?; // [B,H,nc,d_k,C]
+    let kk = ctx.matmul(k_beta_c, k_t)?; // [B,H,nc,C,C]
+    let kk = ctx.mul(kk, decay_mask)?;
+    let neg = ctx.emit(|res, s| unsafe { mlx::mlx_negative(res, kk, s) })?;
+    let mut attn = ctx.where_(mask, zero, neg)?; // [B,H,nc,C,C]
+
+    // Forward substitution: build (I - A)^-1 in place (fixed C-iteration loop, static shapes).
+    for i in 1..c {
+        let row = ctx.slice(attn, &[0, 0, 0, i, 0], &[b, h, nc, i + 1, i])?; // [B,H,nc,1,i]
+        let sub = ctx.slice(attn, &[0, 0, 0, 0, 0], &[b, h, nc, i, i])?; // [B,H,nc,i,i]
+        let prod = ctx.matmul(row, sub)?; // [B,H,nc,1,i]
+        let new_row = ctx.add(row, prod)?;
+        attn = ctx.slice_update(attn, new_row, &[0, 0, 0, i, 0], &[b, h, nc, i + 1, i])?;
+    }
+    let eye = ctx.emit(|res, s| unsafe { mlx::mlx_eye(res, c, c, 0, dt, s) })?;
+    let attn = ctx.add(attn, eye)?; // [B,H,nc,C,C]
+
+    let u_val = ctx.matmul(attn, v_beta_c)?; // [B,H,nc,C,d_v] ("pseudo-values")
+    let g_exp = exp_arr(ctx, g_cum)?; // [B,H,nc,C]
+    let g_exp_col = ctx.expand_dims(g_exp, 4)?; // [B,H,nc,C,1]
+    let k_scaled = ctx.mul(k_beta_c, g_exp_col)?; // [B,H,nc,C,d_k]
+    let k_cumdecay = ctx.matmul(attn, k_scaled)?; // [B,H,nc,C,d_k]
+
+    // Sequential scan over chunks; each step is a handful of batched matmuls over [B,H,C,·].
+    let mut out_chunks: Vec<mlx::mlx_array> = Vec::with_capacity(nc as usize);
+    for i in 0..nc {
+        let q_i = chunk5(ctx, q_c, i, b, h, c, d_k)?; // [B,H,C,d_k]
+        let k_i = chunk5(ctx, k_c, i, b, h, c, d_k)?; // [B,H,C,d_k]
+        let v_i = chunk5(ctx, u_val, i, b, h, c, d_v)?; // [B,H,C,d_v]
+        let dm_i = chunk5(ctx, decay_mask, i, b, h, c, c)?; // [B,H,C,C]
+        let gc_i = chunk4(ctx, g_cum, i, b, h, c)?; // [B,H,C]
+        let kcd_i = chunk5(ctx, k_cumdecay, i, b, h, c, d_k)?; // [B,H,C,d_k]
+
+        let k_i_t = transpose_last2(ctx, k_i, 4)?; // [B,H,d_k,C]
+        let attn_i = ctx.matmul(q_i, k_i_t)?; // [B,H,C,C]
+        let attn_i = ctx.mul(attn_i, dm_i)?;
+
+        let v_prime = ctx.matmul(kcd_i, state)?; // [B,H,C,d_v]
+        let v_new = ctx.sub(v_i, v_prime)?; // [B,H,C,d_v]
+
+        let gc_i_exp = exp_arr(ctx, gc_i)?; // [B,H,C]
+        let gc_i_col = ctx.expand_dims(gc_i_exp, 3)?; // [B,H,C,1]
+        let q_dec = ctx.mul(q_i, gc_i_col)?; // [B,H,C,d_k]
+        let attn_inter = ctx.matmul(q_dec, state)?; // [B,H,C,d_v]
+        let intra = ctx.matmul(attn_i, v_new)?; // [B,H,C,d_v]
+        let out_i = ctx.add(attn_inter, intra)?; // [B,H,C,d_v]
+        out_chunks.push(out_i);
+
+        // State update: decay carried state and add the chunk's key/value outer product.
+        let g_last = ctx.slice(gc_i, &[0, 0, c - 1], &[b, h, c])?; // [B,H,1]
+        let g_last_exp = exp_arr(ctx, g_last)?; // [B,H,1]
+        let g_last_e = ctx.expand_dims(g_last_exp, 3)?; // [B,H,1,1]
+        let decayed = ctx.mul(state, g_last_e)?; // [B,H,d_k,d_v]
+
+        let w = ctx.sub(g_last, gc_i)?; // [B,H,C]  (g_last - g_cum)
+        let w_exp = exp_arr(ctx, w)?;
+        let w_col = ctx.expand_dims(w_exp, 3)?; // [B,H,C,1]
+        let kw = ctx.mul(k_i, w_col)?; // [B,H,C,d_k]
+        let kw_t = transpose_last2(ctx, kw, 4)?; // [B,H,d_k,C]
+        let upd = ctx.matmul(kw_t, v_new)?; // [B,H,d_k,d_v]
+        state = ctx.add(decayed, upd)?;
+    }
+
+    if !n.outputs.is_empty() && !n.outputs[0].name.is_empty() {
+        let out5 = ctx.stack(&out_chunks, 2)?; // [B,H,nc,C,d_v]
+        let out_flat = ctx.reshape(out5, &[b, h, tp, d_v])?;
+        let out = ctx.slice(out_flat, &[0, 0, 0, 0], &[b, h, t_len, d_v])?; // drop padding
+        let out = ctx.transpose(out, &[0, 2, 1, 3])?; // [B,T,H,d_v]
+        let out = ctx.reshape(out, &[b, t_len, h * d_v])?;
+        let out = ctx.contiguous(out)?;
+        ctx.bind(&n.outputs[0], out);
+    }
+    if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
+        let ps = ctx.contiguous(state)?;
+        ctx.bind(&n.outputs[1], ps);
+    }
+    Ok(())
+}
+
 fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let rule = str_attr(n, "update_rule", "gated_delta");
     let uses_decay = rule_uses_decay(&rule);
@@ -425,6 +657,23 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     } else {
         None
     };
+
+    // Prefill fast path: the CHUNKED gated-delta algorithm (chunk_size = 64) is numerically
+    // identical (in exact arithmetic) to the recurrent unroll but expressed as batched matmuls, so
+    // it fills the GPU on long sequences. It is used ONLY for `gated_delta` with a per-head SCALAR
+    // decay layout (the Qwen3.5 GatedDeltaNet form). The `delta` rule is deliberately excluded: with
+    // no decay to bound it, the `(I - A)^-1` forward substitution amplifies fp32 rounding and
+    // diverges from ORT CPU (verified: ~1e-1..1e1 abs error at T>=128), so it stays on the stable
+    // recurrent path — as do `linear` / `gated` (no delta correction) and the per-key-dim decay
+    // layout. Decode / small T (t_len <= chunk_size) also stay recurrent (best for T == 1).
+    let use_chunked = rule == "gated_delta" && decay_per_head_scalar && t_len > CHUNK_SIZE;
+    if use_chunked {
+        let g_bht = decay4.expect("gated_delta carries decay"); // [B,H,T] scalar decay
+        let beta_bht = beta3.expect("gated_delta carries beta"); // [B,H,T]
+        return linear_attention_chunked(
+            ctx, n, q4, k4, v4, g_bht, beta_bht, state, b, h, d_k, d_v, t_len, dt,
+        );
+    }
 
     let mut outs: Vec<mlx::mlx_array> = Vec::with_capacity(t_len as usize);
     for t in 0..t_len {
