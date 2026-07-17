@@ -247,19 +247,25 @@ def _linear_attention_model(
     with_past: bool,
     scale: float | None = None,
     dtype: ir.DataType = DT.FLOAT,
+    scalar_decay: bool = False,
+    dyn_time: bool = False,
 ):
     """Build a single-node com.microsoft::LinearAttention model plus random feeds."""
     np_dtype = np.float16 if dtype == DT.FLOAT16 else np.float32
     rng = np.random.default_rng(
-        hash((rule, B, T, q_heads, kv_heads, d_k, d_v, with_past, scale)) & 0xFFFFFFFF
+        hash((rule, B, T, q_heads, kv_heads, d_k, d_v, with_past, scale, scalar_decay, dyn_time))
+        & 0xFFFFFFFF
     )
 
     def feed(*shape: int) -> np.ndarray:
         return (rng.standard_normal(shape) * 0.3).astype(np_dtype)
 
-    query = m.tensor("query", dtype, [B, T, q_heads * d_k])
-    key = m.tensor("key", dtype, [B, T, q_heads * d_k])
-    value = m.tensor("value", dtype, [B, T, kv_heads * d_v])
+    # Declared time dim: symbolic (dynamic) when dyn_time, so the claim's dynamic-time path and the
+    # shape-keyed trace's concrete-extent resolution are exercised. Feeds always carry a concrete T.
+    Tdim = "seq" if dyn_time else T
+    query = m.tensor("query", dtype, [B, Tdim, q_heads * d_k])
+    key = m.tensor("key", dtype, [B, Tdim, q_heads * d_k])
+    value = m.tensor("value", dtype, [B, Tdim, kv_heads * d_v])
     ins: list[ir.Value] = [query, key, value]
     feeds: dict[str, np.ndarray] = {
         "query": feed(B, T, q_heads * d_k),
@@ -279,19 +285,19 @@ def _linear_attention_model(
     elif last >= 3:
         ins.append(empty)
     if present[4]:
-        ins.append(m.tensor("decay", dtype, [B, T, kv_heads * d_k]))
+        # Per-head SCALAR decay [B,T,H] (Qwen3.5 GatedDeltaNet) vs per-head-per-dim [B,T,H*d_k].
+        dwidth = kv_heads if scalar_decay else kv_heads * d_k
+        ins.append(m.tensor("decay", dtype, [B, Tdim, dwidth]))
         # negative so exp(decay) in (0, 1) — a stable multiplicative gate
-        feeds["decay"] = (-np.abs(rng.standard_normal((B, T, kv_heads * d_k))) * 0.1).astype(
-            np_dtype
-        )
+        feeds["decay"] = (-np.abs(rng.standard_normal((B, T, dwidth))) * 0.1).astype(np_dtype)
     elif last >= 4:
         ins.append(empty)
     if present[5]:
-        ins.append(m.tensor("beta", dtype, [B, T, kv_heads]))
+        ins.append(m.tensor("beta", dtype, [B, Tdim, kv_heads]))
         feeds["beta"] = (rng.random((B, T, kv_heads)) * 0.5 + 0.25).astype(np_dtype)
 
     outs = [
-        m.tensor("output", dtype, [B, T, kv_heads * d_v]),
+        m.tensor("output", dtype, [B, Tdim, kv_heads * d_v]),
         m.tensor("present_state", dtype, [B, kv_heads, d_k, d_v]),
     ]
     attrs = [
@@ -375,3 +381,17 @@ def test_linear_attention_zero_size(B: int, T: int) -> None:
 @pytest.mark.skip(reason="dynamic (symbolic) T is left to ORT CPU — the unroll needs a static T")
 def test_linear_attention_dynamic_t_left_to_cpu() -> None:
     ...
+
+
+# Qwen3.5 / Qwen3-Next GatedDeltaNet form: more value heads than query heads, a per-head SCALAR
+# decay gate [B,T,H], and a DYNAMIC (symbolic) time dim — the shape real decoder exports carry.
+@pytest.mark.parametrize("with_past", [False, True])
+@pytest.mark.parametrize("dyn_time", [False, True], ids=["static_T", "dynamic_T"])
+def test_linear_attention_qwen35_scalar_decay(with_past: bool, dyn_time: bool) -> None:
+    model, feeds = _linear_attention_model(
+        "gated_delta", B=1, T=3, q_heads=2, kv_heads=4, d_k=16, d_v=16,
+        with_past=with_past, scalar_decay=True, dyn_time=dyn_time,
+    )
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU lacks com.microsoft.LinearAttention (per-head-scalar decay) in this build")
+    m.assert_matches_cpu(model, feeds, rtol=2e-3, atol=2e-3)

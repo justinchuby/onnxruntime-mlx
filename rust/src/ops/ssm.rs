@@ -344,6 +344,16 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     let vsh = ctx.shape_of(value);
     let b = qsh[0];
     let t_len = qsh[1];
+    // A dynamic (symbolic) time extent only survives into a SHAPELESS trace; the static-length
+    // unroll below needs a concrete T. Fail the trace so the plan falls back to the eager translator
+    // (or the shape-keyed general trace), where `shape_of` reports the real extent. The claim admits
+    // dynamic-time nodes precisely because this guard keeps them correct.
+    if t_len < 0 {
+        return Err(
+            "MLX LinearAttention: dynamic time extent in a shapeless trace — falls back to eager"
+                .to_string(),
+        );
+    }
     let d_k = qsh[2] / hq;
     let d_v = vsh[2] / h;
 
@@ -391,11 +401,23 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     let scale_s = la_scalar(ctx, scale, dt)?;
     let q4 = ctx.mul(q4, scale_s)?; // scaled query
 
-    let decay4 = if uses_decay {
+    // Decay may be per-head-per-key-dim `[B,T,H*d_k]` (the op-test / ORT reference form) OR a
+    // per-head SCALAR `[B,T,H]` (Qwen3.5 GatedDeltaNet exports one gate per value head). Detect it
+    // from the input's last dim; the scalar form broadcasts across (d_k, d_v).
+    let decay_per_head_scalar = uses_decay && {
+        let d = ctx.resolve(&n.inputs[4])?;
+        let ds = ctx.shape_of(d);
+        ds.len() == 3 && ds[2] == h
+    };
+    let decay4 = if !uses_decay {
+        None
+    } else if decay_per_head_scalar {
+        // [B,T,H] -> [B,H,T]
+        let d = ctx.resolve(&n.inputs[4])?;
+        Some(ctx.transpose(d, &[0, 2, 1])?)
+    } else {
         let d = ctx.resolve(&n.inputs[4])?;
         Some(to_heads(ctx, d, h, d_k)?)
-    } else {
-        None
     };
     let beta3 = if uses_beta {
         let bta = ctx.resolve(&n.inputs[5])?;
@@ -407,9 +429,16 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     let mut outs: Vec<mlx::mlx_array> = Vec::with_capacity(t_len as usize);
     for t in 0..t_len {
         if let Some(decay4) = decay4 {
-            let slab = time_slab(ctx, decay4, t, b, h, d_k)?; // (B, H, d_k)
-            let g = ctx.emit(|res, s| unsafe { mlx::mlx_exp(res, slab, s) })?;
-            let g = ctx.expand_dims(g, 3)?; // (B,H,d_k,1)
+            let g = if decay_per_head_scalar {
+                let slab = time_slab2(ctx, decay4, t, b, h)?; // (B, H)
+                let g = ctx.emit(|res, s| unsafe { mlx::mlx_exp(res, slab, s) })?;
+                let g = ctx.expand_dims(g, 2)?; // (B,H,1)
+                ctx.expand_dims(g, 3)? // (B,H,1,1) — broadcasts over (d_k,d_v)
+            } else {
+                let slab = time_slab(ctx, decay4, t, b, h, d_k)?; // (B, H, d_k)
+                let g = ctx.emit(|res, s| unsafe { mlx::mlx_exp(res, slab, s) })?;
+                ctx.expand_dims(g, 3)? // (B,H,d_k,1)
+            };
             state = ctx.mul(state, g)?;
         }
         let k_t = time_slab(ctx, k4, t, b, h, d_k)?; // (B, H, d_k)
@@ -488,11 +517,9 @@ fn linear_attention_claim(node: &NodeView) -> ClaimResult {
         "query must be rank 3, got shape {:?}",
         q.shape
     );
-    require!(
-        q.shape[1] >= 0,
-        "query time dimension must be static, got shape {:?}",
-        q.shape
-    );
+    // The time dimension may be DYNAMIC (symbolic `[-1]`, as in real Qwen3.5/Qwen3-Next decoder
+    // exports): the shape-keyed general trace resolves the concrete extent at trace time, and the
+    // handler unrolls over it (with a guard that falls back to eager if it is ever traced shapeless).
     let float_ok = |i: usize| -> bool {
         if !node.input_present(i) {
             return true;
