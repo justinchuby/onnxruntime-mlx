@@ -108,7 +108,7 @@ impl Array {
         // internal allocate+copy — record which, plus the bytes borrowed. Gated (one atomic load off).
         let tr = crate::trace::tracer();
         if tr.active() {
-            let aligned = (data as usize) % 16384 == 0;
+            let aligned = (data as usize).is_multiple_of(16384);
             tr.record_managed_wrap((arr.size() * arr.itemsize()) as u64, aligned);
         }
         arr
@@ -152,7 +152,7 @@ impl Array {
 
     /// Raw byte pointer to the (evaluated) contiguous buffer, for the unified-memory copy-out.
     pub fn data_bytes(&self) -> *const u8 {
-        unsafe { mlx::mlx_array_data_uint8(self.raw) as *const u8 }
+        unsafe { mlx::mlx_array_data_uint8(self.raw) }
     }
 }
 
@@ -252,7 +252,7 @@ pub fn eval(outputs: &VectorArray) -> Result<(), String> {
 ///     pointer — the *base* (un-compiled) closure whose body traces the whole decode subgraph.
 ///   * [`Closure::compile`] runs `mlx_compile` (shapeless) on a base closure and returns the
 ///     *compiled* closure that fuses the traced graph into far fewer kernel launches.
-/// [`Closure::apply`] runs the closure over an input vector, returning the output arrays.
+///     [`Closure::apply`] runs the closure over an input vector, returning the output arrays.
 pub struct Closure {
     raw: mlx::mlx_closure,
 }

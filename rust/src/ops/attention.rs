@@ -124,6 +124,8 @@ fn sdpa(
 }
 
 /// Dispatch SDPA over the (mutually exclusive) causal / array-mask / no-mask cases.
+// The dispatch needs all kernel inputs to preserve the separate mask cases.
+#[allow(clippy::too_many_arguments)]
 fn sdpa_dispatch(
     ctx: &mut TranslationContext,
     q: mlx::mlx_array,
@@ -974,7 +976,7 @@ fn is_int32(t: ort::ONNXTensorElementDataType) -> bool {
 ///   * 11-input (…, seqlens_k, total_seq, cos, sin, position_ids, attention_bias) — the Gemma3n
 ///     variant with `do_rotary=0` (cos/sin absent, rotary applied by external RotaryEmbedding nodes)
 ///     and an additive `attention_bias` mask (input 10). `position_ids` (input 9) is ignored.
-/// All floating inputs/outputs share one dtype; seqlens_k / total_sequence_length are int32.
+///     All floating inputs/outputs share one dtype; seqlens_k / total_sequence_length are int32.
 fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
     require!(node.num_outputs() > 0, "requires at least 1 output");
     let out_type = match node.output_info(0) {

@@ -440,7 +440,7 @@ fn parse_einsum(raw: &str) -> Option<(Vec<String>, String)> {
     let simple = |t: &str| -> bool {
         let mut seen = HashSet::new();
         t.chars()
-            .all(|c| ('a'..='z').contains(&c) && seen.insert(c))
+            .all(|c| c.is_ascii_lowercase() && seen.insert(c))
     };
     if !simple(&output) || !terms.iter().all(|t| simple(t)) {
         return None;
@@ -490,7 +490,7 @@ fn einsum_claim(node: &NodeView) -> ClaimResult {
         output_term.len()
     );
     let mut dims: HashMap<char, i64> = HashMap::new();
-    for i in 0..ni {
+    for (i, term) in input_terms.iter().enumerate() {
         let info = match node.input_info(i) {
             Some(x) => x,
             None => deny!("missing tensor type/shape info on input {i}"),
@@ -502,12 +502,12 @@ fn einsum_claim(node: &NodeView) -> ClaimResult {
             crate::registry::ort_dtype_name(info.dtype)
         );
         require!(
-            info.shape.len() == input_terms[i].len(),
+            info.shape.len() == term.len(),
             "input {i} rank {} must match equation term length {}",
             info.shape.len(),
-            input_terms[i].len()
+            term.len()
         );
-        for (axis, label) in input_terms[i].chars().enumerate() {
+        for (axis, label) in term.chars().enumerate() {
             let d = info.shape[axis];
             match dims.get(&label).copied() {
                 None => {

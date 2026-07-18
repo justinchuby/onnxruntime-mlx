@@ -143,10 +143,12 @@ pub fn detect_seq_len(
 ) -> Option<i32> {
     for node in &plan.nodes {
         for inp in &node.inputs {
-            if inp.source == Src::CtxInput && !inp.constant && inp.name == "input_ids" {
-                if let Ok((_d, shape, _t)) = read_ctx_input_raw(api, kctx, inp.ctx_index) {
-                    return shape.last().map(|&d| d as i32);
-                }
+            if inp.source == Src::CtxInput
+                && !inp.constant
+                && inp.name == "input_ids"
+                && let Ok((_d, shape, _t)) = read_ctx_input_raw(api, kctx, inp.ctx_index)
+            {
+                return shape.last().map(|&d| d as i32);
             }
         }
     }
@@ -311,7 +313,7 @@ pub fn try_compiled(
         let plan = unsafe { &*plan_ptr };
         for di in &slot.get(plan).dyn_inputs {
             let (_data, shape, _dtype) = read_ctx_input_raw(api, kctx, di.ctx_index)?;
-            if shape.iter().any(|&d| d == 0) {
+            if shape.contains(&0) {
                 return Ok(false);
             }
         }
@@ -711,13 +713,13 @@ fn trace_body(
     if matches!(cfg.shape_mode, ShapeMode::ShapeKeyed) && cfg.rope_as_data && shared_kv {
         let s = detect_seq_len(api, kctx, unsafe { &*plan_ptr }).unwrap_or(1);
         let mask_idx = slot.get(unsafe { &*plan_ptr }).mask_ctx_index;
-        if mask_idx >= 0 {
-            if let Ok((_d, shape, _t)) = read_ctx_input_raw(api, kctx, mask_idx as usize) {
-                let vp = (*shape.get(1).unwrap_or(&0) as i32) - s;
-                if vp >= 0 {
-                    narrow = true;
-                    static_valid_past = vp;
-                }
+        if mask_idx >= 0
+            && let Ok((_d, shape, _t)) = read_ctx_input_raw(api, kctx, mask_idx as usize)
+        {
+            let vp = (*shape.get(1).unwrap_or(&0) as i32) - s;
+            if vp >= 0 {
+                narrow = true;
+                static_valid_past = vp;
             }
         }
     }

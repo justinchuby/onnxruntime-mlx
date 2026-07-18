@@ -192,7 +192,7 @@ fn output_datatype_ok(node: &NodeView) -> bool {
 fn dft_claim(node: &NodeView) -> ClaimResult {
     let ni = node.num_inputs();
     require!(
-        ni >= 1 && ni <= 3 && node.num_outputs() == 1,
+        (1..=3).contains(&ni) && node.num_outputs() == 1,
         "expects 1-3 inputs and 1 output, got {}in/{}out",
         ni,
         node.num_outputs()
@@ -324,7 +324,7 @@ fn stft_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
 fn stft_claim(node: &NodeView) -> ClaimResult {
     let ni = node.num_inputs();
     require!(
-        ni >= 2 && ni <= 4 && node.num_outputs() == 1,
+        (2..=4).contains(&ni) && node.num_outputs() == 1,
         "expects 2-4 inputs and 1 output, got {}in/{}out",
         ni,
         node.num_outputs()

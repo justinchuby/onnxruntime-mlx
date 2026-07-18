@@ -6,13 +6,13 @@
 //! declined for independent offload in `ep::get_capability`) and realizes the control flow by
 //! translating the body inline through `TranslationContext::run_subgraph`:
 //!
-//!   * If   — HOST-READABLE `cond` (graph input / initializer / outer-scope); read host-side and
-//!            translate the taken branch only. A data-dependent `cond` produced by another node is
-//!            declined (runs on ORT's CPU control-flow kernels).
+//!   * If — HOST-READABLE `cond` (graph input / initializer / outer-scope); read host-side and
+//!     translate the taken branch only. A data-dependent `cond` produced by another node is declined
+//!     (runs on ORT's CPU control-flow kernels).
 //!   * Scan — STATIC trip count (scan axis length known from the input shape). Unroll the body over
-//!            axis 0, carrying state and stacking scan outputs. Forward, axis 0 only (MVP).
+//!     axis 0, carrying state and stacking scan outputs. Forward, axis 0 only (MVP).
 //!   * Loop — CONSTANT trip count M with a cond that is a pass-through of the loop cond input (the
-//!            canonical `for i in range(M)` idiom). Unroll M times; carried-state-only (MVP).
+//!     canonical `for i in range(M)` idiom). Unroll M times; carried-state-only (MVP).
 //!
 //! Anything outside these static/foldable forms is left unclaimed and runs on ORT's CPU control-flow
 //! kernels (with the body ops still offloaded to MLX via the ordinary flat path).
@@ -174,33 +174,29 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
 
     for t in 0..trip {
         let mut bin: Vec<mlx::mlx_array> = Vec::with_capacity(num_state + num_scan);
-        for i in 0..num_state {
-            bin.push(state[i]);
-        }
-        for i in 0..num_scan {
-            let shp = ctx.shape_of(scans[i]);
+        bin.extend_from_slice(&state[..num_state]);
+        for scan in &scans[..num_scan] {
+            let shp = ctx.shape_of(*scan);
             let mut start = vec![0i32; shp.len()];
             let mut stop = shp.clone();
             start[0] = t;
             stop[0] = t + 1;
-            let sl = ctx.slice(scans[i], &start, &stop)?;
+            let sl = ctx.slice(*scan, &start, &stop)?;
             let sq = ctx.squeeze(sl, 0)?;
             bin.push(sq);
         }
         let bout = ctx.run_subgraph(&body, &bin)?;
-        for i in 0..num_state {
-            state[i] = bout[i];
-        }
-        for i in 0..num_scan_out {
-            collected[i].push(bout[num_state + i]);
+        state[..num_state].copy_from_slice(&bout[..num_state]);
+        for (coll, b) in collected.iter_mut().zip(&bout[num_state..num_state + num_scan_out]) {
+            coll.push(*b);
         }
     }
 
-    for i in 0..num_state {
-        ctx.bind(&n.outputs[i], state[i]);
+    for (o, &s) in n.outputs[..num_state].iter().zip(&state[..num_state]) {
+        ctx.bind(o, s);
     }
-    for i in 0..num_scan_out {
-        let stacked = ctx.stack(&collected[i], 0)?;
+    for (i, coll) in collected.iter().enumerate() {
+        let stacked = ctx.stack(coll, 0)?;
         ctx.bind(&n.outputs[num_state + i], stacked);
     }
     Ok(())
@@ -338,18 +334,14 @@ fn loop_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         let mut bin: Vec<mlx::mlx_array> = Vec::with_capacity(2 + num_state);
         bin.push(iter);
         bin.push(condin);
-        for i in 0..num_state {
-            bin.push(state[i]);
-        }
+        bin.extend_from_slice(&state[..num_state]);
         let bout = ctx.run_subgraph(&body, &bin)?;
         // bout[0] = cond_out (pass-through, guaranteed true by claim); bout[1..] = carried state.
-        for i in 0..num_state {
-            state[i] = bout[1 + i];
-        }
+        state[..num_state].copy_from_slice(&bout[1..1 + num_state]);
     }
 
-    for i in 0..num_state {
-        ctx.bind(&n.outputs[i], state[i]);
+    for (o, &s) in n.outputs[..num_state].iter().zip(&state[..num_state]) {
+        ctx.bind(o, s);
     }
     Ok(())
 }

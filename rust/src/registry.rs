@@ -41,8 +41,14 @@ macro_rules! deny {
 #[macro_export]
 macro_rules! require {
     ($cond:expr, $($fmt:tt)+) => {
-        if !($cond) {
-            return ::core::result::Result::Err(::std::borrow::Cow::Owned(format!($($fmt)+)));
+        // Bind to a bool first so the macro negates `!ok` (a bool), not `!(a < b)` directly — the
+        // latter trips clippy::neg_cmp_op_on_partial_ord in every caller that passes a float
+        // comparison. (An `#[allow]` on the `if` would be an unstable expression attribute, E0658.)
+        {
+            let ok: bool = $cond;
+            if !ok {
+                return ::core::result::Result::Err(::std::borrow::Cow::Owned(format!($($fmt)+)));
+            }
         }
     };
 }

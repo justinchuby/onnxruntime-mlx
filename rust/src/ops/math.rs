@@ -228,7 +228,7 @@ fn gelu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         .map(String::as_str)
         .unwrap_or("none");
     let gate = if approximate == "tanh" {
-        let c0 = scalar_like(ctx, x, 0.797_884_56)?; // sqrt(2/pi)
+        let c0 = scalar_like(ctx, x, 0.797_884_6)?; // sqrt(2/pi)
         let c1 = scalar_like(ctx, x, 0.044_715)?;
         let x2 = ctx.binary(mlx::mlx_multiply, x, x)?;
         let x3 = ctx.binary(mlx::mlx_multiply, x2, x)?;

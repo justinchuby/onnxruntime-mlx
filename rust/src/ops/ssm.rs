@@ -4,7 +4,7 @@
 //!   * CausalConvWithState (com.microsoft) — fused causal depthwise conv1d with carry state.
 //!   * LinearAttention (com.microsoft) — chunked/recurrent linear attention (4 update rules,
 //!     GQA) via static-length unrolling over the time axis T.
-//! Only statically translatable, MLX-supported forms are claimed; the rest fall to ORT CPU.
+//!     Only statically translatable, MLX-supported forms are claimed; the rest fall to ORT CPU.
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::registry::{
@@ -206,9 +206,9 @@ fn causal_conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
 
 fn causal_conv_claim(node: &NodeView) -> ClaimResult {
     let ni = node.num_inputs();
-    require!(ni >= 2 && ni <= 4, "expects 2-4 inputs, got {ni}");
+    require!((2..=4).contains(&ni), "expects 2-4 inputs, got {ni}");
     let no = node.num_outputs();
-    require!(no >= 1 && no <= 2, "expects 1-2 outputs, got {no}");
+    require!((1..=2).contains(&no), "expects 1-2 outputs, got {no}");
     require!(
         !has_interior_gap(node),
         "optional inputs may only be omitted from the trailing end"
@@ -721,8 +721,8 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     if !n.outputs.is_empty() && !n.outputs[0].name.is_empty() {
         // Assemble output (B, T, H*d_v): each step's (B, H, d_v) reshapes to (B, 1, H*d_v).
         let mut out = ctx.reshape(outs[0], &[b, 1, h * d_v])?;
-        for t in 1..t_len as usize {
-            let slab = ctx.reshape(outs[t], &[b, 1, h * d_v])?;
+        for &step_out in outs.iter().skip(1) {
+            let slab = ctx.reshape(step_out, &[b, 1, h * d_v])?;
             out = ctx.concat2(out, slab, 1)?;
         }
         let out = ctx.contiguous(out)?;

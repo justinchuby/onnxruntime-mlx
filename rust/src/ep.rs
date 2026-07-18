@@ -211,7 +211,7 @@ unsafe fn get_capability_impl(
                 .into_iter()
                 .map(|(op, (n, why, names))| (op, n, why, names))
                 .collect();
-            rejected.sort_by(|a, b| b.1.cmp(&a.1));
+            rejected.sort_by_key(|a| std::cmp::Reverse(a.1));
             if std::env::var_os("MLX_EP_CLAIM_DEBUG").is_some() {
                 for (op, n, why, names) in &rejected {
                     eprintln!("[rust-mlx-ep] unclaimed {op} x{n} ({why}): {names:?}");
@@ -306,7 +306,7 @@ fn build_convex_clusters(
     supported: &[bool],
 ) -> Vec<Vec<usize>> {
     let n = nodes.len();
-    let words = (n + 63) / 64;
+    let words = n.div_ceil(64);
 
     // tensor name -> producing node index.
     let mut producer: HashMap<String, usize> = HashMap::new();
@@ -327,11 +327,12 @@ fn build_convex_clusters(
             if name.is_empty() {
                 continue;
             }
-            if let Some(&i) = producer.get(&name) {
-                if i != j && seen.insert(i) {
-                    succ[i].push(j);
-                    pred[j].push(i);
-                }
+            if let Some(&i) = producer.get(&name)
+                && i != j
+                && seen.insert(i)
+            {
+                succ[i].push(j);
+                pred[j].push(i);
             }
         }
     }
@@ -388,14 +389,14 @@ fn build_convex_clusters(
     }
 
     let is_convex = |s_bits: &[u64], reach_s: &[u64], reach: &[Vec<u64>]| -> bool {
-        for x in 0..n {
+        for (x, reaches) in reach.iter().enumerate() {
             if bit_test(s_bits, x) {
                 continue;
             }
             if !bit_test(reach_s, x) {
                 continue; // S cannot reach x
             }
-            if bit_intersects(&reach[x], s_bits) {
+            if bit_intersects(reaches, s_bits) {
                 return false; // x can reach back into S
             }
         }
@@ -426,8 +427,8 @@ fn build_convex_clusters(
     }
 
     let mut grouped: HashMap<usize, Vec<usize>> = HashMap::new();
-    for i in 0..n {
-        if supported[i] {
+    for (i, &is_supported) in supported.iter().enumerate() {
+        if is_supported {
             let root = uf_find(&mut parent, i);
             grouped.entry(root).or_default().push(i);
         }
@@ -1155,11 +1156,12 @@ unsafe fn topo_order(
                 if name.is_empty() {
                     continue;
                 }
-                if let Some(&i) = producer.get(&name) {
-                    if i != j && seen.insert(i) {
-                        succ[i].push(j);
-                        indeg[j] += 1;
-                    }
+                if let Some(&i) = producer.get(&name)
+                    && i != j
+                    && seen.insert(i)
+                {
+                    succ[i].push(j);
+                    indeg[j] += 1;
                 }
             }
         }

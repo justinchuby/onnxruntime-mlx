@@ -941,6 +941,8 @@ impl<'a> TranslationContext<'a> {
     }
 
     /// A kept 1-D (or 0-D) int64 array wrapping host values (Shape/Size outputs).
+    // builder-style: constructs an mlx_array from host data into the ctx arena.
+    #[allow(clippy::wrong_self_convention)]
     pub fn from_host_i64(&mut self, data: &[i64], shape: &[i32]) -> mlxsys::mlx_array {
         self.keep(Array::from_data(
             data.as_ptr() as *const c_void,
@@ -1088,6 +1090,8 @@ impl<'a> TranslationContext<'a> {
     }
 
     /// A kept array wrapping host bytes of the given `dtype` and `shape`.
+    // builder-style: constructs an mlx_array from host data into the ctx arena.
+    #[allow(clippy::wrong_self_convention)]
     pub fn from_host(&mut self, data: *const c_void, shape: &[i32], dtype: mlxsys::mlx_dtype) -> mlxsys::mlx_array {
         self.keep(Array::from_data(data, shape, dtype))
     }
@@ -1112,7 +1116,7 @@ impl<'a> TranslationContext<'a> {
 
     /// Raw host byte pointer of an (evaluated) array — valid until the array is freed.
     pub fn host_ptr(&self, a: mlxsys::mlx_array) -> *const u8 {
-        unsafe { mlxsys::mlx_array_data_uint8(a) as *const u8 }
+        unsafe { mlxsys::mlx_array_data_uint8(a) }
     }
 
     /// Like [`Self::contiguous_eval`] but permitted inside a general trace. ONLY call when the array
@@ -1474,17 +1478,15 @@ impl<'a> TranslationContext<'a> {
         let mut ext: Vec<(OutRef, mlxsys::mlx_array)> = Vec::new();
         for node in nodes {
             for o in &node.outputs {
-                if o.external {
-                    if let Some(&a) = self.env.get(&o.name) {
-                        let casted = self.astype(a, mlx_dtype_from_onnx(o.otype))?;
-                        // Materialise to row-major contiguous HERE (once, at the boundary) so the
-                        // flat copy_out memcpy is valid. Intermediate view ops (transpose/slice/
-                        // expand/split) therefore stay zero-copy strided views that MLX folds into
-                        // consuming kernels; only actual subgraph outputs pay a contiguous copy.
-                        let casted = self.contiguous(casted)?;
-                        outs.append(casted);
-                        ext.push((o.clone(), casted));
-                    }
+                if o.external && let Some(&a) = self.env.get(&o.name) {
+                    let casted = self.astype(a, mlx_dtype_from_onnx(o.otype))?;
+                    // Materialise to row-major contiguous HERE (once, at the boundary) so the
+                    // flat copy_out memcpy is valid. Intermediate view ops (transpose/slice/
+                    // expand/split) therefore stay zero-copy strided views that MLX folds into
+                    // consuming kernels; only actual subgraph outputs pay a contiguous copy.
+                    let casted = self.contiguous(casted)?;
+                    outs.append(casted);
+                    ext.push((o.clone(), casted));
                 }
             }
         }
@@ -1566,7 +1568,7 @@ pub(crate) fn copy_out_raw_delta(
 ) -> Result<(), MlxError> {
     let arr = std::mem::ManuallyDrop::new(Array::from_raw(a)); // borrow, do not free
     let shape = arr.shape();
-    let count: usize = shape.iter().map(|&d| d as usize).product::<usize>().max(0);
+    let count: usize = shape.iter().map(|&d| d as usize).product();
     let itemsize = arr.itemsize();
     unsafe {
         let api = &*ort_api;

@@ -562,17 +562,19 @@ fn col2im_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
         .unwrap_or_else(|| vec![0; 2 * r]);
 
     let mut kk: i64 = 1;
-    for d in 0..r {
-        kk *= block_shape[d];
+    for &block in &block_shape {
+        kk *= block;
     }
     let c = is[1] / kk as i32;
     let mut ss: i64 = 1;
-    for d in 0..r {
-        ss *= image_shape[d];
+    for &image_dim in &image_shape {
+        ss *= image_dim;
     }
 
     let mut npos = vec![0i64; r];
     let mut img_stride = vec![1i64; r];
+    // Indexing aligned shape vectors keeps each spatial dimension's values together.
+    #[allow(clippy::needless_range_loop)]
     for d in 0..r {
         npos[d] = (image_shape[d] + pads[d] + pads[r + d] - dil[d] * (block_shape[d] - 1) - 1)
             / stride[d]
@@ -632,8 +634,8 @@ fn col2im_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
         for nv in 0..nn {
             for cv in 0..c {
                 let base = ((nv as i64 * c as i64 + cv as i64) * ss) as i32;
-                for j in 0..(m as usize) {
-                    scatter_idx[w] = base + spatial[j];
+                for &spatial_index in &spatial {
+                    scatter_idx[w] = base + spatial_index;
                     w += 1;
                 }
             }
@@ -645,9 +647,7 @@ fn col2im_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
     }
 
     let mut out_shape = vec![nn, c];
-    for d in 0..r {
-        out_shape.push(image_shape[d] as i32);
-    }
+    out_shape.extend(image_shape.iter().map(|&d| d as i32));
     let out = reshape(ctx, out_acc, &out_shape)?;
     let out = astype(ctx, out, out_dtype(n))?;
     let y = contiguous(ctx, out)?;
@@ -692,7 +692,7 @@ fn col2im_claim(node: &NodeView) -> ClaimResult {
     };
     let r = image_shape.len();
     require!(
-        r >= 1 && r <= 3 && block_shape.len() == r,
+        (1..=3).contains(&r) && block_shape.len() == r,
         "Col2Im supports 1-3 spatial dims with matching image_shape/block_shape ranks \
          (got image rank {r}, block rank {})",
         block_shape.len()

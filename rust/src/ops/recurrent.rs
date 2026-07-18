@@ -475,14 +475,12 @@ fn recurrent_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
             dt,
         )?);
     }
-    let num_dir = results.len();
-
     // Y : [S, num_dir, B, H]. Per direction: stack Ys along axis 0 -> [S,B,H], expand -> [S,1,B,H];
     // concat directions along axis 1.
     if !n.outputs.is_empty() && !n.outputs[0].name.is_empty() {
         let mut y: Option<mlx::mlx_array> = None;
-        for d in 0..num_dir {
-            let stacked = ctx.stack(&results[d].ys, 0)?; // [S,B,H]
+        for result in &results {
+            let stacked = ctx.stack(&result.ys, 0)?; // [S,B,H]
             let ydir = ctx.expand_dims(stacked, 1)?; // [S,1,B,H]
             y = Some(match y {
                 None => ydir,
@@ -498,8 +496,8 @@ fn recurrent_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
     // Y_h : [num_dir, B, H].
     if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
         let mut yh: Option<mlx::mlx_array> = None;
-        for d in 0..num_dir {
-            let hd = ctx.expand_dims(results[d].final_h, 0)?; // [1,B,H]
+        for result in &results {
+            let hd = ctx.expand_dims(result.final_h, 0)?; // [1,B,H]
             yh = Some(match yh {
                 None => hd,
                 Some(prev) => ctx.concat2(prev, hd, 0)?,
@@ -514,9 +512,9 @@ fn recurrent_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
     // Y_c : [num_dir, B, H] (LSTM only).
     if op == "LSTM" && n.outputs.len() >= 3 && !n.outputs[2].name.is_empty() {
         let mut yc: Option<mlx::mlx_array> = None;
-        for d in 0..num_dir {
+        for result in &results {
             let cd = ctx.expand_dims(
-                results[d]
+                result
                     .final_c
                     .ok_or_else(|| "LSTM: final cell state missing".to_string())?,
                 0,

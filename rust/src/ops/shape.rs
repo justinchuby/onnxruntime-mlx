@@ -270,9 +270,7 @@ fn expand_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
         };
         let d_out = if d_in == 1 {
             d_t
-        } else if d_t == 1 {
-            d_in
-        } else if d_in == d_t {
+        } else if d_t == 1 || d_in == d_t {
             d_in
         } else {
             incompatible = true;
@@ -354,8 +352,8 @@ fn split_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
         // Cumulative boundary indices (exclusive of the final section) for mlx_split_sections.
         let mut indices: Vec<i32> = Vec::new();
         let mut acc = 0i32;
-        for i in 0..sizes.len().saturating_sub(1) {
-            acc += sizes[i] as i32;
+        for &sz in &sizes[..sizes.len().saturating_sub(1)] {
+            acc += sz as i32;
             indices.push(acc);
         }
         let mut pv = VectorArray::new();
@@ -961,7 +959,7 @@ fn expand_claim(node: &NodeView) -> ClaimResult {
 fn slice_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
     require!(
-        nin >= 3 && nin <= 5 && node.num_outputs() == 1,
+        (3..=5).contains(&nin) && node.num_outputs() == 1,
         "Slice expects 3-5 inputs and 1 output, got {}in/{}out",
         nin,
         node.num_outputs()
@@ -1117,7 +1115,7 @@ fn tile_claim(node: &NodeView) -> ClaimResult {
 fn pad_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
     require!(
-        nin >= 2 && nin <= 4 && node.num_outputs() == 1,
+        (2..=4).contains(&nin) && node.num_outputs() == 1,
         "Pad expects 2-4 inputs and 1 output, got {}in/{}out",
         nin,
         node.num_outputs()
@@ -1326,6 +1324,9 @@ fn constant_of_shape_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+// The per-axis claim guards below index parallel arrays (input.shape/output.shape/sizes/scales) by
+// axis and use the axis index in their decline messages — an iterator form would be less clear.
+#[allow(clippy::needless_range_loop)]
 fn resize_claim(node: &NodeView) -> ClaimResult {
     require!(
         node.num_inputs() >= 3 && node.num_inputs() <= 4 && node.num_outputs() == 1,

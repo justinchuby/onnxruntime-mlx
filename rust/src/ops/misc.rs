@@ -220,7 +220,7 @@ fn trilu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
     } else {
         0
     };
-    let upper = n.ints.get("upper").map_or(true, |&v| v != 0);
+    let upper = n.ints.get("upper").is_none_or(|&v| v != 0);
     let out = ctx.emit(|res, s| unsafe {
         if upper {
             mlx::mlx_triu(res, x, k, s)
@@ -234,7 +234,7 @@ fn trilu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
 
 fn trilu_claim(node: &NodeView) -> ClaimResult {
     let ni = node.num_inputs();
-    require!(ni >= 1 && ni <= 2 && node.num_outputs() == 1,
+    require!((1..=2).contains(&ni) && node.num_outputs() == 1,
         "expects 1 or 2 inputs and 1 output, got {ni}in/{}out", node.num_outputs());
     let (x, out) = match (node.input_info(0), node.output_info(0)) {
         (Some(a), Some(b)) => (a, b),
@@ -315,9 +315,9 @@ fn det_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let src = ctx.host_ptr(ev) as *const f32;
     let mut out = vec![0f32; batch];
     let mut a = vec![0f64; m * m];
-    for b in 0..batch {
-        for i in 0..m * m {
-            a[i] = unsafe { *src.add(b * m * m + i) } as f64;
+    for (b, out_value) in out.iter_mut().enumerate() {
+        for (i, value) in a.iter_mut().enumerate() {
+            *value = unsafe { *src.add(b * m * m + i) } as f64;
         }
         let mut det = 1.0f64;
         for col in 0..m {
@@ -349,7 +349,7 @@ fn det_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
                 }
             }
         }
-        out[b] = det as f32;
+        *out_value = det as f32;
     }
     let out_shape: Vec<i32> = shape[..rank - 2].to_vec();
     let res = ctx.from_host(out.as_ptr() as *const c_void, &out_shape, F32);
@@ -561,7 +561,7 @@ fn bind_i64_opt(ctx: &mut TranslationContext, n: &NodeDesc, slot: usize, data: &
 
 fn unique_claim(node: &NodeView) -> ClaimResult {
     let no = node.num_outputs();
-    require!(node.num_inputs() == 1 && no >= 1 && no <= 4,
+    require!(node.num_inputs() == 1 && (1..=4).contains(&no),
         "Unique: data-dependent output shape with no MLX primitive — stays on CPU");
     require!(!node.has_attr("axis"),
         "Unique: data-dependent output shape with no MLX primitive — stays on CPU");
@@ -696,7 +696,7 @@ fn sce_loss_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErro
 
 fn loss_claim(node: &NodeView, sce: bool) -> ClaimResult {
     let ni = node.num_inputs();
-    require!(ni >= 2 && ni <= 3, "expects 2 or 3 inputs, got {ni}");
+    require!((2..=3).contains(&ni), "expects 2 or 3 inputs, got {ni}");
     let max_out = if sce { 2 } else { 1 };
     let no = node.num_outputs();
     require!(no >= 1 && no <= max_out, "expects 1 to {max_out} outputs, got {no}");

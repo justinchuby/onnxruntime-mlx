@@ -397,7 +397,7 @@ impl MlxTracer {
                 let mut val = format!("x{n}: {reason}");
                 if !names.is_empty() {
                     let shown = names.join(", ");
-                    let more = if *n as usize > names.len() { ", …" } else { "" };
+                    let more = if *n > names.len() { ", …" } else { "" };
                     val = format!("{val} — nodes: [{shown}{more}]");
                 }
                 args = args.with(format!("fallback_{op}"), val);
@@ -615,7 +615,7 @@ impl MlxTracer {
         ));
         if !s.rejected.is_empty() {
             let mut items: Vec<(&String, &(u64, String))> = s.rejected.iter().collect();
-            items.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+            items.sort_by_key(|a| std::cmp::Reverse(a.1.0));
             out.push_str("           unclaimed (→ CPU):\n");
             for (op, (n, reason)) in items.iter().take(8) {
                 let why = if reason.is_empty() { "no MLX handler / opset" } else { reason };
@@ -902,7 +902,7 @@ impl MlxTracer {
         }
         let total: u64 = snapshot.iter().map(|(_, us, _)| *us).sum();
         let mut ranked = snapshot;
-        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked.sort_by_key(|a| std::cmp::Reverse(a.1));
         ranked.truncate(10);
 
         let kind = "build-time (fusion intact; per-kernel GPU detail: ONNX_GENAI_MLX_GPU_CAPTURE)";
@@ -1033,28 +1033,27 @@ impl MlxTracer {
 
         // GPU utilisation % (and freq) via IOReport — a real delta between this sample
         // and the previous one. First call primes the baseline and yields nothing.
-        if let Ok(mut util) = self.gpu_util.lock() {
-            if let Some(sampler) = util.as_mut() {
-                if let Some(reading) = sampler.sample() {
-                    let mut c = match self.counters.lock() {
-                        Ok(g) => g,
-                        Err(p) => p.into_inner(),
-                    };
-                    c.push(CounterSample {
-                        track: "mlx.gpu_util_pct".to_string(),
-                        key: "pct".to_string(),
-                        value: reading.active_pct,
-                        ts,
-                    });
-                    if let Some(mhz) = reading.freq_mhz {
-                        c.push(CounterSample {
-                            track: "mlx.gpu_freq_mhz".to_string(),
-                            key: "mhz".to_string(),
-                            value: mhz,
-                            ts,
-                        });
-                    }
-                }
+        if let Ok(mut util) = self.gpu_util.lock()
+            && let Some(sampler) = util.as_mut()
+            && let Some(reading) = sampler.sample()
+        {
+            let mut c = match self.counters.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            c.push(CounterSample {
+                track: "mlx.gpu_util_pct".to_string(),
+                key: "pct".to_string(),
+                value: reading.active_pct,
+                ts,
+            });
+            if let Some(mhz) = reading.freq_mhz {
+                c.push(CounterSample {
+                    track: "mlx.gpu_freq_mhz".to_string(),
+                    key: "mhz".to_string(),
+                    value: mhz,
+                    ts,
+                });
             }
         }
     }
@@ -1186,11 +1185,11 @@ mod gpu {
     use std::os::raw::{c_char, c_void};
 
     #[allow(non_camel_case_types)]
-    type SEL = *const c_void;
+    type Sel = *const c_void;
 
     unsafe extern "C" {
         fn MTLCreateSystemDefaultDevice() -> *mut c_void;
-        fn sel_registerName(name: *const c_char) -> SEL;
+        fn sel_registerName(name: *const c_char) -> Sel;
         fn objc_msgSend();
     }
 
@@ -1212,7 +1211,7 @@ mod gpu {
             // objc_msgSend is variadic/untyped in the header; transmute to the exact
             // shape of the message we are sending. On arm64 the integer result comes
             // back in x0 for this signature.
-            let send: extern "C" fn(*mut c_void, SEL) -> u64 =
+            let send: extern "C" fn(*mut c_void, Sel) -> u64 =
                 std::mem::transmute(objc_msgSend as *const c_void);
             send(obj as *mut c_void, sel)
         }
@@ -1282,7 +1281,7 @@ mod signpost {
                     OS_SIGNPOST_INTERVAL_END,
                     self.id,
                     self.name,
-                    b"\0".as_ptr() as *const c_char,
+                    c"".as_ptr(),
                     buf.as_mut_ptr(),
                     buf.len() as u32,
                 );
@@ -1306,7 +1305,7 @@ mod signpost {
                 OS_SIGNPOST_INTERVAL_BEGIN,
                 id,
                 name_ptr,
-                b"\0".as_ptr() as *const c_char,
+                c"".as_ptr(),
                 buf.as_mut_ptr(),
                 buf.len() as u32,
             );
@@ -1574,21 +1573,19 @@ mod ioreport {
         pub fn new() -> Option<GpuUtil> {
             unsafe {
                 let cf = dlopen(
-                    b"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation\0"
-                        .as_ptr() as *const c_char,
+                    c"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation".as_ptr(),
                     RTLD_NOW,
                 );
                 // IOReport's symbols live in /usr/lib/libIOReport.dylib (the framework
                 // bundle path is not dlopen-able — it is cache-only under a different
                 // install name). Fall back to the framework path just in case.
                 let mut ior = dlopen(
-                    b"/usr/lib/libIOReport.dylib\0".as_ptr() as *const c_char,
+                    c"/usr/lib/libIOReport.dylib".as_ptr(),
                     RTLD_NOW,
                 );
                 if ior.is_null() {
                     ior = dlopen(
-                        b"/System/Library/PrivateFrameworks/IOReport.framework/IOReport\0"
-                            .as_ptr() as *const c_char,
+                        c"/System/Library/PrivateFrameworks/IOReport.framework/IOReport".as_ptr(),
                         RTLD_NOW,
                     );
                 }
@@ -1623,7 +1620,7 @@ mod ioreport {
 
                 let group = cfstr_create(
                     std::ptr::null(),
-                    b"GPU Stats\0".as_ptr() as *const c_char,
+                    c"GPU Stats".as_ptr(),
                     CF_UTF8,
                 );
                 if group.is_null() {

@@ -2,18 +2,17 @@
 //! ai.onnx integer/QLinear coverage. Faithful port of the C++ `ops/quant.cc`, `ops/quantize.cc` and
 //! `ops/quant2.cc`:
 //!
-//!   * MatMulNBits          — int4 block-quantized weight matmul. BOTH the 3-input SYMMETRIC form
-//!                            (implicit zero point 8) AND the 4-input ASYMMETRIC form with an explicit
-//!                            packed-int4 `zero_points` input (uint8). Dequant is w = (q - zp) * scale.
-//!                            For MLX-supported group sizes (32/64/128) the weight is repacked ONCE to
-//!                            MLX affine uint32 words + per-block scales/biases and run through
-//!                            `mlx_quantized_matmul` (weights stay compressed — the decode memory win).
-//!                            For block_size 16 (which `mlx_quantized_matmul` does not support) the
-//!                            weight is dequantized in-graph to fp32 [N,K] and a dense `mlx_matmul` runs.
+//!   * MatMulNBits — int4 block-quantized weight matmul. BOTH the 3-input SYMMETRIC form
+//!     (implicit zero point 8) AND the 4-input ASYMMETRIC form with an explicit packed-int4
+//!     `zero_points` input (uint8). Dequant is w = (q - zp) * scale. For MLX-supported group sizes
+//!     (32/64/128) the weight is repacked ONCE to MLX affine uint32 words + per-block scales/biases
+//!     and run through `mlx_quantized_matmul` (weights stay compressed — the decode memory win). For
+//!     block_size 16 (which `mlx_quantized_matmul` does not support) the weight is dequantized
+//!     in-graph to fp32 [N,K] and a dense `mlx_matmul` runs.
 //!   * GatherBlockQuantized — int4 block-quantized embedding gather + dequant, SYMMETRIC (zp=8) and
-//!                            ASYMMETRIC (explicit packed-int4 `zero_points`) forms.
-//!   * QuantizeLinear        — y = saturate(round(x / scale) + zero_point).
-//!   * DequantizeLinear      — y = (x - zero_point) * scale.
+//!     ASYMMETRIC (explicit packed-int4 `zero_points`) forms.
+//!   * QuantizeLinear — y = saturate(round(x / scale) + zero_point).
+//!   * DequantizeLinear — y = (x - zero_point) * scale.
 //!   * DynamicQuantizeLinear — compute affine uint8 scale + zero point from x's [min,0]..[max,0] range.
 //!   * MatMulInteger         — (A - a_zp) @ (B - b_zp), int32 (exact via a small-K fp32 GEMM gate).
 //!   * ConvInteger           — conv(x - x_zp, w - w_zp), int32 (exact via a small-accumulation gate).
@@ -212,10 +211,8 @@ fn matmulnbits_repack(
 ) -> Result<mlx::mlx_array, MlxError> {
     let wref = &n.inputs[1];
     let key = format!("{}#qw", wref.name);
-    if wref.constant || wref.source == Src::Initializer {
-        if let Some(w) = ctx.cache_get(&key) {
-            return Ok(w);
-        }
+    if (wref.constant || wref.source == Src::Initializer) && let Some(w) = ctx.cache_get(&key) {
+        return Ok(w);
     }
     let host = ctx.raw_host(wref)?;
     let src = host.data as *const u8;
@@ -302,8 +299,8 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
     let a = ctx.resolve(&n.inputs[0])?;
     let ashape = ctx.shape_of(a);
     let mut m: i32 = 1;
-    for i in 0..ashape.len().saturating_sub(1) {
-        m *= ashape[i];
+    for &d in &ashape[..ashape.len().saturating_sub(1)] {
+        m *= d;
     }
     let a2 = ctx.reshape(a, &[m, k as i32])?;
     let act_dt = ctx.dtype_of(a2);
@@ -326,7 +323,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
         };
         let gs = mlx::mlx_optional_int_ { value: block as i32, has_value: true };
         let bb = mlx::mlx_optional_int_ { value: 4, has_value: true };
-        let mode = b"affine\0".as_ptr() as *const std::os::raw::c_char;
+        let mode = c"affine".as_ptr();
         ctx.emit(|res, s| unsafe {
             mlx::mlx_quantized_matmul(res, a2, w, scales2d, biases, true, gs, bb, mode, s)
         })?
@@ -949,7 +946,7 @@ fn gather_block_quantized_claim(node: &NodeView) -> ClaimResult {
 
 fn quantize_linear_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!(nin >= 2 && nin <= 3 && node.num_outputs() >= 1,
+    require!((2..=3).contains(&nin) && node.num_outputs() >= 1,
         "expects 2 or 3 inputs and at least one output");
     let (x, s, o) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
         (Some(x), Some(s), Some(o)) => (x, s, o),
@@ -975,7 +972,7 @@ fn quantize_linear_claim(node: &NodeView) -> ClaimResult {
 
 fn dequantize_linear_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!(nin >= 2 && nin <= 3 && node.num_outputs() >= 1,
+    require!((2..=3).contains(&nin) && node.num_outputs() >= 1,
         "expects 2 or 3 inputs and at least one output");
     let (x, s, o) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
         (Some(x), Some(s), Some(o)) => (x, s, o),
@@ -1018,7 +1015,7 @@ fn dynamic_quantize_linear_claim(node: &NodeView) -> ClaimResult {
 
 fn matmul_integer_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!(nin >= 2 && nin <= 4 && node.num_outputs() >= 1,
+    require!((2..=4).contains(&nin) && node.num_outputs() >= 1,
         "expects 2 to 4 inputs and at least one output");
     let (a, b, o) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
         (Some(a), Some(b), Some(o)) => (a, b, o),
@@ -1115,12 +1112,12 @@ fn conv_accum_exact(w_shape: &[i64]) -> bool {
     for &d in &w_shape[2..] {
         n_acc *= d;
     }
-    n_acc >= 1 && n_acc <= MAX_EXACT_ACCUM
+    (1..=MAX_EXACT_ACCUM).contains(&n_acc)
 }
 
 fn conv_integer_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!(nin >= 2 && nin <= 4 && node.num_outputs() == 1,
+    require!((2..=4).contains(&nin) && node.num_outputs() == 1,
         "expects 2 to 4 inputs and 1 output");
     let (x, w, o) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
         (Some(x), Some(w), Some(o)) => (x, w, o),
@@ -1182,7 +1179,7 @@ fn qlinear_matmul_claim(node: &NodeView) -> ClaimResult {
 
 fn qlinear_conv_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!(nin >= 8 && nin <= 9 && node.num_outputs() == 1,
+    require!((8..=9).contains(&nin) && node.num_outputs() == 1,
         "expects 8 or 9 inputs and 1 output");
     let (x, w, o) = match (node.input_info(0), node.input_info(3), node.output_info(0)) {
         (Some(x), Some(w), Some(o)) => (x, w, o),
@@ -1248,6 +1245,7 @@ const QMOE_IN_ROUTER_W: usize = 14;
 /// MLX array in `comp_dt`. Faithful to ORT's `DequantizeBlock`: value = (q - 2^(bits-1)) * scale,
 /// where the nibble/byte for column c is at packed index c/pack with shift (c%pack)*bits, and each
 /// scale spans `block_size` columns along K (column-wise = one scale per row when block_size==0).
+#[allow(clippy::too_many_arguments)] // full expert-weight geometry (E/N/K/bits/block) + ctx/indices
 fn qmoe_dequant(
     ctx: &mut TranslationContext,
     n: &NodeDesc,
@@ -1346,7 +1344,7 @@ fn qmoe_activation(
             let x3 = mul(ctx, x2, x)?;
             let cx3 = mul(ctx, x3, c0)?;
             let inner = add(ctx, x, cx3)?;
-            let s_v = f32(ctx, 0.7978845608);
+            let s_v = f32(ctx, 0.797_884_6);
             let s = ctx.astype(s_v, comp_dt)?;
             let scaled = mul(ctx, inner, s)?;
             let th = ctx.unary(mlx::mlx_tanh, scaled)?;

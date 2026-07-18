@@ -317,8 +317,8 @@ fn softmax_claim(node: &NodeView) -> ClaimResult {
 ///   * int32<->int64 (exact within range);
 ///   * int32/int64 -> fp32/fp16 (round-to-nearest, matching CPU static_cast/convert);
 ///   * fp32/fp16 -> int32/int64 (truncation toward zero, matching ONNX Cast + CPU static_cast).
-/// float64/bool/uint are intentionally excluded (not part of the audited detector subgraphs and not
-/// all verified against CPU).
+///     float64/bool/uint are intentionally excluded (not part of the audited detector subgraphs and not
+///     all verified against CPU).
 fn cast_pair_claimable(
     src: ort::ONNXTensorElementDataType,
     dst: ort::ONNXTensorElementDataType,
