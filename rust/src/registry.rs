@@ -763,6 +763,31 @@ impl NodeView {
             && self.is_constant_initializer(i)
     }
 
+    /// True iff input `i` has no producer node — i.e. it is a graph input, an initializer, or an
+    /// outer-scope value. Such values are readable host-side at translate time (`raw_host` handles
+    /// the `Initializer` / `CtxInput` sources). An input WITH a producer is a runtime intermediate
+    /// `raw_host` cannot read.
+    pub fn input_is_host_readable(&self, i: usize) -> bool {
+        let ins = self.inputs_raw();
+        let vi = match ins.get(i) {
+            Some(&vi) if !vi.is_null() => vi,
+            _ => return false,
+        };
+        unsafe {
+            let mut producer: *const ort::OrtNode = std::ptr::null();
+            let st = (self.api().ValueInfo_GetValueProducer.unwrap())(
+                vi,
+                &mut producer,
+                std::ptr::null_mut(),
+            );
+            if !st.is_null() {
+                self.release_status(st);
+                return false;
+            }
+            producer.is_null()
+        }
+    }
+
     /// Read the int64 values of a constant-initializer input `i` AT CLAIM TIME. Returns None when the
     /// input is not a readable int64 constant initializer (→ node left to CPU).
     pub fn read_const_int64(&self, i: usize) -> Option<Vec<i64>> {

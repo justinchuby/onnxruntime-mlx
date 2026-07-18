@@ -6,7 +6,9 @@
 //! declined for independent offload in `ep::get_capability`) and realizes the control flow by
 //! translating the body inline through `TranslationContext::run_subgraph`:
 //!
-//!   * If   — read the runtime `cond` host-side each forward and translate the taken branch only.
+//!   * If   — HOST-READABLE `cond` (graph input / initializer / outer-scope); read host-side and
+//!            translate the taken branch only. A data-dependent `cond` produced by another node is
+//!            declined (runs on ORT's CPU control-flow kernels).
 //!   * Scan — STATIC trip count (scan axis length known from the input shape). Unroll the body over
 //!            axis 0, carrying state and stacking scan outputs. Forward, axis 0 only (MVP).
 //!   * Loop — CONSTANT trip count M with a cond that is a pass-through of the loop cond input (the
@@ -90,6 +92,15 @@ fn if_claim(node: &NodeView) -> ClaimResult {
         node.num_outputs()
     );
     require!(is_bool(node, 0), "condition input must have bool dtype");
+    // The branch is selected host-side at translate time (`if_op` reads the cond via `raw_host`),
+    // so the condition MUST be host-readable: a graph input, initializer, or outer-scope value.
+    // A runtime intermediate (e.g. Phi-4's long-context `Greater(total_seq_len, 4096)` rotary-cache
+    // selector) is not readable by `raw_host` — leave such If nodes to ORT's CPU control-flow
+    // kernels (their body ops still offload to MLX via the ordinary flat path).
+    require!(
+        node.input_is_host_readable(0),
+        "condition must be a graph input/initializer (data-dependent conditions run on CPU)"
+    );
     let subs = node.subgraphs();
     require!(
         subs.len() == 2,
