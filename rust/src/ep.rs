@@ -175,10 +175,10 @@ unsafe fn get_capability_impl(
 
         // Claiming view: build the per-op fallback reasons for the declined nodes (only when
         // observability is active, so this extra FFI never touches the traced-off fast path). The
-        // legacy `MLX_EP_CLAIM_DEBUG` env still forces the raw stderr dump for quick debugging.
+        // legacy `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG` env still forces the raw stderr dump for quick debugging.
         let tr = crate::trace::tracer();
         let mut rejected: Vec<(String, usize, String, Vec<String>)> = Vec::new();
-        if tr.active() || std::env::var_os("MLX_EP_CLAIM_DEBUG").is_some() {
+        if tr.active() || std::env::var_os("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG").is_some() {
             use std::collections::BTreeMap;
             // Per op-type: (count, first-reason, up to a few node names for locating them).
             let mut acc: BTreeMap<String, (usize, String, Vec<String>)> = BTreeMap::new();
@@ -212,7 +212,7 @@ unsafe fn get_capability_impl(
                 .map(|(op, (n, why, names))| (op, n, why, names))
                 .collect();
             rejected.sort_by_key(|a| std::cmp::Reverse(a.1));
-            if std::env::var_os("MLX_EP_CLAIM_DEBUG").is_some() {
+            if std::env::var_os("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG").is_some() {
                 for (op, n, why, names) in &rejected {
                     eprintln!("[rust-mlx-ep] unclaimed {op} x{n} ({why}): {names:?}");
                 }

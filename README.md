@@ -66,7 +66,7 @@ on how the graph is shaped. Rules of thumb, fastest → slowest:
    few islands can make MLX *slower* than CPU — the win scales with fused-region compute size, not
    claim rate alone. Aim to keep declined ops at the graph's edges.
 
-**Diagnosing it yourself:** run with `MLX_EP_CLAIM_DEBUG=1` (or the tracer) to print exactly which
+**Diagnosing it yourself:** run with `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG=1` (or the tracer) to print exactly which
 ops were declined, how many, and an actionable reason for each — the fastest way to see why a graph
 fragmented and what to change (e.g. re-export at a higher opset, give a static shape, drop an fp64
 cast).
@@ -201,11 +201,11 @@ exports, timed as the median of 10 warm runs against the CPU EP on the same mach
 The EP ships a built-in tracer (compiled in by default, **near-zero cost when off**). Recording is
 gated entirely by environment variables — set one, run your model, and inspect the result.
 
-**Get a Perfetto/Chrome trace.** Point `ONNX_GENAI_MLX_TRACE` at an output path; the JSON trace is
+**Get a Perfetto/Chrome trace.** Point `ONNXRUNTIME_EP_MLX_TRACE` at an output path; the JSON trace is
 written when the inference session is torn down:
 
 ```bash
-ONNX_GENAI_MLX_TRACE=/tmp/mlx_trace.json python your_script.py
+ONNXRUNTIME_EP_MLX_TRACE=/tmp/mlx_trace.json python your_script.py
 # then open https://ui.perfetto.dev  (or chrome://tracing) and load /tmp/mlx_trace.json
 ```
 
@@ -219,9 +219,9 @@ fell back to a slower *composed* path (despite a fused kernel existing) are colo
 
 | Env var | Effect |
 |---|---|
-| `ONNX_GENAI_MLX_VERBOSE=1` | Print the end-of-run session summary (claim rate, compute-path breakdown, time attribution) to stderr. |
-| `MLX_EP_CLAIM_DEBUG=1` | Print each unclaimed node + the actionable reason (why the graph fragmented). |
-| `ONNX_GENAI_MLX_SIGNPOST=1` | Emit `os_signpost` intervals so an Instruments *Metal System Trace* correlates. |
+| `ONNXRUNTIME_EP_MLX_VERBOSE=1` | Print the end-of-run session summary (claim rate, compute-path breakdown, time attribution) to stderr. |
+| `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG=1` | Print each unclaimed node + the actionable reason (why the graph fragmented). |
+| `ONNXRUNTIME_EP_MLX_SIGNPOST=1` | Emit `os_signpost` intervals so an Instruments *Metal System Trace* correlates. |
 
 **Per-kernel GPU detail (Xcode).** MLX hides its Metal command buffers inside one fused `mlx_eval`, so
 the JSON trace times the fused eval as a whole. To see *inside* it, capture a boundary eval to a
@@ -229,8 +229,8 @@ the JSON trace times the fused eval as a whole. To see *inside* it, capture a bo
 
 ```bash
 MTL_CAPTURE_ENABLED=1 \
-ONNX_GENAI_MLX_GPU_CAPTURE=/tmp/mlx.gputrace \
-ONNX_GENAI_MLX_GPU_CAPTURE_EVAL=5 \
+ONNXRUNTIME_EP_MLX_GPU_CAPTURE=/tmp/mlx.gputrace \
+ONNXRUNTIME_EP_MLX_GPU_CAPTURE_EVAL=5 \
 python your_script.py
 ```
 

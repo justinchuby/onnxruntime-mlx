@@ -19,7 +19,7 @@
 //!     fused path), a lightweight span per node at graph-build time (`<op_type>`,
 //!     cat `op`), and a rich per-op detail span (shapes / dtype / elements / bytes).
 //!   * **Seeing INSIDE the fused eval — Xcode GPU capture**
-//!     (`ONNX_GENAI_MLX_GPU_CAPTURE=<path.gputrace>`, `ONNX_GENAI_MLX_GPU_CAPTURE_EVAL=<n>`):
+//!     (`ONNXRUNTIME_EP_MLX_GPU_CAPTURE=<path.gputrace>`, `ONNXRUNTIME_EP_MLX_GPU_CAPTURE_EVAL=<n>`):
 //!     capture the Nth boundary eval (default 0) with `mlx_metal_start_capture`/
 //!     `stop_capture` → a `.gputrace` bundle with full per-kernel timing / occupancy /
 //!     bandwidth. This is the faithful detailed view: it captures the REAL fused
@@ -75,24 +75,24 @@ pub enum PathMark {
 
 /// Set to a filesystem path to enable tracing; the Chrome/Perfetto JSON trace is
 /// written there on EP teardown. Unset → tracing disabled (near-zero cost).
-pub const TRACE_ENV: &str = "ONNX_GENAI_MLX_TRACE";
+pub const TRACE_ENV: &str = "ONNXRUNTIME_EP_MLX_TRACE";
 /// Set to `1` to force os_signpost intervals on even when JSON tracing is off.
-pub const SIGNPOST_ENV: &str = "ONNX_GENAI_MLX_SIGNPOST";
+pub const SIGNPOST_ENV: &str = "ONNXRUNTIME_EP_MLX_SIGNPOST";
 /// Set to a `<path>.gputrace` (or `1` for a default path) to wrap a boundary eval in a
 /// Metal GPU capture (`mlx_metal_start_capture` … `stop_capture`). The resulting
 /// `.gputrace` bundle opens in Xcode / Instruments for full per-kernel GPU timing,
 /// occupancy and memory-bandwidth of the REAL fused eval — the faithful detailed view
 /// (`mlx-c` surfaces no per-kernel timing itself, and fine mode perturbs execution).
 /// Requires `MTL_CAPTURE_ENABLED=1` in the environment before process start.
-pub const GPU_CAPTURE_ENV: &str = "ONNX_GENAI_MLX_GPU_CAPTURE";
+pub const GPU_CAPTURE_ENV: &str = "ONNXRUNTIME_EP_MLX_GPU_CAPTURE";
 /// Which eval (0-based) to GPU-capture (default 0). For decode, eval 0 is the
 /// prefill/warmup; set e.g. `5` to capture a representative steady-state decode step.
-pub const GPU_CAPTURE_EVAL_ENV: &str = "ONNX_GENAI_MLX_GPU_CAPTURE_EVAL";
+pub const GPU_CAPTURE_EVAL_ENV: &str = "ONNXRUNTIME_EP_MLX_GPU_CAPTURE_EVAL";
 /// Set to `1` to print the human-readable end-of-run **session summary** (claim rate,
 /// per-path Compute breakdown, memory movement, time attribution) to stderr even when
 /// full JSON tracing is off. When JSON tracing IS on the summary is always emitted (to
 /// stderr AND as trace metadata). Unset + no JSON trace → nothing printed (zero cost).
-pub const VERBOSE_ENV: &str = "ONNX_GENAI_MLX_VERBOSE";
+pub const VERBOSE_ENV: &str = "ONNXRUNTIME_EP_MLX_VERBOSE";
 
 /// Which execution path a fused subgraph's Compute took — the "execution-path view".
 /// Mirrors the dispatch order in [`crate::ep`]'s `compute`: compiled decode → compiled
@@ -221,7 +221,7 @@ pub struct MlxTracer {
     device: usize,
     /// Resolved `.gputrace` capture path (`None` = capture disabled).
     capture_path: Option<PathBuf>,
-    /// Which eval (0-based) to capture — `ONNX_GENAI_MLX_GPU_CAPTURE_EVAL` (default 0).
+    /// Which eval (0-based) to capture — `ONNXRUNTIME_EP_MLX_GPU_CAPTURE_EVAL` (default 0).
     /// Set to e.g. 5 to capture a steady-state DECODE token instead of eval 0 (prefill/warmup).
     capture_eval_target: u64,
     /// Running eval counter; the capture fires when it reaches `capture_eval_target`.
@@ -235,7 +235,7 @@ pub struct MlxTracer {
     gpu_util: Mutex<Option<ioreport::GpuUtil>>,
     /// Human-readable end-of-run digest (claim/path/memory/timing). See [`Summary`].
     summary: Mutex<Summary>,
-    /// Print the session summary to stderr even when JSON tracing is off (`ONNX_GENAI_MLX_VERBOSE`).
+    /// Print the session summary to stderr even when JSON tracing is off (`ONNXRUNTIME_EP_MLX_VERBOSE`).
     verbose: bool,
 }
 
@@ -257,7 +257,7 @@ impl MlxTracer {
             (TraceContext::noop(), None)
         };
 
-        // GPU capture (`ONNX_GENAI_MLX_GPU_CAPTURE`) is independent of JSON tracing: it
+        // GPU capture (`ONNXRUNTIME_EP_MLX_GPU_CAPTURE`) is independent of JSON tracing: it
         // writes a `.gputrace` bundle, not JSON. `1` → a default path in the cwd.
         let capture_path = std::env::var(GPU_CAPTURE_ENV)
             .ok()
@@ -905,7 +905,7 @@ impl MlxTracer {
         ranked.sort_by_key(|a| std::cmp::Reverse(a.1));
         ranked.truncate(10);
 
-        let kind = "build-time (fusion intact; per-kernel GPU detail: ONNX_GENAI_MLX_GPU_CAPTURE)";
+        let kind = "build-time (fusion intact; per-kernel GPU detail: ONNXRUNTIME_EP_MLX_GPU_CAPTURE)";
         let denom = total.max(1) as f64;
 
         let mut lines = String::new();
@@ -972,7 +972,7 @@ impl MlxTracer {
             eprintln!(
                 "[rust-mlx-ep] GPU capture requires MTL_CAPTURE_ENABLED=1 to be exported before the \
                  process starts (the Metal capture layer must be inserted at device creation); \
-                 skipping capture. Re-run with: MTL_CAPTURE_ENABLED=1 ONNX_GENAI_MLX_GPU_CAPTURE={} ...",
+                 skipping capture. Re-run with: MTL_CAPTURE_ENABLED=1 ONNXRUNTIME_EP_MLX_GPU_CAPTURE={} ...",
                 path.to_string_lossy()
             );
             return None;

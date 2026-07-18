@@ -67,7 +67,7 @@ subgraph into ONE hidden, synchronous `mlx_eval`, per-op `MTLCommandBuffer`
 
 ```sh
 # Write a Chrome/Perfetto trace (loads in https://ui.perfetto.dev):
-ONNX_GENAI_MLX_TRACE=/tmp/mlx_trace.json DYLD_LIBRARY_PATH=$ORT_LIB \
+ONNXRUNTIME_EP_MLX_TRACE=/tmp/mlx_trace.json DYLD_LIBRARY_PATH=$ORT_LIB \
   ONNXRUNTIME_MLX_EP_LIB=$PWD/target/release/libonnxruntime_mlx_ep.dylib \
   python -m pytest ../tests/ops/test_mlx_ops.py -k "binary_fp32 and Add" -q
 ```
@@ -85,7 +85,7 @@ ONNX_GENAI_MLX_TRACE=/tmp/mlx_trace.json DYLD_LIBRARY_PATH=$ORT_LIB \
   resolved by `dlopen`/`dlsym` at runtime, so a missing/ABI-changed framework just
   disables the util counter — never a crash.
 - **os_signpost** intervals around the same subgraph/eval regions for an
-  Instruments *Metal System Trace* (`ONNX_GENAI_MLX_SIGNPOST=1` forces them on).
+  Instruments *Metal System Trace* (`ONNXRUNTIME_EP_MLX_SIGNPOST=1` forces them on).
 - Events are stamped with the real `pid` (`std::process::id()`) so they merge into
   onnx-genai's Perfetto timeline. Written on EP teardown; the collector
   accumulates across sessions, so each teardown rewrites the full cumulative trace.
@@ -98,7 +98,7 @@ ONNX_GENAI_MLX_TRACE=/tmp/mlx_trace.json DYLD_LIBRARY_PATH=$ORT_LIB \
 By default a whole fused subgraph evaluates as ONE opaque `mlx.eval` blob (MLX hides
 its per-kernel Metal command buffers). Two opt-in modes break that open:
 
-- **Fine-grained per-op GPU timing** — `ONNX_GENAI_MLX_TRACE_FINE=1` (implies tracing
+- **Fine-grained per-op GPU timing** — `ONNXRUNTIME_EP_MLX_TRACE_FINE=1` (implies tracing
   on). After each node's handler binds its outputs, they are `mlx_array_eval`'d
   individually and timed, emitting a `gpu.op` span per op with the op's
   GPU-inclusive wall time + shape/dtype/bytes Args. The single blob becomes per-op
@@ -107,10 +107,10 @@ its per-kernel Metal command buffers). Two opt-in modes break that open:
   path keeps the single fused eval.
 
   ```sh
-  ONNX_GENAI_MLX_TRACE=/tmp/fine.json ONNX_GENAI_MLX_TRACE_FINE=1 ... python ...
+  ONNXRUNTIME_EP_MLX_TRACE=/tmp/fine.json ONNXRUNTIME_EP_MLX_TRACE_FINE=1 ... python ...
   ```
 
-- **Xcode/Instruments GPU capture** — `ONNX_GENAI_MLX_GPU_CAPTURE=<path.gputrace>`
+- **Xcode/Instruments GPU capture** — `ONNXRUNTIME_EP_MLX_GPU_CAPTURE=<path.gputrace>`
   (or `=1` for a default path) wraps the **first** eval only in
   `mlx_metal_start_capture` … `stop_capture`, producing a `.gputrace` bundle with
   full per-kernel GPU timing / occupancy / memory-bandwidth. Requires
@@ -119,7 +119,7 @@ its per-kernel Metal command buffers). Two opt-in modes break that open:
   rather than aborting.
 
   ```sh
-  MTL_CAPTURE_ENABLED=1 ONNX_GENAI_MLX_GPU_CAPTURE=/tmp/cap.gputrace ... python ...
+  MTL_CAPTURE_ENABLED=1 ONNXRUNTIME_EP_MLX_GPU_CAPTURE=/tmp/cap.gputrace ... python ...
   open /tmp/cap.gputrace   # in Xcode
   ```
 

@@ -4,7 +4,7 @@ Perfetto / Chrome-trace captures from the Rust MLX execution provider's built-in
 tracer. **Open any `.json` here at <https://ui.perfetto.dev>** (drag-and-drop or
 "Open trace file") or at `chrome://tracing`.
 
-Each trace was produced by setting `ONNX_GENAI_MLX_TRACE=<path>` while running a
+Each trace was produced by setting `ONNXRUNTIME_EP_MLX_TRACE=<path>` while running a
 model through the EP (the tracer is env-gated and off by default, near-zero cost
 when off). Events are stamped with the real process id, so an EP trace merges
 into onnx-genai's own timeline under the same process.
@@ -35,7 +35,7 @@ The EP's key runtime events are surfaced as structured, env-gated tracer events
    *"Resize: only static `sizes`/`scales` are claimed … export a static-shape
    model"*), and the concrete **node names** so you can locate each one in the
    graph (`… — nodes: [Resize_156, Resize_140]`). Counters `mlx.claimed_nodes`,
-   `mlx.unclaimed_nodes`, `mlx.fused_subgraphs`. (Set `MLX_EP_CLAIM_DEBUG=1` to
+   `mlx.unclaimed_nodes`, `mlx.fused_subgraphs`. (Set `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG=1` to
    also dump the same per-node breakdown to stderr without a full trace.)
 2. **Execution-path view** (`ep.path`) — `mlx.compute[<path>]` instant per Compute
    naming the path (`decode` / `prefill` / `general` / `eager`), the compile-cache
@@ -49,7 +49,7 @@ The EP's key runtime events are surfaced as structured, env-gated tracer events
 5. **Session summary** — a human-readable digest printed to stderr on EP teardown
    (claim rate, per-path Compute breakdown, memory movement, time attribution) and
    embedded as the `mlx.session_summary` instant. Force it without full JSON tracing
-   with `ONNX_GENAI_MLX_VERBOSE=1`.
+   with `ONNXRUNTIME_EP_MLX_VERBOSE=1`.
 
 ## Reading the tracks
 
@@ -78,28 +78,28 @@ The EP's key runtime events are surfaced as structured, env-gated tracer events
 ORT_LIB=<...ort-prebuilt/lib>
 DYLD_LIBRARY_PATH=$ORT_LIB \
   ONNXRUNTIME_MLX_EP_LIB=rust/target/release/libonnxruntime_mlx_ep.dylib \
-  ONNX_GENAI_MLX_TRACE=examples/traces/gqa-attention-fused.json \
+  ONNXRUNTIME_EP_MLX_TRACE=examples/traces/gqa-attention-fused.json \
   python -m pytest tests/ops -q -k gqa
 
 # the new claim/path/memory/timing event traces
 DYLD_LIBRARY_PATH=$ORT_LIB \
   ONNXRUNTIME_MLX_EP_LIB=rust/target/release/libonnxruntime_mlx_ep.dylib \
-  ONNX_GENAI_MLX_TRACE=examples/traces/ep-events-conv.json \
+  ONNXRUNTIME_EP_MLX_TRACE=examples/traces/ep-events-conv.json \
   python -m pytest tests/ops/test_conv.py -q            # general compiled path
 DYLD_LIBRARY_PATH=$ORT_LIB \
   ONNXRUNTIME_MLX_EP_LIB=rust/target/release/libonnxruntime_mlx_ep.dylib \
-  ONNX_GENAI_MLX_TRACE=examples/traces/ep-events-attention.json \
+  ONNXRUNTIME_EP_MLX_TRACE=examples/traces/ep-events-attention.json \
   python -m pytest tests/ops/test_attention_ext.py -q -k "gqa or group"
 
 # just the human-readable session summary (no JSON trace file, near-zero overhead)
 DYLD_LIBRARY_PATH=$ORT_LIB \
   ONNXRUNTIME_MLX_EP_LIB=rust/target/release/libonnxruntime_mlx_ep.dylib \
-  ONNX_GENAI_MLX_VERBOSE=1 python -m pytest tests/ops/test_conv.py -q -s
+  ONNXRUNTIME_EP_MLX_VERBOSE=1 python -m pytest tests/ops/test_conv.py -q -s
 
 # real decode (via onnx-genai profile_decode)
 DYLD_LIBRARY_PATH=$ORT_LIB ONNX_GENAI_EP=metal \
   ONNX_GENAI_METAL_EP_LIB=$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib \
-  ONNX_GENAI_MLX_TRACE=examples/traces/qwen2.5-0.5b-decode.json \
+  ONNXRUNTIME_EP_MLX_TRACE=examples/traces/qwen2.5-0.5b-decode.json \
   ../onnx-genai/target/release/profile_decode \
   --model ../onnx-genai/models/qwen2.5-0.5b-cpu-recipe --tokens 8
 ```

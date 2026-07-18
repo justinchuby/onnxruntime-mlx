@@ -41,10 +41,10 @@ use crate::sys::mlx as mlxsys;
 use crate::sys::ort;
 
 /// Decide whether any compiled fast path is allowed for this plan. Disabled by the
-/// `ONNX_GENAI_MLX_NO_COMPILE` kill-switch (forces eager for debugging / numerical A-B) or when the
+/// `ONNXRUNTIME_EP_MLX_NO_COMPILE` kill-switch (forces eager for debugging / numerical A-B) or when the
 /// subgraph contains a control-flow node (its graph structure depends on runtime data).
 pub fn compile_enabled(has_control_flow: bool) -> bool {
-    let killed = std::env::var_os("ONNX_GENAI_MLX_NO_COMPILE")
+    let killed = std::env::var_os("ONNXRUNTIME_EP_MLX_NO_COMPILE")
         .map(|v| v != "0" && !v.is_empty())
         .unwrap_or(false);
     !has_control_flow && !killed
@@ -72,9 +72,9 @@ fn is_general_compile_unsafe(op_type: &str) -> bool {
 }
 
 /// Decide whether the general compiled fast path is allowed for this plan. Shares the compile
-/// kill-switch (`ONNX_GENAI_MLX_NO_COMPILE`), and is additionally disabled for control-flow or any
+/// kill-switch (`ONNXRUNTIME_EP_MLX_NO_COMPILE`), and is additionally disabled for control-flow or any
 /// subgraph containing an op that is unsafe to trace once (see [`is_general_compile_unsafe`]). An
-/// extra kill-switch `MLX_EP_NO_GENERAL_COMPILE` forces eager for A/B numerical validation without
+/// extra kill-switch `ONNXRUNTIME_EP_MLX_NO_GENERAL_COMPILE` forces eager for A/B numerical validation without
 /// touching the decode path.
 /// A node that would read a DATA-DEPENDENT runtime shape/scalar (a reshape/expand/slice/range target
 /// that is neither constant nor shape-const). Reading it needs a mid-graph eval that is illegal in a
@@ -98,7 +98,7 @@ pub fn general_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     if !compile_enabled(has_control_flow) {
         return false;
     }
-    if std::env::var_os("MLX_EP_NO_GENERAL_COMPILE")
+    if std::env::var_os("ONNXRUNTIME_EP_MLX_NO_GENERAL_COMPILE")
         .map(|v| v != "0" && !v.is_empty())
         .unwrap_or(false)
     {
@@ -117,14 +117,14 @@ pub fn general_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
 /// `[0, valid_past+S)` (S and valid_past are fixed per shape key), so it no longer runs SDPA over the
 /// full KV capacity — the compute-bound waste that made it a ~15-20% TTFT regression. With the
 /// narrowing it is byte-identical to eager AND beats eager TTFT, so it is enabled by default. The
-/// kill-switch `MLX_EP_NO_PREFILL_COMPILE=1` forces eager prefill (A/B numerical validation / safety)
+/// kill-switch `ONNXRUNTIME_EP_MLX_NO_PREFILL_COMPILE=1` forces eager prefill (A/B numerical validation / safety)
 /// without touching the decode path. Also honours the global compile kill-switch. The build itself
 /// falls back to eager for any non-decoder / partial-rotary shape.
 pub fn prefill_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     if !compile_enabled(has_control_flow) {
         return false;
     }
-    if std::env::var_os("MLX_EP_NO_PREFILL_COMPILE")
+    if std::env::var_os("ONNXRUNTIME_EP_MLX_NO_PREFILL_COMPILE")
         .map(|v| v != "0" && !v.is_empty())
         .unwrap_or(false)
     {

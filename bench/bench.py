@@ -38,7 +38,7 @@ EP_NAME = "MLXExecutionProvider"
 @contextlib.contextmanager
 def _capture_stderr():
     """Capture C/Rust-level stderr (fd 2) into a string — used to read the EP's
-    MLX_EP_CLAIM_DEBUG output emitted during session creation."""
+    ONNXRUNTIME_EP_MLX_CLAIM_DEBUG output emitted during session creation."""
     saved = os.dup(2)
     with tempfile.TemporaryFile(mode="w+b") as tmp:
         os.dup2(tmp.fileno(), 2)
@@ -79,10 +79,10 @@ def _median_ms(sess: ort.InferenceSession, feeds: dict, iters: int, warmup: int)
 def _claim_info(model: bytes) -> tuple[bool, list[str]]:
     """Create an MLX session with claim-debug on and report whether the graph was
     fully claimed (no CPU fallback) plus any unclaimed op types."""
-    os.environ["MLX_EP_CLAIM_DEBUG"] = "1"
+    os.environ["ONNXRUNTIME_EP_MLX_CLAIM_DEBUG"] = "1"
     with _capture_stderr():
         _session(model, [EP_NAME, "CPUExecutionProvider"])
-    os.environ.pop("MLX_EP_CLAIM_DEBUG", None)
+    os.environ.pop("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG", None)
     text = getattr(_capture_stderr, "text", "")
     unclaimed = []
     for line in text.splitlines():

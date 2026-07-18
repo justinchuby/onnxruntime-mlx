@@ -413,10 +413,10 @@ def _dyn_out(name: str, dtype: ir.DataType, channels: int, spatial_rank: int) ->
 
 def _assert_dynamic_on_mlx(model: bytes, feeds, op_type: str, tol, capfd, monkeypatch) -> None:
     """Run through the EP, assert `op_type` was CLAIMED (not declined) and output matches CPU."""
-    monkeypatch.setenv("MLX_EP_CLAIM_DEBUG", "1")
+    monkeypatch.setenv("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG", "1")
     m.assert_matches_cpu(model, feeds, **tol)
     err = capfd.readouterr().err
-    # MLX_EP_CLAIM_DEBUG prints one line per declined op-type: "... unclaimed <Op> xN (<reason>): [...]".
+    # ONNXRUNTIME_EP_MLX_CLAIM_DEBUG prints one line per declined op-type: "... unclaimed <Op> xN (<reason>): [...]".
     for line in err.splitlines():
         if "unclaimed" in line:
             assert f"unclaimed {op_type} " not in line, (

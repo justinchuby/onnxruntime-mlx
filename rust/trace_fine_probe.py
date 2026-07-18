@@ -1,5 +1,5 @@
 """Ad-hoc probe: run a MULTI-OP subgraph through the MLX EP to exercise the
-fine-grained per-op tracing (ONNX_GENAI_MLX_TRACE_FINE) and GPU capture modes.
+fine-grained per-op tracing (ONNXRUNTIME_EP_MLX_TRACE_FINE) and GPU capture modes.
 
 Builds Add -> Sigmoid -> Mul -> Add (4 nodes, one fused subgraph) so the trace
 should show several `gpu.op` spans instead of one opaque `mlx.eval` blob.

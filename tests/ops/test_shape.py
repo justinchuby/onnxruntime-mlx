@@ -455,7 +455,7 @@ def test_reshape_dynamic_shape_from_input_shape(capfd, monkeypatch):
     g = ir.Graph([x], [o], nodes=nodes, initializers=inits, opset_imports={"": 24}, name="mlx_dynreshape")
     model = ir.to_proto(ir.Model(g, ir_version=11)).SerializeToString()
     feed = {"x": np.random.default_rng(0).standard_normal((B, S, H)).astype(np.float32)}
-    monkeypatch.setenv("MLX_EP_CLAIM_DEBUG", "1")
+    monkeypatch.setenv("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG", "1")
     m.assert_matches_cpu(model, feed, rtol=1e-5, atol=1e-5)
     err = capfd.readouterr().err
     for line in err.splitlines():

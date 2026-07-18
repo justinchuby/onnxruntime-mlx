@@ -135,7 +135,7 @@ def test_simplified_layer_norm_default_domain(capfd, monkeypatch):
         if "not a registered" in str(exc):
             pytest.skip("SimplifiedLayerNormalization not in this ORT build")
         raise
-    monkeypatch.setenv("MLX_EP_CLAIM_DEBUG", "1")
+    monkeypatch.setenv("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG", "1")
     m.assert_matches_cpu(model, {"x": x, "s": scale}, rtol=1e-4, atol=1e-5)
     err = capfd.readouterr().err
     for line in err.splitlines():

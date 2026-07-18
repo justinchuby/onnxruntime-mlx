@@ -15,7 +15,7 @@ pub type OpHandler = fn(&mut TranslationContext, &NodeDesc) -> Result<(), MlxErr
 
 /// The outcome of a claim predicate: `Ok(())` claims the node; `Err(reason)` declines it and carries
 /// a colocated, human-readable explanation of WHY (surfaced verbatim by the tracer's "claiming view"
-/// and by `MLX_EP_CLAIM_DEBUG`). Because the reason travels WITH the decision, every decline is
+/// and by `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG`). Because the reason travels WITH the decision, every decline is
 /// guaranteed to have one and it can never drift out of sync with the predicate's actual logic —
 /// there is no separate reason table to maintain.
 pub type ClaimResult = Result<(), Cow<'static, str>>;
@@ -162,7 +162,7 @@ pub fn translate(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxEr
 /// exactly; `Err(reason)` = it falls back to CPU, and `reason` explains why (either "no registry
 /// entry for this (domain, op, opset)" or the colocated message the matching claim predicate
 /// returned). This is the single source of truth: `claimable` is just `.is_ok()`, and the tracer /
-/// `MLX_EP_CLAIM_DEBUG` surface the `Err` string directly — no separate reason table to drift.
+/// `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG` surface the `Err` string directly — no separate reason table to drift.
 pub fn claim_decision(node: &NodeView) -> ClaimResult {
     match registry().find_entry(&node.domain(), &node.op_type(), node.since_version()) {
         Some(entry) => (entry.claim)(node),

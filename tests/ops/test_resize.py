@@ -312,7 +312,7 @@ def _dyn_resize(dt, channels: int, *, scales=None, sizes=None, mode: str, ctm: s
 
 
 def _assert_resize_claimed(model: bytes, feeds, tol, capfd, monkeypatch) -> None:
-    monkeypatch.setenv("MLX_EP_CLAIM_DEBUG", "1")
+    monkeypatch.setenv("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG", "1")
     m.assert_matches_cpu(model, feeds, **tol)
     err = capfd.readouterr().err
     for line in err.splitlines():
