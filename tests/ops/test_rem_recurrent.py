@@ -95,7 +95,12 @@ def _recurrent_model(
     if clip is not None:
         attrs.append(ir.AttrFloat32("clip", clip))
 
-    node = ir.Node("", op, in_values, attributes=attrs, outputs=out_values)
+    node = ir.node(
+        op,
+        in_values,
+        attributes={attr.name: attr for attr in attrs},
+        outputs=out_values,
+    )
     graph = ir.Graph(
         [v for v in in_values if v is not None],
         out_values,

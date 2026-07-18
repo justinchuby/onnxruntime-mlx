@@ -35,7 +35,13 @@ def _model_with_attrs(
         attrs.append(ir.AttrString(name, value))
     for name, value in (int_attrs or {}).items():
         attrs.append(ir.AttrInt64(name, int(value)))
-    node = ir.Node(domain, op_type, inputs, attributes=attrs, outputs=outputs)
+    node = ir.node(
+        op_type,
+        inputs,
+        attributes={attr.name: attr for attr in attrs},
+        domain=domain,
+        outputs=outputs,
+    )
     opset_imports = {"": opset}
     if domain:
         opset_imports[domain] = 1

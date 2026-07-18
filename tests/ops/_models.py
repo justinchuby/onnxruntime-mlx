@@ -22,17 +22,6 @@ def tensor(name: str, dtype: ir.DataType, shape: list[int]) -> ir.Value:
     return ir.Value(name=name, type=ir.TensorType(dtype), shape=ir.Shape(shape))
 
 
-def _attr(name: str, value: object) -> ir.Attr:
-    # bool is a subclass of int, but no boolean attributes are used here.
-    if isinstance(value, float):
-        return ir.AttrFloat32(name, value)
-    if isinstance(value, int):
-        return ir.AttrInt64(name, int(value))
-    if isinstance(value, str):
-        return ir.AttrString(name, value)
-    raise TypeError(f"unsupported attribute type for {name!r}: {type(value)!r}")
-
-
 def make_model(
     op_type: str,
     inputs: list[ir.Value],
@@ -43,11 +32,11 @@ def make_model(
     opset: int = 24,
 ) -> bytes:
     """Build a single-node model. IR values are graph-bound, so pass fresh values per model."""
-    node = ir.Node(
-        domain,
+    node = ir.node(
         op_type,
         inputs,
-        attributes=[_attr(k, v) for k, v in (attributes or {}).items()],
+        attributes=attributes or {},
+        domain=domain,
         outputs=outputs,
     )
     opset_imports = {"": opset}
@@ -79,30 +68,22 @@ def bf16_interior_model(
     fp_inputs = [tensor(name, DataType.FLOAT, shape) for name, shape in float_inputs]
     bf_inputs = [tensor(f"{name}_bf", DataType.BFLOAT16, shape) for name, shape in float_inputs]
     nodes = [
-        ir.Node(
-            "", "Cast", [fp], attributes=[ir.AttrInt64("to", int(DataType.BFLOAT16))], outputs=[bf]
-        )
+        ir.node("Cast", [fp], attributes={"to": int(DataType.BFLOAT16)}, outputs=[bf])
         for fp, bf in zip(fp_inputs, bf_inputs, strict=True)
     ]
     bf_out = tensor("y_bf", DataType.BFLOAT16, out_shape)
     nodes.append(
-        ir.Node(
-            domain,
+        ir.node(
             op_type,
             bf_inputs,
-            attributes=[_attr(k, v) for k, v in (attributes or {}).items()],
+            attributes=attributes or {},
+            domain=domain,
             outputs=[bf_out],
         )
     )
     fp_out = tensor("out", DataType.FLOAT, out_shape)
     nodes.append(
-        ir.Node(
-            "",
-            "Cast",
-            [bf_out],
-            attributes=[ir.AttrInt64("to", int(DataType.FLOAT))],
-            outputs=[fp_out],
-        )
+        ir.node("Cast", [bf_out], attributes={"to": int(DataType.FLOAT)}, outputs=[fp_out])
     )
     opset_imports = {"": 24}
     if domain:
@@ -376,11 +357,10 @@ def bf16_gqa_model(
         for input_name, shape in float_specs
     }
     nodes = [
-        ir.Node(
-            "",
+        ir.node(
             "Cast",
             [fp_inputs[input_name]],
-            attributes=[ir.AttrInt64("to", int(DataType.BFLOAT16))],
+            attributes={"to": int(DataType.BFLOAT16)},
             outputs=[bf_inputs[input_name]],
         )
         for input_name, _ in float_specs
@@ -393,8 +373,7 @@ def bf16_gqa_model(
         tensor("present_value_bf", DataType.BFLOAT16, [batch, kv_heads, present, head]),
     ]
     nodes.append(
-        ir.Node(
-            "com.microsoft",
+        ir.node(
             "GroupQueryAttention",
             [
                 bf_inputs["query"],
@@ -407,13 +386,14 @@ def bf16_gqa_model(
                 bf_inputs["cos_cache"],
                 bf_inputs["sin_cache"],
             ],
-            attributes=[
-                ir.AttrInt64("num_heads", num_heads),
-                ir.AttrInt64("kv_num_heads", kv_heads),
-                ir.AttrFloat32("scale", float(1.0 / np.sqrt(head))),
-                ir.AttrInt64("do_rotary", geometry["do_rotary"]),
-                ir.AttrInt64("rotary_interleaved", geometry.get("interleaved", 0)),
-            ],
+            attributes={
+                "num_heads": num_heads,
+                "kv_num_heads": kv_heads,
+                "scale": float(1.0 / np.sqrt(head)),
+                "do_rotary": geometry["do_rotary"],
+                "rotary_interleaved": geometry.get("interleaved", 0),
+            },
+            domain="com.microsoft",
             outputs=bf_outputs,
         )
     )
@@ -423,13 +403,7 @@ def bf16_gqa_model(
         tensor("present_value", DataType.FLOAT, [batch, kv_heads, present, head]),
     ]
     nodes.extend(
-        ir.Node(
-            "",
-            "Cast",
-            [bf],
-            attributes=[ir.AttrInt64("to", int(DataType.FLOAT))],
-            outputs=[fp],
-        )
+        ir.node("Cast", [bf], attributes={"to": int(DataType.FLOAT)}, outputs=[fp])
         for bf, fp in zip(bf_outputs, fp_outputs, strict=True)
     )
     inputs = [fp_inputs[input_name] for input_name, _ in float_specs[:5]]

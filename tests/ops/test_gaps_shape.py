@@ -55,7 +55,7 @@ def _single(
     attributes: list[ir.Attr] | None = None,
     initializers: list[ir.Value] | None = None,
 ) -> bytes:
-    node = ir.Node("", op_type, inputs, attributes=attributes or [], outputs=[output])
+    node = ir.node(op_type, inputs, attributes={a.name: a for a in (attributes or [])}, outputs=[output])
     graph_inputs = [value for value in inputs if value.const_value is None]
     return _model([node], graph_inputs, [output], initializers=initializers)
 
@@ -226,14 +226,13 @@ def test_shape_int64_output_feeds_gather():
     index = _initializer("index", np.array(0, dtype=np.int64))
     output = m.tensor("out", DT.INT64, [])
     nodes = [
-        ir.Node(
-            "",
+        ir.node(
             "Shape",
             [data],
-            attributes=[ir.AttrInt64("start", 1), ir.AttrInt64("end", 3)],
+            attributes={"start": 1, "end": 3},
             outputs=[shape],
         ),
-        ir.Node("", "Gather", [shape, index], attributes=[ir.AttrInt64("axis", 0)], outputs=[output]),
+        ir.node("Gather", [shape, index], attributes={"axis": 0}, outputs=[output]),
     ]
     model = _model(nodes, [data], [output], initializers=[index])
     m.assert_matches_cpu(model, {"data": np.zeros((2, 3, 4), np.float32)}, rtol=0.0, atol=0.0)
@@ -246,8 +245,8 @@ def test_range_int64_output_feeds_sub():
     ranged = m.tensor("ranged", DT.INT64, [4])
     output = m.tensor("out", DT.INT64, [4])
     nodes = [
-        ir.Node("", "Range", [start, limit, delta], outputs=[ranged]),
-        ir.Node("", "Sub", [ranged, ranged], outputs=[output]),
+        ir.node("Range", [start, limit, delta], outputs=[ranged]),
+        ir.node("Sub", [ranged, ranged], outputs=[output]),
     ]
     model = _model(nodes, [], [output], initializers=[start, limit, delta])
     _assert_matches_cpu_noopt(model, {})

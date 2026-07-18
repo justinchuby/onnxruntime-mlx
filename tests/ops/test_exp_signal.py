@@ -24,12 +24,6 @@ from onnx_ir import DataType as DT
 import _models as m
 
 
-def _attr(name: str, value: object) -> ir.Attr:
-    if isinstance(value, int):
-        return ir.AttrInt64(name, int(value))
-    raise TypeError(f"unsupported attribute {name!r}: {type(value)!r}")
-
-
 def initz(name: str, arr: np.ndarray) -> ir.Value:
     """A constant-initializer value (const_value set) — read by the EP at translate time."""
     t = ir.tensor(arr, name=name)
@@ -51,9 +45,7 @@ def build(
     opset: int = 17,
 ) -> bytes:
     """Single-node model; constant-initializer inputs are pulled into the graph initializer list."""
-    node = ir.Node(
-        "", op, inputs, attributes=[_attr(k, v) for k, v in (attrs or {}).items()], outputs=outputs
-    )
+    node = ir.node(op, inputs, attributes=attrs or {}, outputs=outputs)
     graph_inputs = [i for i in inputs if i.const_value is None]
     initializers = [i for i in inputs if i.const_value is not None]
     graph = ir.Graph(

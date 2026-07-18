@@ -33,7 +33,13 @@ def _model(
     domain: str = "",
     opset: int = 24,
 ) -> bytes:
-    node = ir.Node(domain, op, inputs, attributes=attributes, outputs=outputs)
+    node = ir.node(
+        op,
+        inputs,
+        attributes={attribute.name: attribute for attribute in attributes},
+        domain=domain,
+        outputs=outputs,
+    )
     graph = ir.Graph(
         [value for value in inputs if value.const_value is None],
         outputs,
@@ -145,8 +151,8 @@ def test_sigmoid_mul_swish_fold() -> None:
         [x],
         [out],
         nodes=[
-            ir.Node("", "Sigmoid", [x], outputs=[sigmoid]),
-            ir.Node("", "Mul", [x, sigmoid], outputs=[out]),
+            ir.node("Sigmoid", [x], outputs=[sigmoid]),
+            ir.node("Mul", [x, sigmoid], outputs=[out]),
         ],
         opset_imports={"": 24},
         name="mlx_swish_fold",

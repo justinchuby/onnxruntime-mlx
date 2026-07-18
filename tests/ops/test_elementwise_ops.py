@@ -123,15 +123,14 @@ def test_activation(op: str, attrs: dict, dtype: DT, np_dtype, tol: float) -> No
     # ONNX constrains Celu to float32 only; its fp16 graph is invalid regardless of EP.
     if op == "Celu" and dtype == DT.FLOAT16:
         pytest.skip("ONNX Celu is float32-only")
-    # 'approximate' is a string attribute (not handled by _models._attr), so build the node directly.
+    # 'approximate' is a string attribute, so build the node with ir.node directly.
     if "approximate" in attrs:
         import onnx_ir as ir
 
-        node = ir.Node(
-            "",
+        node = ir.node(
             op,
             [m.tensor("x", dtype, [2, 3])],
-            attributes=[ir.AttrString("approximate", attrs["approximate"])],
+            attributes={"approximate": attrs["approximate"]},
             outputs=[m.tensor("out", dtype, [2, 3])],
         )
         graph = ir.Graph(
@@ -344,11 +343,10 @@ def test_bitshift(direction: str, dtype: DT, np_dtype) -> None:
     # 'direction' is a required string attribute — build the node directly.
     import onnx_ir as ir
 
-    node = ir.Node(
-        "",
+    node = ir.node(
         "BitShift",
         [m.tensor("a", dtype, [4]), m.tensor("b", dtype, [4])],
-        attributes=[ir.AttrString("direction", direction)],
+        attributes={"direction": direction},
         outputs=[m.tensor("out", dtype, [4])],
     )
     graph = ir.Graph(

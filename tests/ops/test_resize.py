@@ -66,10 +66,10 @@ def build_resize(
         inputs.append(initz("sizes", sizes))
         inits.append(initz("sizes", sizes))
     out = m.tensor("o", ir_dt, out_shape)
-    attrs = [ir.AttrString("mode", mode), ir.AttrString("coordinate_transformation_mode", ctm)]
+    attrs = {"mode": mode, "coordinate_transformation_mode": ctm}
     if nmode is not None:
-        attrs.append(ir.AttrString("nearest_mode", nmode))
-    node = ir.Node("", "Resize", inputs, attributes=attrs, outputs=[out])
+        attrs["nearest_mode"] = nmode
+    node = ir.node("Resize", inputs, attributes=attrs, outputs=[out])
     graph = ir.Graph(
         [x], [out], nodes=[node], initializers=inits, opset_imports={"": 19}, name="mlx_Resize"
     )
@@ -241,27 +241,22 @@ def test_bf16_interior_matches_ref(mode):
     y_bf = m.tensor("y_bf", DT.BFLOAT16, out_shape)
     out = m.tensor("out", DT.FLOAT, out_shape)
     nodes = [
-        ir.Node(
-            "", "Cast", [x], attributes=[ir.AttrInt64("to", int(DT.BFLOAT16))], outputs=[x_bf]
-        ),
-        ir.Node(
-            "",
+        ir.node("Cast", [x], attributes={"to": int(DT.BFLOAT16)}, outputs=[x_bf]),
+        ir.node(
             "Resize",
             [x_bf, roi_v, scales_v],
-            attributes=[
-                ir.AttrString("mode", attrs["mode"]),
-                ir.AttrString("coordinate_transformation_mode", "half_pixel"),
-                *(
-                    [ir.AttrString("nearest_mode", attrs["nearest_mode"])]
+            attributes={
+                "mode": attrs["mode"],
+                "coordinate_transformation_mode": "half_pixel",
+                **(
+                    {"nearest_mode": attrs["nearest_mode"]}
                     if mode == "nearest"
-                    else []
+                    else {}
                 ),
-            ],
+            },
             outputs=[y_bf],
         ),
-        ir.Node(
-            "", "Cast", [y_bf], attributes=[ir.AttrInt64("to", int(DT.FLOAT))], outputs=[out]
-        ),
+        ir.node("Cast", [y_bf], attributes={"to": int(DT.FLOAT)}, outputs=[out]),
     ]
     graph = ir.Graph(
         [x],
@@ -306,11 +301,10 @@ def _dyn_resize(dt, channels: int, *, scales=None, sizes=None, mode: str, ctm: s
     out = ir.Value(
         name="o", type=ir.TensorType(ir_dt), shape=ir.Shape([1, channels, "OH", "OW"])
     )
-    node = ir.Node(
-        "",
+    node = ir.node(
         "Resize",
         inputs,
-        attributes=[ir.AttrString("mode", mode), ir.AttrString("coordinate_transformation_mode", ctm)],
+        attributes={"mode": mode, "coordinate_transformation_mode": ctm},
         outputs=[out],
     )
     graph = ir.Graph([x], [out], nodes=[node], initializers=inits, opset_imports={"": 19}, name="mlx_Resize_dyn")

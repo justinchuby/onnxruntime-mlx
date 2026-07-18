@@ -38,7 +38,12 @@ def build(
     opset: int = 22,
 ) -> bytes:
     """Single-node graph model (all inputs are runtime feeds)."""
-    node = ir.Node("", op, inputs, attributes=list(attrs or []), outputs=outputs)
+    node = ir.node(
+        op,
+        inputs,
+        attributes={attr.name: attr for attr in (attrs or [])},
+        outputs=outputs,
+    )
     graph = ir.Graph(
         inputs, outputs, nodes=[node], opset_imports={"": opset}, name=f"mlx_{op}"
     )

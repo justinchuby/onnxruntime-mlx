@@ -42,7 +42,13 @@ def build(
     domain: str = "",
     opset: int = 24,
 ) -> bytes:
-    node = ir.Node(domain, op, inputs, attributes=list(attrs or []), outputs=outputs)
+    node = ir.node(
+        op,
+        inputs,
+        attributes={attr.name: attr for attr in (attrs or [])},
+        domain=domain,
+        outputs=outputs,
+    )
     imports = {"": opset}
     if domain:
         imports[domain] = 1
@@ -229,9 +235,12 @@ def test_skip_simplified_layer_norm_unused_mean_invstd():
     mean = ir.Value(name="mean_unused", type=None)  # dangling: no consumer, not a graph output
     invstd = ir.Value(name="invstd_unused", type=None)
     resid = m.tensor("resid", DT.FLOAT, shape)
-    node = ir.Node(
-        "com.microsoft", "SkipSimplifiedLayerNormalization", [xi, si, gi],
-        attributes=[ir.AttrFloat32("epsilon", 1e-5)], outputs=[o, mean, invstd, resid],
+    node = ir.node(
+        "SkipSimplifiedLayerNormalization",
+        [xi, si, gi],
+        attributes={"epsilon": 1e-5},
+        domain="com.microsoft",
+        outputs=[o, mean, invstd, resid],
     )
     graph = ir.Graph([xi, si, gi], [o, resid], nodes=[node],
                      opset_imports={"": 24, "com.microsoft": 1}, name="mlx_SkipSimplifiedLN_unused")

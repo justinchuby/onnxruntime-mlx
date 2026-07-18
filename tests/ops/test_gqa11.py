@@ -31,11 +31,11 @@ def _build_11(
 ) -> bytes:
     """Single-node 11-input GQA model. Empty-named inputs (absent optionals) stay off the graph
     input list; every other tensor is a runtime graph input."""
-    node = ir.Node(
-        "com.microsoft",
+    node = ir.node(
         "GroupQueryAttention",
         inputs,
-        attributes=[m._attr(k, v) for k, v in attrs.items()],
+        attributes=attrs,
+        domain="com.microsoft",
         outputs=outputs,
     )
     graph_inputs = [i for i in inputs if i.name]

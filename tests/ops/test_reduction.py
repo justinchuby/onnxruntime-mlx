@@ -22,13 +22,7 @@ def _model_with_axes_attribute(
 ) -> bytes:
     x = m.tensor("x", dtype, input_shape)
     out = m.tensor("out", dtype, output_shape)
-    node = ir.Node(
-        "",
-        op,
-        [x],
-        attributes=[ir.AttrInt64s("axes", axes), ir.AttrInt64("keepdims", keepdims)],
-        outputs=[out],
-    )
+    node = ir.node(op, [x], attributes={"axes": axes, "keepdims": keepdims}, outputs=[out])
     graph = ir.Graph(
         [x],
         [out],

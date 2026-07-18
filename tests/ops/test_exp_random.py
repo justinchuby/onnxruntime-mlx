@@ -14,18 +14,6 @@ from onnx_ir import DataType as DT
 import _models as m
 
 
-def _attr(name: str, value: object) -> ir.Attr:
-    if isinstance(value, float):
-        return ir.AttrFloat32(name, value)
-    if isinstance(value, int):
-        return ir.AttrInt64(name, value)
-    if isinstance(value, str):
-        return ir.AttrString(name, value)
-    if isinstance(value, list) and all(isinstance(v, int) for v in value):
-        return ir.AttrInt64s(name, value)
-    raise TypeError(f"unsupported attribute {name!r}: {type(value)!r}")
-
-
 def _model(
     op_type: str,
     inputs: list[ir.Value],
@@ -33,13 +21,7 @@ def _model(
     *,
     attributes: dict[str, object],
 ) -> bytes:
-    node = ir.Node(
-        "",
-        op_type,
-        inputs,
-        attributes=[_attr(name, value) for name, value in attributes.items()],
-        outputs=outputs,
-    )
+    node = ir.node(op_type, inputs, attributes=attributes, outputs=outputs)
     graph = ir.Graph(
         inputs,
         outputs,

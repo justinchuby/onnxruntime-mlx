@@ -71,7 +71,7 @@ def build(
     opset: int = 24,
 ) -> bytes:
     """Single-node model; initializer inputs are pulled out into the graph initializer list."""
-    node = ir.Node(domain, op, inputs, attributes=list(attrs or []), outputs=outputs)
+    node = ir.node(op, inputs, attributes={a.name: a for a in (attrs or [])}, domain=domain, outputs=outputs)
     graph_inputs = [i for i in inputs if i.const_value is None]
     imports = {"": opset}
     if domain:
@@ -441,10 +441,10 @@ def test_reshape_dynamic_shape_from_input_shape(capfd, monkeypatch):
     target = ir.Value(name="target")
     o = ir.Value(name="o", type=ir.TensorType(DT.FLOAT), shape=ir.Shape([B, "S", 3, 4]))
     nodes = [
-        ir.Node("", "Shape", [x], outputs=[shp]),
-        ir.Node("", "Gather", [shp, idx], attributes=[ir.AttrInt64("axis", 0)], outputs=[dims01]),
-        ir.Node("", "Concat", [dims01, tail], attributes=[ir.AttrInt64("axis", 0)], outputs=[target]),
-        ir.Node("", "Reshape", [x, target], outputs=[o]),
+        ir.node("Shape", [x], outputs=[shp]),
+        ir.node("Gather", [shp, idx], attributes={"axis": 0}, outputs=[dims01]),
+        ir.node("Concat", [dims01, tail], attributes={"axis": 0}, outputs=[target]),
+        ir.node("Reshape", [x, target], outputs=[o]),
     ]
     inits = [
         ir.Value(name="idx", type=ir.TensorType(DT.INT64), shape=ir.Shape([2]),

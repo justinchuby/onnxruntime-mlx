@@ -30,7 +30,12 @@ def _model(
     initializers: list[ir.Value] | None = None,
     attributes: list[ir.Attr] | None = None,
 ) -> bytes:
-    node = ir.Node("", op_type, inputs, attributes=list(attributes or []), outputs=[output])
+    node = ir.node(
+        op_type,
+        inputs,
+        attributes={attribute.name: attribute for attribute in (attributes or [])},
+        outputs=[output],
+    )
     graph = ir.Graph(
         [value for value in inputs if value.const_value is None],
         [output],

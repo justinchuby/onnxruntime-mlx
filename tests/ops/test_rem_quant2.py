@@ -54,7 +54,12 @@ def build(
     opset: int = 24,
 ) -> bytes:
     """Single-node model; constant-initializer inputs are pulled into the graph initializer list."""
-    node = ir.Node("", op, inputs, attributes=list(attrs or []), outputs=outputs)
+    node = ir.node(
+        op,
+        inputs,
+        attributes={attr.name: attr for attr in (attrs or [])},
+        outputs=outputs,
+    )
     graph_inputs = [i for i in inputs if i.const_value is None and i.name]
     graph = ir.Graph(
         graph_inputs,

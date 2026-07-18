@@ -113,18 +113,18 @@ def if_model() -> bytes:
     one_t = _const("one_t", np.ones(3, FLOAT))
     t_out = _t("t_out", DT.FLOAT, [3])
     then_g = ir.Graph(
-        [], [t_out], nodes=[ir.Node("", "Add", [x, one_t], outputs=[t_out])],
+        [], [t_out], nodes=[ir.node("Add", [x, one_t], outputs=[t_out])],
         name="then_g", opset_imports={"": 18}, initializers=[one_t],
     )
     one_e = _const("one_e", np.ones(3, FLOAT))
     e_out = _t("e_out", DT.FLOAT, [3])
     else_g = ir.Graph(
-        [], [e_out], nodes=[ir.Node("", "Sub", [x, one_e], outputs=[e_out])],
+        [], [e_out], nodes=[ir.node("Sub", [x, one_e], outputs=[e_out])],
         name="else_g", opset_imports={"": 18}, initializers=[one_e],
     )
-    if_node = ir.Node(
-        "", "If", [cond], outputs=[y],
-        attributes=[ir.AttrGraph("then_branch", then_g), ir.AttrGraph("else_branch", else_g)],
+    if_node = ir.node(
+        "If", [cond], outputs=[y],
+        attributes={"then_branch": then_g, "else_branch": else_g},
     )
     return _model(ir.Graph([x, cond], [y], nodes=[if_node], name="ifm", opset_imports={"": 18}))
 
@@ -142,13 +142,13 @@ def scan_model() -> bytes:
     b_sum2 = _t("b_sum2", DT.FLOAT, [2])
     body = ir.Graph(
         [b_acc, b_x], [b_sum, b_sum2],
-        nodes=[ir.Node("", "Add", [b_acc, b_x], outputs=[b_sum]),
-               ir.Node("", "Identity", [b_sum], outputs=[b_sum2])],
+        nodes=[ir.node("Add", [b_acc, b_x], outputs=[b_sum]),
+               ir.node("Identity", [b_sum], outputs=[b_sum2])],
         name="scan_body", opset_imports={"": 18},
     )
-    scan = ir.Node(
-        "", "Scan", [init, X], outputs=[final, Yseq],
-        attributes=[ir.AttrInt64("num_scan_inputs", 1), ir.AttrGraph("body", body)],
+    scan = ir.node(
+        "Scan", [init, X], outputs=[final, Yseq],
+        attributes={"num_scan_inputs": 1, "body": body},
     )
     return _model(
         ir.Graph([init, X], [final, Yseq], nodes=[scan], name="scanm", opset_imports={"": 18})
@@ -170,12 +170,12 @@ def loop_model() -> bytes:
     one = _const("lone", np.ones(2, FLOAT))
     body = ir.Graph(
         [b_i, b_cond, b_acc], [b_condo, b_accn],
-        nodes=[ir.Node("", "Add", [b_acc, one], outputs=[b_accn]),
-               ir.Node("", "Identity", [b_cond], outputs=[b_condo])],
+        nodes=[ir.node("Add", [b_acc, one], outputs=[b_accn]),
+               ir.node("Identity", [b_cond], outputs=[b_condo])],
         name="loop_body", opset_imports={"": 18}, initializers=[one],
     )
-    loop = ir.Node("", "Loop", [M, condin, acc0], outputs=[accf],
-                   attributes=[ir.AttrGraph("body", body)])
+    loop = ir.node("Loop", [M, condin, acc0], outputs=[accf],
+                   attributes={"body": body})
     return _model(
         ir.Graph([M, condin, acc0], [accf], nodes=[loop], name="loopm", opset_imports={"": 18})
     )
@@ -201,12 +201,12 @@ def loop_datadependent_model() -> bytes:
     limit = _const("limit", np.full(1, 100.0, FLOAT))
     body = ir.Graph(
         [b_i, b_cond, b_acc], [b_condo, b_accn],
-        nodes=[ir.Node("", "Add", [b_acc, ten], outputs=[b_accn]),
-               ir.Node("", "Less", [b_accn, limit], outputs=[b_condo])],
+        nodes=[ir.node("Add", [b_acc, ten], outputs=[b_accn]),
+               ir.node("Less", [b_accn, limit], outputs=[b_condo])],
         name="loop_dd_body", opset_imports={"": 18}, initializers=[ten, limit],
     )
-    loop = ir.Node("", "Loop", [M, condin, acc0], outputs=[accf],
-                   attributes=[ir.AttrGraph("body", body)])
+    loop = ir.node("Loop", [M, condin, acc0], outputs=[accf],
+                   attributes={"body": body})
     return _model(
         ir.Graph([M, condin, acc0], [accf], nodes=[loop], name="loopddm", opset_imports={"": 18})
     )
@@ -230,21 +230,21 @@ def if_outer_initializer_squeeze_model() -> bytes:
 
     t_out = _t("t_out", DT.FLOAT, [2, 4])
     then_g = ir.Graph(
-        [], [t_out], nodes=[ir.Node("", "Squeeze", [x, axes1], outputs=[t_out])],
+        [], [t_out], nodes=[ir.node("Squeeze", [x, axes1], outputs=[t_out])],
         name="then_g", opset_imports={"": 18},
     )
     e_pre = _t("e_pre", DT.FLOAT, [2, 4])
     e_out = _t("e_out", DT.FLOAT, [2, 4])
     else_g = ir.Graph(
         [], [e_out], nodes=[
-            ir.Node("", "Squeeze", [x, axes1], outputs=[e_pre]),
-            ir.Node("", "Neg", [e_pre], outputs=[e_out]),
+            ir.node("Squeeze", [x, axes1], outputs=[e_pre]),
+            ir.node("Neg", [e_pre], outputs=[e_out]),
         ],
         name="else_g", opset_imports={"": 18},
     )
-    if_node = ir.Node(
-        "", "If", [cond], outputs=[y],
-        attributes=[ir.AttrGraph("then_branch", then_g), ir.AttrGraph("else_branch", else_g)],
+    if_node = ir.node(
+        "If", [cond], outputs=[y],
+        attributes={"then_branch": then_g, "else_branch": else_g},
     )
     return _model(ir.Graph(
         [x, cond], [y], nodes=[if_node], name="ifoutinit",

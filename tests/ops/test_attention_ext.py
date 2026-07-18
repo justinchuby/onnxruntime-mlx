@@ -30,14 +30,6 @@ FLOAT = np.float32
 
 
 # --- IR builder (optional inputs -> empty-name placeholders) -------------------------------------
-def _attr(name: str, value: object) -> ir.Attr:
-    if isinstance(value, float):
-        return ir.AttrFloat32(name, value)
-    if isinstance(value, int):
-        return ir.AttrInt64(name, int(value))
-    raise TypeError(f"unsupported attribute {name!r}: {type(value)!r}")
-
-
 def build_model(
     op_type: str,
     inputs: list[ir.Value | None],
@@ -56,11 +48,11 @@ def build_model(
     node_inputs = list(inputs)
     while node_inputs and node_inputs[-1] is None:
         node_inputs.pop()
-    node = ir.Node(
-        domain,
+    node = ir.node(
         op_type,
         node_inputs,
-        attributes=[_attr(k, v) for k, v in (attributes or {}).items()],
+        attributes=attributes or {},
+        domain=domain,
         outputs=[o for o in outputs if o is not None],
     )
     graph_inputs = [v for v in node_inputs if v is not None]

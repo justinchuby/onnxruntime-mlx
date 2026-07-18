@@ -31,13 +31,7 @@ def _model_with_string_attr(
 ) -> bytes:
     inputs = [m.tensor(f"in{i}", dtype, shape) for i in range(n_inputs)]
     out = m.tensor("out", dtype, shape)
-    node = ir.Node(
-        "",
-        op,
-        inputs,
-        attributes=[ir.AttrString(attr_name, attr_value)],
-        outputs=[out],
-    )
+    node = ir.node(op, inputs, attributes={attr_name: attr_value}, outputs=[out])
     graph = ir.Graph(
         inputs, [out], nodes=[node], name=f"mlx_{op}", opset_imports={"": opset}
     )
@@ -56,13 +50,7 @@ def _reduce_attr_model(
 ) -> bytes:
     x = m.tensor("x", dtype, in_shape)
     out = m.tensor("out", dtype, out_shape)
-    node = ir.Node(
-        "",
-        op,
-        [x],
-        attributes=[ir.AttrInt64s("axes", axes), ir.AttrInt64("keepdims", keepdims)],
-        outputs=[out],
-    )
+    node = ir.node(op, [x], attributes={"axes": axes, "keepdims": keepdims}, outputs=[out])
     graph = ir.Graph(
         [x], [out], nodes=[node], name=f"mlx_{op}_axes_attr", opset_imports={"": opset}
     )

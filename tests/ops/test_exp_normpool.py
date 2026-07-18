@@ -42,7 +42,12 @@ def build(
     initializers: list[ir.Value] | None = None,
     opset: int = 18,
 ) -> bytes:
-    node = ir.Node("", op, inputs, attributes=list(attrs or []), outputs=outputs)
+    node = ir.node(
+        op,
+        inputs,
+        attributes={attr.name: attr for attr in (attrs or [])},
+        outputs=outputs,
+    )
     graph = ir.Graph(
         [v for v in inputs if v.const_value is None],
         outputs,
