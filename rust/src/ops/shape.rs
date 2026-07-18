@@ -951,8 +951,9 @@ fn expand_claim(node: &NodeView) -> ClaimResult {
         crate::registry::ort_dtype_name(data)
     );
     require!(
-        node.is_const_int64(1),
-        "Expand: only a constant int64 `shape` initializer is claimed; this node's is a runtime value — stays on CPU"
+        node.input_info(1).map(|i| i.dtype)
+            == Some(ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64),
+        "Expand `shape` input must be int64 (runtime shape-derived values resolve at trace time; a data-dependent shape falls back to eager)"
     );
     Ok(())
 }
@@ -981,8 +982,11 @@ fn slice_claim(node: &NodeView) -> ClaimResult {
         crate::registry::ort_dtype_name(data)
     );
     require!(
-        node.is_const_int64(1) && node.is_const_int64(2),
-        "Slice: `starts` and `ends` must be constant int64 initializers; this node's are runtime values — stays on CPU"
+        node.input_info(1).map(|i| i.dtype)
+            == Some(ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
+            && node.input_info(2).map(|i| i.dtype)
+                == Some(ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64),
+        "Slice `starts`/`ends` must be int64 (runtime shape-derived values resolve at trace time; a data-dependent value falls back to eager)"
     );
     if nin >= 4 && node.input_present(3) {
         require!(
