@@ -64,6 +64,10 @@ on how the graph is shaped. Rules of thumb, fastest → slowest:
    - **Data-dependent output shapes** — `NonZero` / `Unique` / a `Reshape` whose target is computed
      from tensor *values* (not shapes) — these need a mid-graph host read that a single trace can't
      express, so their subgraph runs eager.
+   - **`Range` with non-constant bounds** stays on CPU: its output extent is value-dependent, and its
+     result often feeds a shape/axes consumer (e.g. the reduce axes of expanded `RMSNormalization`),
+     which would force a mid-compile eval that aborts the closure. `Range` with constant `start`/
+     `limit`/`delta` is claimed and folds to a static extent.
    - **fp64** anywhere (MLX has no float64), or any op the registry doesn't claim.
 5. **Fragmentation is the real cost.** One unclaimed op *in the middle* of a graph splits it into two
    islands with a CPU round-trip between them. Sub-5 ms graphs are dispatch/eval-overhead-bound, so a
