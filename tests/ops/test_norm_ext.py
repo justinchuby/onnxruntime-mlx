@@ -210,3 +210,36 @@ def test_batch_norm_inference(dt):
     )
     feeds = {"x": x, "s": scale, "b": bias, "mean": mean, "var": var}
     m.assert_matches_cpu(model, feeds, **tol(dt))
+
+
+def test_skip_simplified_layer_norm_unused_mean_invstd():
+    """SkipSimplifiedLayerNormalization declaring mean(out1)/inv-std(out2) that are UNUSED (no
+    consumer) — the common transformers.js/Mobius export shape. The RMS handler doesn't produce
+    them; since they aren't fused-subgraph boundary outputs, MLX must DCE them, claim the node, and
+    still match CPU on the consumed outputs (normalized out0 + residual sum out3)."""
+    rng = np.random.default_rng(11)
+    shape = [1, 5, 8]
+    x = rng.standard_normal(shape).astype(np.float32)
+    skip = rng.standard_normal(shape).astype(np.float32)
+    gamma = rng.standard_normal((8,)).astype(np.float32)
+    xi = m.tensor("x", DT.FLOAT, shape)
+    si = m.tensor("skip", DT.FLOAT, shape)
+    gi = m.tensor("gamma", DT.FLOAT, [8])
+    o = m.tensor("o", DT.FLOAT, shape)
+    mean = ir.Value(name="mean_unused", type=None)  # dangling: no consumer, not a graph output
+    invstd = ir.Value(name="invstd_unused", type=None)
+    resid = m.tensor("resid", DT.FLOAT, shape)
+    node = ir.Node(
+        "com.microsoft", "SkipSimplifiedLayerNormalization", [xi, si, gi],
+        attributes=[ir.AttrFloat32("epsilon", 1e-5)], outputs=[o, mean, invstd, resid],
+    )
+    graph = ir.Graph([xi, si, gi], [o, resid], nodes=[node],
+                     opset_imports={"": 24, "com.microsoft": 1}, name="mlx_SkipSimplifiedLN_unused")
+    model = ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
+    try:
+        ort.InferenceSession(model, providers=["CPUExecutionProvider"])
+    except Exception as exc:  # noqa: BLE001
+        if "not a registered" in str(exc):
+            pytest.skip("SkipSimplifiedLayerNormalization not in this ORT build")
+        raise
+    m.assert_matches_cpu(model, {"x": x, "skip": skip, "gamma": gamma}, rtol=1e-4, atol=1e-5)

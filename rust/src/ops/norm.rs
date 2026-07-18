@@ -562,10 +562,12 @@ fn skip_rms_norm_claim(node: &NodeView) -> ClaimResult {
     // The handler produces only out[0] (normalized) and the optional out[last] (residual sum);
     // reject if mean (out[1]) or inv-std (out[2]) are requested — mlx_fast_rms_norm doesn't compute
     // them, so claiming would leave those outputs unbound (mirrors skip_layer_norm_claim).
-    require!(
-        !node.output_present(1) && !node.output_present(2),
-        "mean/inv-std outputs are unsupported; only normalized output and optional residual sum are produced"
-    );
+    // mean (out[1]) / inv-std (out[2]) are optional diagnostic outputs the RMS handler does not
+    // produce. When the graph actually CONSUMES them they become fused-subgraph boundary outputs and
+    // ORT would flag them unbound; when they are declared-but-unused (the common transformers.js /
+    // Mobius export case) they are never boundary outputs, so MLX simply DCEs them. We therefore
+    // accept them here and let the framework's unused-output elision handle it — a consuming model
+    // fails loudly (unbound output), never silently wrong.
     for (i, name) in [(1, "skip"), (2, "gamma")] {
         let dtype = match tensor_dtype(node, i) {
             Some(dtype) => dtype,
@@ -617,10 +619,12 @@ fn skip_layer_norm_claim(node: &NodeView) -> ClaimResult {
         );
     }
     // Reject if mean (out[1]) or inv-std (out[2]) are requested — we do not compute them.
-    require!(
-        !node.output_present(1) && !node.output_present(2),
-        "mean/inv-std outputs are unsupported; only normalized output and optional residual sum are produced"
-    );
+    // mean (out[1]) / inv-std (out[2]) are optional diagnostic outputs the RMS handler does not
+    // produce. When the graph actually CONSUMES them they become fused-subgraph boundary outputs and
+    // ORT would flag them unbound; when they are declared-but-unused (the common transformers.js /
+    // Mobius export case) they are never boundary outputs, so MLX simply DCEs them. We therefore
+    // accept them here and let the framework's unused-output elision handle it — a consuming model
+    // fails loudly (unbound output), never silently wrong.
     Ok(())
 }
 
