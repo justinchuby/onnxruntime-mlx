@@ -1205,13 +1205,13 @@ fn attention_claim(node: &NodeView) -> ClaimResult {
             kvh
         );
         require!(
-            qshape.iter().all(|&d| d > 0),
-            "Q must have static positive dimensions, got shape {:?}",
+            qshape[2] > 0 && qshape[0] != 0,
+            "Q hidden dimension must be static and positive (batch/seq may be dynamic), got shape {:?}",
             qshape
         );
         require!(
-            kshape[1] > 0 && vshape[1] > 0 && kshape[2] > 0 && vshape[2] > 0,
-            "K and V must have static positive sequence and hidden dimensions, got {:?} and {:?}",
+            kshape[2] > 0 && vshape[2] > 0,
+            "K and V hidden dimensions must be static and positive, got {:?} and {:?}",
             kshape,
             vshape
         );
