@@ -36,6 +36,38 @@ embedding, and more, in fp32/fp16/bf16. A handful of ops that need engine-level 
 recurrence (`Scan`, `LSTM`, `LinearAttention`, `MoE`, `PackedMultiHeadAttention`) run on ORT CPU by
 design. See [`docs/OP_ARCHITECTURE.md`](docs/OP_ARCHITECTURE.md) for the full coverage table.
 
+## When is a graph fast? (claim + compile rules of thumb)
+
+Peak performance comes from the EP fusing a large region into **one MLX closure** that is traced +
+`mlx_compile`d **once** and replayed — one dispatch instead of hundreds. Whether that happens depends
+on how the graph is shaped. Rules of thumb, fastest → slowest:
+
+1. **Static-shape, fully-claimable feed-forward** (audio / CNN / vision encoders) — *ideal*. The whole
+   graph is one convex cluster, compiled once, replayed. (Perch: 725/725 nodes, 1 subgraph.)
+2. **Dynamic dims that resolve at trace time** are fine. A symbolic batch/sequence/spatial dim, or a
+   `shape`/`starts` derived from `Shape(x)` (a *shape-const* value), is resolved to a concrete extent
+   per **shape key** — so dynamic-spatial Conv/Resize, `[B,S,-1]` reshapes, etc. still compile. But a
+   **shape *change*** at run time **retraces** the closure (the `general` = shape-keyed path), so
+   many distinct shapes = many compiles. Bucket/pad your shapes for best reuse.
+3. **Attention decoders** (`GroupQueryAttention`) get a dedicated **shapeless decode/prefill** path:
+   the growing KV length is a shapeless dim, so per-token decode **never retraces** (KV aliased
+   in-place, delta copy-out). This is the one case where a growing dimension stays fast.
+4. **What forces a slow fallback (per-node eager, or CPU):**
+   - **Control flow** — `If` / `Loop` / `Scan` bodies are never compiled (the whole plan runs eager).
+   - **Data-dependent output shapes** — `NonZero` / `Unique` / a `Reshape` whose target is computed
+     from tensor *values* (not shapes) — these need a mid-graph host read that a single trace can't
+     express, so their subgraph runs eager.
+   - **fp64** anywhere (MLX has no float64), or any op the registry doesn't claim.
+5. **Fragmentation is the real cost.** One unclaimed op *in the middle* of a graph splits it into two
+   islands with a CPU round-trip between them. Sub-5 ms graphs are dispatch/eval-overhead-bound, so a
+   few islands can make MLX *slower* than CPU — the win scales with fused-region compute size, not
+   claim rate alone. Aim to keep declined ops at the graph's edges.
+
+**Diagnosing it yourself:** run with `MLX_EP_CLAIM_DEBUG=1` (or the tracer) to print exactly which
+ops were declined, how many, and an actionable reason for each — the fastest way to see why a graph
+fragmented and what to change (e.g. re-export at a higher opset, give a static shape, drop an fp64
+cast).
+
 ## Requirements
 
 - macOS on Apple Silicon, ORT 1.27 prebuilt (`ORT_API_VERSION >= 27`)
