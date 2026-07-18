@@ -62,6 +62,7 @@ fn is_general_compile_unsafe(op_type: &str) -> bool {
     matches!(
         op_type,
         "GroupQueryAttention"
+            | "PagedAttention"
             | "Attention"
             | "MultiHeadAttention"
             | "SparseAttention"

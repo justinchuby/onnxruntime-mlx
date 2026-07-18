@@ -25,6 +25,9 @@ no `.metal` kernels to maintain.
 - **QMoE** (quantized Mixture-of-Experts, `quant_type='int'`) → dense per-expert matmuls + top-k
   softmax routing + SwiGLU/silu/gelu/relu activation (int4/int8 experts dequantized in-graph)
 - **GroupQueryAttention** (RoPE in-op) → `mlx_fast_scaled_dot_product_attention` + `mlx_fast_rope`
+- **PagedAttention** (block-paged KV cache, packed var-length batches) → per-sequence paged gather +
+  GQA causal SDPA + RoPE. ORT ships this CUDA-only, so the MLX EP is the only way it runs on Apple
+  Silicon (there is no CPU fallback).
 - **RMSNormalization / SkipSimplifiedLayerNormalization** → `mlx_fast_rms_norm`
 - **GatherBlockQuantized** (symmetric int4 embedding) → gather + dequant
 - **Softmax / Add / Mul / Sub / Sigmoid / Cast** → the matching MLX elementwise ops
@@ -33,8 +36,9 @@ Ops the EP does not translate are left unclaimed and run on ORT's CPU EP.
 
 The translator covers the **full set of ops Mobius emits** (~85 op types) via a modular, opset-aware
 registry (`rust/src/ops/*.rs`) — math/logical, reductions, shape/data-movement, normalizations,
-attention (GQA, Attention 23/24, MHA, RoPE), dense MatMul/Gemm, Conv/pooling, quantized matmul &
-embedding, quantized Mixture-of-Experts (`QMoE`), and more, in fp32/fp16/bf16. A handful of ops that
+attention (GQA, PagedAttention, Attention 23/24, MHA, RoPE), dense MatMul/Gemm, Conv/pooling,
+quantized matmul & embedding, quantized Mixture-of-Experts (`QMoE`), and more, in fp32/fp16/bf16. A
+handful of ops that
 need engine-level control-flow or recurrence (`Scan`, `LSTM`, `LinearAttention`, float `MoE`,
 `PackedMultiHeadAttention`) run on ORT CPU by design. See
 [`docs/OP_ARCHITECTURE.md`](docs/OP_ARCHITECTURE.md) for the full coverage table.

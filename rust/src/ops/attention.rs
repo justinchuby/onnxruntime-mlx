@@ -17,10 +17,10 @@
 //! GQA's in-op RoPE also fuses onto `mlx_fast_rope` for fp32 caches (composed fallback otherwise).
 //! This is the eager (single-`mlx_eval`) path only.
 
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_void};
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
-use crate::mlx::VectorArray;
+use crate::mlx::{Array, VectorArray};
 use crate::registry::{
     is_mlx_float, ClaimResult, NodeView, OpRegistration, OpRegistry, K_ANY_OPSET,
 };
@@ -1451,7 +1451,275 @@ fn reg(
     });
 }
 
+// ---- PagedAttention (com.microsoft) ------------------------------------------------------------
+// Block-paged KV-cache attention with packed var-length batches (vLLM-style continuous batching).
+// ORT ships this CUDA-only (no CPU kernel), so the MLX EP claiming it is the only way such a model
+// runs on Apple Silicon. This is an EAGER, data-dependent op: the packing boundaries
+// (cumulative_sequence_length), per-sequence past lengths (past_seqlens) and the physical block map
+// (block_table) are runtime INT32 tensors, read host-side each forward. For each sequence we gather
+// its cached K/V from the scattered physical blocks, append the new (optionally RoPE'd) K/V, run a
+// causal GQA SDPA (query row i attends keys [0, past+i]) in fp32, and pack the outputs back.
+// Supported subset: separate Q/K/V, GQA, causal, optional RoPE. Declined: packed-QKV input, softcap,
+// sliding window (local_window_size), asymmetric forms.
+
+/// Read an integer input tensor (int32 or int64) to a host `Vec<i64>`, normalizing dtype through
+/// MLX (astype + eval) — unlike `read_ints`, which reinterprets the raw bytes as i64 and so mangles
+/// an int32 tensor. PagedAttention's control tensors (cum_seqlens/past_seqlens/block_table) are int32.
+fn read_int_input(ctx: &mut TranslationContext, r: &crate::engine::TensorRef) -> Result<Vec<i64>, MlxError> {
+    let a = ctx.resolve(r)?;
+    let a = ctx.astype(a, mlx::mlx_dtype__MLX_INT64)?;
+    let a = ctx.contiguous_eval(a)?;
+    let sh = ctx.shape_of(a);
+    let n: usize = sh.iter().map(|&d| d as usize).product();
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let p = unsafe { mlx::mlx_array_data_int64(a) };
+    if p.is_null() {
+        return Ok(Vec::new());
+    }
+    Ok(unsafe { std::slice::from_raw_parts(p, n) }.to_vec())
+}
+
+/// Build a 1-D int32 MLX array from concrete host indices (physical block ids for a `take`).
+fn i32_host_array(ctx: &mut TranslationContext, data: &[i32]) -> mlx::mlx_array {
+    ctx.keep(Array::from_data(
+        data.as_ptr() as *const c_void,
+        &[data.len() as i32],
+        mlx::mlx_dtype__MLX_INT32,
+    ))
+}
+
+/// Repeat each of `kv` heads `g` times along the head axis of a `[1, kv, s, hd]` tensor, yielding
+/// `[1, kv*g, s, hd]` — the GQA broadcast (output head e reads kv head e/g), matching np.repeat.
+fn gqa_repeat_heads(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    kv: i32,
+    g: i32,
+    s: i32,
+    hd: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    if g == 1 {
+        return Ok(x);
+    }
+    let r = ctx.reshape(x, &[1, kv, 1, s, hd])?;
+    let bshape = [1, kv, g, s, hd];
+    let b = ctx.emit(|res, st| unsafe {
+        mlx::mlx_broadcast_to(res, r, bshape.as_ptr(), bshape.len(), st)
+    })?;
+    ctx.reshape(b, &[1, kv * g, s, hd])
+}
+
+fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let num_heads = attr_int(n, "num_heads", 0) as i32;
+    let kv_heads = attr_int(n, "kv_num_heads", 0) as i32;
+    let do_rotary = attr_int(n, "do_rotary", 0) != 0;
+    let interleaved = attr_int(n, "rotary_interleaved", 0) != 0;
+    if num_heads <= 0 || kv_heads <= 0 || num_heads % kv_heads != 0 {
+        return Err("PagedAttention: bad num_heads/kv_num_heads".to_string());
+    }
+    let f32t = mlx::mlx_dtype__MLX_FLOAT32;
+
+    let q = ctx.resolve(&n.inputs[0])?;
+    let out_dt = ctx.dtype_of(q);
+    let qs = ctx.shape_of(q); // [num_tokens, hidden]
+    let hidden = qs[1];
+    let head = hidden / num_heads;
+    let kv_hidden = kv_heads * head;
+    let scale = attr_scale(n, head);
+    let g = num_heads / kv_heads;
+
+    let key = ctx.resolve(&n.inputs[1])?;
+    let value = ctx.resolve(&n.inputs[2])?;
+    let kcache = ctx.resolve(&n.inputs[3])?;
+    let vcache = ctx.resolve(&n.inputs[4])?;
+    let cshape = ctx.shape_of(kcache); // [num_blocks, block_size, kv, head]
+    let block_size = cshape[1];
+
+    // Data-dependent control tensors, read host-side (this op is forced onto the eager path).
+    let cum = read_int_input(ctx, &n.inputs[5])?; // [batch+1]
+    let past = read_int_input(ctx, &n.inputs[6])?; // [batch]
+    let bt = read_int_input(ctx, &n.inputs[7])?; // [batch, max_blocks] flattened
+    if cum.len() < 2 {
+        return Err("PagedAttention: cumulative_sequence_length must have length batch+1".to_string());
+    }
+    let batch = cum.len() - 1;
+    let max_blocks = bt.len() / batch;
+
+    // Recover the fused-RoPE period array from the cos/sin caches once (fp32 fast-rope path). The
+    // cache is [max_seq, rotary_dim/2], so the rotary dimension = 2 * its column count.
+    let rope = if do_rotary {
+        let cos = ctx.resolve(&n.inputs[8])?;
+        let sin = ctx.resolve(&n.inputs[9])?;
+        let half = ctx.shape_of(cos)[1];
+        let freqs = rope_freqs_from_cache(ctx, cos, sin, half)?;
+        Some((freqs, 2 * half))
+    } else {
+        None
+    };
+
+    let mut outs: Vec<mlx::mlx_array> = Vec::new();
+    for b in 0..batch {
+        let s0 = cum[b] as i32;
+        let s1 = cum[b + 1] as i32;
+        let nq = s1 - s0;
+        if nq <= 0 {
+            continue;
+        }
+        let pastb = past[b] as i32;
+        let total = pastb + nq;
+
+        // Slice this sequence's packed rows and split into [1, heads, nq, head].
+        let qb = slice(ctx, q, &[s0, 0], &[s1, hidden])?;
+        let qb = ctx.reshape(qb, &[1, nq, hidden])?;
+        let mut qh = split_heads(ctx, qb, 1, nq, num_heads, head)?; // [1,H,nq,head]
+        let kb = slice(ctx, key, &[s0, 0], &[s1, kv_hidden])?;
+        let kb = ctx.reshape(kb, &[1, nq, kv_hidden])?;
+        let mut kh_new = split_heads(ctx, kb, 1, nq, kv_heads, head)?; // [1,kv,nq,head]
+        let vb = slice(ctx, value, &[s0, 0], &[s1, kv_hidden])?;
+        let vb = ctx.reshape(vb, &[1, nq, kv_hidden])?;
+        let vh_new = split_heads(ctx, vb, 1, nq, kv_heads, head)?; // [1,kv,nq,head]
+
+        // RoPE the new Q and K at absolute positions [past, total).
+        if let Some((freqs, rot)) = rope {
+            qh = fast_rope_static(ctx, qh, rot, interleaved, pastb, freqs)?;
+            kh_new = fast_rope_static(ctx, kh_new, rot, interleaved, pastb, freqs)?;
+        }
+
+        // Gather the cached prefix [0, past) from the physical blocks and append the new K/V.
+        let (kh, vh) = if pastb > 0 {
+            let nblk = ((pastb + block_size - 1) / block_size) as usize;
+            let idx: Vec<i32> = (0..nblk).map(|j| bt[b * max_blocks + j] as i32).collect();
+            let idx_arr = i32_host_array(ctx, &idx);
+            let gk = ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, kcache, idx_arr, 0, s) })?;
+            let gk = ctx.reshape(gk, &[1, (nblk as i32) * block_size, kv_hidden])?;
+            let gk = split_heads(ctx, gk, 1, (nblk as i32) * block_size, kv_heads, head)?; // [1,kv,N,head]
+            let gk = slice(ctx, gk, &[0, 0, 0, 0], &[1, kv_heads, pastb, head])?;
+            let gv = ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, vcache, idx_arr, 0, s) })?;
+            let gv = ctx.reshape(gv, &[1, (nblk as i32) * block_size, kv_hidden])?;
+            let gv = split_heads(ctx, gv, 1, (nblk as i32) * block_size, kv_heads, head)?;
+            let gv = slice(ctx, gv, &[0, 0, 0, 0], &[1, kv_heads, pastb, head])?;
+            (concat2(ctx, gk, kh_new, 2)?, concat2(ctx, gv, vh_new, 2)?) // [1,kv,total,head]
+        } else {
+            (kh_new, vh_new)
+        };
+
+        // GQA broadcast to full head count, then causal SDPA (query i attends keys [0, past+i]).
+        let kh = gqa_repeat_heads(ctx, kh, kv_heads, g, total, head)?; // [1,H,total,head]
+        let vh = gqa_repeat_heads(ctx, vh, kv_heads, g, total, head)?;
+        let qh = ctx.astype(qh, f32t)?;
+        let kh = ctx.astype(kh, f32t)?;
+        let vh = ctx.astype(vh, f32t)?;
+        let mask = causal_mask_topleft(ctx, nq, total, pastb, f32t)?; // [nq,total]
+        let mask = ctx.reshape(mask, &[1, 1, nq, total])?;
+        let o = sdpa(ctx, qh, kh, vh, scale, b"array\0", mask)?; // [1,H,nq,head]
+        let o = ctx.transpose(o, &[0, 2, 1, 3])?; // [1,nq,H,head]
+        let o = ctx.reshape(o, &[nq, hidden])?;
+        outs.push(ctx.astype(o, out_dt)?);
+    }
+
+    let output = match outs.len() {
+        0 => {
+            // No tokens (all sequences empty): bind an empty [0, hidden] tensor.
+            let z = ctx.reshape(q, &[qs[0], hidden])?;
+            slice(ctx, z, &[0, 0], &[0, hidden])?
+        }
+        1 => outs[0],
+        _ => {
+            let mut vec = VectorArray::new();
+            for o in &outs {
+                vec.append(*o);
+            }
+            ctx.emit(|res, s| unsafe { mlx::mlx_concatenate_axis(res, vec.as_raw(), 0, s) })?
+        }
+    };
+    ctx.bind(&n.outputs[0], output);
+    Ok(())
+}
+
+fn paged_attention_claim(node: &NodeView) -> ClaimResult {
+    require!(node.num_outputs() >= 1, "PagedAttention requires at least 1 output");
+    // T = fp16/bf16 only; output dtype must match the query.
+    let out_dt = match node.output_info(0) {
+        Some(o) if is_mlx_float(o.dtype) => o.dtype,
+        Some(o) => deny!(
+            "output must be an MLX float dtype, got {}",
+            crate::registry::ort_dtype_name(o.dtype)
+        ),
+        None => deny!("output lacks tensor type/shape info"),
+    };
+    require!(
+        out_dt == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16
+            || out_dt == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16,
+        "PagedAttention is only supported for fp16/bf16 (T)"
+    );
+    let ninputs = node.num_inputs();
+    require!(
+        (8..=10).contains(&ninputs),
+        "expects 8 inputs (query, key, value, key_cache, value_cache, cumulative_sequence_length, \
+         past_seqlens, block_table) + optional cos/sin, got {}",
+        ninputs
+    );
+    // Separate Q/K/V only (packed-QKV form declined for now): key & value must be present floats.
+    for idx in [0usize, 1, 2, 3, 4] {
+        match dtype_of(node, idx) {
+            Some(dt) => require!(
+                dt == out_dt,
+                "input {} must share the output float dtype",
+                idx
+            ),
+            None => deny!("input {} (Q/K/V/cache) must be present with a float dtype", idx),
+        }
+    }
+    // Positional inputs are int32.
+    for idx in [5usize, 6, 7] {
+        match dtype_of(node, idx) {
+            Some(dt) => require!(is_int32(dt), "input {} must be int32", idx),
+            None => deny!("input {} (positional) must be present", idx),
+        }
+    }
+    let num_heads = node.int_attr("num_heads", 0);
+    let kv_heads = node.int_attr("kv_num_heads", 0);
+    require!(
+        num_heads > 0 && kv_heads > 0 && num_heads % kv_heads == 0,
+        "num_heads ({num_heads}) must be a positive multiple of kv_num_heads ({kv_heads})"
+    );
+    require!(
+        node.int_attr("local_window_size", -1) == -1,
+        "sliding-window attention (local_window_size) is not supported"
+    );
+    require!(
+        node.float_attr("softcap", 0.0) == 0.0,
+        "attention softcap is not supported"
+    );
+    // do_rotary=1 needs the cos/sin caches present (inputs 8, 9).
+    if node.int_attr("do_rotary", 0) != 0 {
+        require!(
+            ninputs == 10 && node.input_present(8) && node.input_present(9),
+            "do_rotary=1 requires cos_cache and sin_cache inputs"
+        );
+        match (dtype_of(node, 8), dtype_of(node, 9)) {
+            (Some(c), Some(s)) => require!(
+                c == out_dt && s == out_dt,
+                "cos_cache/sin_cache must share the output float dtype"
+            ),
+            _ => deny!("do_rotary=1 requires typed cos_cache/sin_cache"),
+        }
+    }
+    Ok(())
+}
+
 pub fn register_attention(registry: &mut OpRegistry) {
+    reg(
+        registry,
+        "com.microsoft",
+        "PagedAttention",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        paged_attention_op,
+        paged_attention_claim,
+    );
     reg(
         registry,
         "com.microsoft",
