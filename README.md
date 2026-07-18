@@ -196,6 +196,47 @@ Any op the EP doesn't claim falls back to the ORT CPU EP, so **every** graph sti
 the EP is a safe drop-in. The audio numbers above are the public Hugging Face Perch v2 / BirdNET ONNX
 exports, timed as the median of 10 warm runs against the CPU EP on the same machine.
 
+## Profiling & tracing (Perfetto)
+
+The EP ships a built-in tracer (compiled in by default, **near-zero cost when off**). Recording is
+gated entirely by environment variables — set one, run your model, and inspect the result.
+
+**Get a Perfetto/Chrome trace.** Point `ONNX_GENAI_MLX_TRACE` at an output path; the JSON trace is
+written when the inference session is torn down:
+
+```bash
+ONNX_GENAI_MLX_TRACE=/tmp/mlx_trace.json python your_script.py
+# then open https://ui.perfetto.dev  (or chrome://tracing) and load /tmp/mlx_trace.json
+```
+
+The timeline shows one span per fused subgraph (`mlx.subgraph`), a nested span around the synchronous
+`mlx_eval` (`mlx.eval` — its CPU wall time is the GPU-inclusive time of the whole fused subgraph),
+per-op build spans with shapes/dtype/bytes, and counter tracks for GPU memory / utilisation. Ops that
+fell back to a slower *composed* path (despite a fused kernel existing) are coloured distinctly with a
+`reason=…`, and a top-10 slowest-ops summary is emitted at teardown.
+
+**Lighter options** (no JSON file):
+
+| Env var | Effect |
+|---|---|
+| `ONNX_GENAI_MLX_VERBOSE=1` | Print the end-of-run session summary (claim rate, compute-path breakdown, time attribution) to stderr. |
+| `MLX_EP_CLAIM_DEBUG=1` | Print each unclaimed node + the actionable reason (why the graph fragmented). |
+| `ONNX_GENAI_MLX_SIGNPOST=1` | Emit `os_signpost` intervals so an Instruments *Metal System Trace* correlates. |
+
+**Per-kernel GPU detail (Xcode).** MLX hides its Metal command buffers inside one fused `mlx_eval`, so
+the JSON trace times the fused eval as a whole. To see *inside* it, capture a boundary eval to a
+`.gputrace` bundle (full per-kernel timing / occupancy / bandwidth) and open it in Xcode:
+
+```bash
+MTL_CAPTURE_ENABLED=1 \
+ONNX_GENAI_MLX_GPU_CAPTURE=/tmp/mlx.gputrace \
+ONNX_GENAI_MLX_GPU_CAPTURE_EVAL=5 \
+python your_script.py
+```
+
+`MTL_CAPTURE_ENABLED=1` must be set before process start. `…_GPU_CAPTURE_EVAL` picks which eval to
+capture (0-based, default 0); for decode, eval 0 is prefill/warmup, so pick a steady-state token.
+
 ## Concurrency
 
 MLX evaluation is **thread-affine** — a given `InferenceSession`'s MLX work must run on the thread
