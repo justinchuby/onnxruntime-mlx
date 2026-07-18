@@ -1003,8 +1003,10 @@ fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
              got do_rotary=1"
         );
     }
-    // Float inputs that must match the output dtype. cos/sin (7,8) only exist in the 9-input form.
-    let float_idx: &[usize] = if has_bias {
+    // Float inputs that must match the output dtype. cos/sin (7,8) exist only in the 9-input form
+    // WITH in-op rotary (do_rotary=1); with external rotary (do_rotary=0) they are absent, as is the
+    // whole 11-input Gemma3n variant.
+    let float_idx: &[usize] = if has_bias || !do_rotary {
         &[0usize, 1, 2, 3, 4]
     } else {
         &[0usize, 1, 2, 3, 4, 7, 8]

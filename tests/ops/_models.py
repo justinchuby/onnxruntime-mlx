@@ -51,8 +51,11 @@ def make_model(
     opset_imports = {"": opset}
     if domain:
         opset_imports[domain] = 1
+    # Empty-name values are ABSENT optional node inputs (e.g. omitted cos/sin), represented as ""
+    # references on the node — they must not appear as graph inputs (two of them would collide).
+    graph_inputs = [v for v in inputs if v.name]
     graph = ir.Graph(
-        inputs, outputs, nodes=[node], name=f"mlx_{op_type}", opset_imports=opset_imports
+        graph_inputs, outputs, nodes=[node], name=f"mlx_{op_type}", opset_imports=opset_imports
     )
     return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
 
@@ -267,8 +270,10 @@ def gqa_model(
     head: int,
     do_rotary: int,
     interleaved: int = 0,
+    rope_cache: bool = True,
 ) -> tuple[bytes, dict[str, np.ndarray]]:
-    """GroupQueryAttention (rope applied inside the MLX SDPA path)."""
+    """GroupQueryAttention. With `rope_cache=False` the cos/sin cache inputs (7,8) are ABSENT
+    (empty slots) — the external-rotary form (do_rotary=0) that genai exports emit."""
     present = past + seq
     max_seq = present + 4
     scale = 1.0 / np.sqrt(head)
@@ -282,6 +287,16 @@ def gqa_model(
     total = np.array([present], dtype=np.int32)
     cos, sin = rotary_caches(max_seq, head)
 
+    cos_v = (
+        tensor("cos_cache", DataType.FLOAT, [max_seq, head // 2])
+        if rope_cache
+        else ir.Value(name="")
+    )
+    sin_v = (
+        tensor("sin_cache", DataType.FLOAT, [max_seq, head // 2])
+        if rope_cache
+        else ir.Value(name="")
+    )
     inputs = [
         tensor("query", DataType.FLOAT, [batch, seq, num_heads * head]),
         tensor("key", DataType.FLOAT, [batch, seq, kv_heads * head]),
@@ -290,8 +305,8 @@ def gqa_model(
         tensor("past_value", DataType.FLOAT, [batch, kv_heads, past, head]),
         tensor("seqlens_k", DataType.INT32, [batch]),
         tensor("total_sequence_length", DataType.INT32, [1]),
-        tensor("cos_cache", DataType.FLOAT, [max_seq, head // 2]),
-        tensor("sin_cache", DataType.FLOAT, [max_seq, head // 2]),
+        cos_v,
+        sin_v,
     ]
     outputs = [
         tensor("attn_output", DataType.FLOAT, [batch, seq, num_heads * head]),
@@ -319,9 +334,10 @@ def gqa_model(
         "past_value": past_v,
         "seqlens_k": seqlens_k,
         "total_sequence_length": total,
-        "cos_cache": cos,
-        "sin_cache": sin,
     }
+    if rope_cache:
+        feeds["cos_cache"] = cos
+        feeds["sin_cache"] = sin
     return model, feeds
 
 
