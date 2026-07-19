@@ -150,6 +150,100 @@ def _conv2d(name: str, cin: int, cout: int, hw: int, k: int = 3) -> Case:
     return Case(name, "conv", model, {"x": x, "w": w})
 
 
+# --- diffusion (Stable-Diffusion UNet) building blocks ------------------------------------------
+# Each block is something the EP claims end-to-end, so it fuses into one MLX closure — the regime
+# where diffusion actually accelerates (a single conv/norm in isolation is dispatch-bound). Shapes
+# mirror SD1.x mid/up resolutions.
+def _conv_node(x, w, o, k=3, stride=1):
+    return ir.Node("", "Conv", [x, w], attributes=[
+        ir.AttrInt64s("kernel_shape", [k, k]), ir.AttrInt64s("strides", [stride, stride]),
+        ir.AttrInt64s("pads", [k // 2] * 4), ir.AttrInt64s("dilations", [1, 1]),
+        ir.AttrInt64("group", 1)], outputs=[o])
+
+
+def _group_norm_node(x, s, b, o, groups=32):
+    return ir.Node("", "GroupNormalization", [x, s, b], attributes=[
+        ir.AttrInt64("num_groups", groups), ir.AttrFloat32("epsilon", 1e-5)], outputs=[o])
+
+
+def _silu_nodes(h_in, h_out, tag, c, hw):
+    s = bm.tensor(f"sig_{tag}", DT.FLOAT, [1, c, hw, hw])
+    return [ir.Node("", "Sigmoid", [h_in], outputs=[s]),
+            ir.Node("", "Mul", [h_in, s], outputs=[h_out])]
+
+
+def _sd_resnet_block(name: str, c: int = 320, hw: int = 64) -> Case:
+    """SD ResnetBlock2D core: GroupNorm->SiLU->Conv->GroupNorm->SiLU->Conv + residual."""
+    r = _rng(name)
+    x = bm.tensor("x", DT.FLOAT, [1, c, hw, hw])
+    w1v = bm.tensor("w1", DT.FLOAT, [c, c, 3, 3])
+    w2v = bm.tensor("w2", DT.FLOAT, [c, c, 3, 3])
+    s1v = bm.tensor("s1", DT.FLOAT, [c])
+    b1v = bm.tensor("b1", DT.FLOAT, [c])
+    s2v = bm.tensor("s2", DT.FLOAT, [c])
+    b2v = bm.tensor("b2", DT.FLOAT, [c])
+    g1 = bm.tensor("g1", DT.FLOAT, [1, c, hw, hw])
+    a1 = bm.tensor("a1", DT.FLOAT, [1, c, hw, hw])
+    c1 = bm.tensor("c1", DT.FLOAT, [1, c, hw, hw])
+    g2 = bm.tensor("g2", DT.FLOAT, [1, c, hw, hw])
+    a2 = bm.tensor("a2", DT.FLOAT, [1, c, hw, hw])
+    c2 = bm.tensor("c2", DT.FLOAT, [1, c, hw, hw])
+    o = bm.tensor("o", DT.FLOAT, [1, c, hw, hw])
+    nodes = [_group_norm_node(x, s1v, b1v, g1)]
+    nodes += _silu_nodes(g1, a1, "1", c, hw)
+    nodes += [_conv_node(a1, w1v, c1), _group_norm_node(c1, s2v, b2v, g2)]
+    nodes += _silu_nodes(g2, a2, "2", c, hw)
+    nodes += [_conv_node(a2, w2v, c2), ir.Node("", "Add", [x, c2], outputs=[o])]
+    graph = ir.Graph([x, w1v, w2v, s1v, b1v, s2v, b2v], [o], nodes=nodes,
+                     name="sd_resnet_block", opset_imports={"": 21})
+    model = ir.to_proto(ir.Model(graph, ir_version=10)).SerializeToString()
+    feeds = {
+        "x": r.standard_normal((1, c, hw, hw)).astype(np.float32),
+        "w1": (r.standard_normal((c, c, 3, 3)) * 0.02).astype(np.float32),
+        "w2": (r.standard_normal((c, c, 3, 3)) * 0.02).astype(np.float32),
+        "s1": np.ones(c, np.float32), "b1": np.zeros(c, np.float32),
+        "s2": np.ones(c, np.float32), "b2": np.zeros(c, np.float32),
+    }
+    return Case(name, "diffusion", model, feeds)
+
+
+def _sd_upblock(name: str, c: int = 320, hw: int = 32) -> Case:
+    """SD UNet up-block: Resize nearest 2x -> Concat(skip, axis=1) -> GroupNorm -> SiLU -> Conv.
+    Exercises the Resize + skip-Concat + norm/conv fusion of the decoder path."""
+    r = _rng(name)
+    x = bm.tensor("x", DT.FLOAT, [1, c, hw, hw])
+    skip = bm.tensor("skip", DT.FLOAT, [1, c, hw * 2, hw * 2])
+    roi = ir.Value(name="")
+    scales = ir.Value(name="scales", type=ir.TensorType(DT.FLOAT), shape=ir.Shape([4]),
+                      const_value=ir.tensor(np.array([1, 1, 2, 2], np.float32)))
+    sv = ir.Value(name="gs", type=ir.TensorType(DT.FLOAT), shape=ir.Shape([2 * c]),
+                  const_value=ir.tensor(np.ones(2 * c, np.float32)))
+    bv = ir.Value(name="gb", type=ir.TensorType(DT.FLOAT), shape=ir.Shape([2 * c]),
+                  const_value=ir.tensor(np.zeros(2 * c, np.float32)))
+    wv = bm.tensor("w", DT.FLOAT, [c, 2 * c, 3, 3])
+    up = bm.tensor("up", DT.FLOAT, [1, c, hw * 2, hw * 2])
+    cat = bm.tensor("cat", DT.FLOAT, [1, 2 * c, hw * 2, hw * 2])
+    gn = bm.tensor("gn", DT.FLOAT, [1, 2 * c, hw * 2, hw * 2])
+    ac = bm.tensor("ac", DT.FLOAT, [1, 2 * c, hw * 2, hw * 2])
+    o = bm.tensor("o", DT.FLOAT, [1, c, hw * 2, hw * 2])
+    nodes = [
+        ir.Node("", "Resize", [x, roi, scales], attributes=[
+            ir.AttrString("mode", "nearest"), ir.AttrString("nearest_mode", "floor"),
+            ir.AttrString("coordinate_transformation_mode", "asymmetric")], outputs=[up]),
+        ir.Node("", "Concat", [up, skip], attributes=[ir.AttrInt64("axis", 1)], outputs=[cat]),
+        _group_norm_node(cat, sv, bv, gn),
+    ]
+    nodes += _silu_nodes(gn, ac, "u", 2 * c, hw * 2)
+    nodes += [_conv_node(ac, wv, o)]
+    graph = ir.Graph([x, skip, wv], [o], nodes=nodes, name="sd_upblock",
+                     opset_imports={"": 21}, initializers=[scales, sv, bv])
+    model = ir.to_proto(ir.Model(graph, ir_version=10)).SerializeToString()
+    feeds = {"x": r.standard_normal((1, c, hw, hw)).astype(np.float32),
+             "skip": r.standard_normal((1, c, hw * 2, hw * 2)).astype(np.float32),
+             "w": (r.standard_normal((c, 2 * c, 3, 3)) * 0.02).astype(np.float32)}
+    return Case(name, "diffusion", model, feeds)
+
+
 def build_cases() -> list[Case]:
     """The benchmark suite. Order is stable so results line up across runs."""
     cases: list[Case] = [
@@ -178,5 +272,8 @@ def build_cases() -> list[Case]:
         _gelu("gelu_fp32_512x1024", DT.FLOAT, 512, 1024),
         _add_broadcast("add_broadcast_fp16_512x1024", DT.FLOAT16, 512, 1024),
         _conv2d("conv2d_fp32_32to64_64x64", 32, 64, 64),
+        # --- diffusion (SD UNet blocks: fuse into one closure => real speedup) --------------------
+        _sd_resnet_block("diffusion_resnet_block_320ch_64x64", 320, 64),
+        _sd_upblock("diffusion_upblock_resize_concat_320ch_32x32", 320, 32),
     ]
     return cases
