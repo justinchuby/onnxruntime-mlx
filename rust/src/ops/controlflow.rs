@@ -19,8 +19,8 @@
 
 use crate::engine::{MlxError, NodeDesc, SubgraphDesc, TensorRef, TranslationContext};
 use crate::registry::{
-    ClaimPredicate, ClaimResult, GraphView, NodeView, OpHandler, OpRegistration, OpRegistry,
-    K_ANY_OPSET,
+    ClaimPredicate, ClaimResult, GraphView, K_ANY_OPSET, NodeView, OpHandler, OpRegistration,
+    OpRegistry,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -187,7 +187,10 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         }
         let bout = ctx.run_subgraph(&body, &bin)?;
         state[..num_state].copy_from_slice(&bout[..num_state]);
-        for (coll, b) in collected.iter_mut().zip(&bout[num_state..num_state + num_scan_out]) {
+        for (coll, b) in collected
+            .iter_mut()
+            .zip(&bout[num_state..num_state + num_scan_out])
+        {
             coll.push(*b);
         }
     }

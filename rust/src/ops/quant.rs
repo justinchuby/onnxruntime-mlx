@@ -27,7 +27,7 @@ use std::os::raw::c_void;
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
-    is_int_index, is_mlx_float, ClaimResult, NodeView, OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_int_index, is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -35,16 +35,32 @@ use crate::{deny, require};
 
 // ---- small MLX helpers (each keeps + returns the raw result) -------------------------------------
 
-fn mul(ctx: &mut TranslationContext, a: mlx::mlx_array, b: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn mul(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    b: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     ctx.binary(mlx::mlx_multiply, a, b)
 }
-fn sub(ctx: &mut TranslationContext, a: mlx::mlx_array, b: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn sub(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    b: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     ctx.binary(mlx::mlx_subtract, a, b)
 }
-fn add(ctx: &mut TranslationContext, a: mlx::mlx_array, b: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn add(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    b: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     ctx.binary(mlx::mlx_add, a, b)
 }
-fn div(ctx: &mut TranslationContext, a: mlx::mlx_array, b: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn div(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    b: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     ctx.binary(mlx::mlx_divide, a, b)
 }
 
@@ -53,7 +69,12 @@ fn round_e(ctx: &mut TranslationContext, a: mlx::mlx_array) -> Result<mlx::mlx_a
     ctx.emit(|res, s| unsafe { mlx::mlx_round(res, a, 0, s) })
 }
 
-fn clip(ctx: &mut TranslationContext, a: mlx::mlx_array, lo: mlx::mlx_array, hi: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn clip(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    lo: mlx::mlx_array,
+    hi: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     ctx.emit(|res, s| unsafe { mlx::mlx_clip(res, a, lo, hi, s) })
 }
 
@@ -142,7 +163,11 @@ fn range_for(t: ort::ONNXTensorElementDataType) -> Option<(f32, f32, mlx::mlx_dt
 // ---- shared int4 unpack / block-broadcast helpers ------------------------------------------------
 
 /// Gather rows `idx` (0-axis) of `src` → [BS, ...].
-fn gather_rows(ctx: &mut TranslationContext, src: mlx::mlx_array, idx: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn gather_rows(
+    ctx: &mut TranslationContext,
+    src: mlx::mlx_array,
+    idx: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, src, idx, 0, s) })
 }
 
@@ -150,7 +175,10 @@ fn gather_rows(ctx: &mut TranslationContext, src: mlx::mlx_array, idx: mlx::mlx_
 /// int4 values [BS, 2P] (uint32): column order low(byte0), high(byte0), low(byte1), high(byte1), …
 /// This is the nibble layout both the packed int4 weight `data` and the packed int4 `zero_points`
 /// use along the quantize axis.
-fn unpack_nibbles(ctx: &mut TranslationContext, packed_u8: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn unpack_nibbles(
+    ctx: &mut TranslationContext,
+    packed_u8: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     let sh = ctx.shape_of(packed_u8);
     let bs = sh[0];
     let p = sh[1];
@@ -199,7 +227,6 @@ fn compute_float_dtype(act_dt: mlx::mlx_dtype) -> mlx::mlx_dtype {
     }
 }
 
-
 /// Repack our uint8 [N, nblocks, block/2] int4 weight to MLX affine uint32 words [N, K/8] (8 nibbles
 /// per word, low→high along K). Cached (constant) or kept (dynamic).
 fn matmulnbits_repack(
@@ -211,7 +238,9 @@ fn matmulnbits_repack(
 ) -> Result<mlx::mlx_array, MlxError> {
     let wref = &n.inputs[1];
     let key = format!("{}#qw", wref.name);
-    if (wref.constant || wref.source == Src::Initializer) && let Some(w) = ctx.cache_get(&key) {
+    if (wref.constant || wref.source == Src::Initializer)
+        && let Some(w) = ctx.cache_get(&key)
+    {
         return Ok(w);
     }
     let host = ctx.raw_host(wref)?;
@@ -230,7 +259,11 @@ fn matmulnbits_repack(
                 let nib = within % 2;
                 let idx = ((row * nblocks + blk) * blob + byte) as usize;
                 let b = bytes[idx];
-                let q = if nib == 0 { (b & 0x0F) as u32 } else { (b >> 4) as u32 };
+                let q = if nib == 0 {
+                    (b & 0x0F) as u32
+                } else {
+                    (b >> 4) as u32
+                };
                 let word = (row as usize) * words + (kk / 8) as usize;
                 packed[word] |= q << (((kk % 8) as u32) * 4);
             }
@@ -321,8 +354,14 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             let neg8 = f32(ctx, -8.0);
             mul(ctx, scales2d, neg8)?
         };
-        let gs = mlx::mlx_optional_int_ { value: block as i32, has_value: true };
-        let bb = mlx::mlx_optional_int_ { value: 4, has_value: true };
+        let gs = mlx::mlx_optional_int_ {
+            value: block as i32,
+            has_value: true,
+        };
+        let bb = mlx::mlx_optional_int_ {
+            value: 4,
+            has_value: true,
+        };
         let mode = c"affine".as_ptr();
         ctx.emit(|res, s| unsafe {
             mlx::mlx_quantized_matmul(res, a2, w, scales2d, biases, true, gs, bb, mode, s)
@@ -565,7 +604,11 @@ fn matmul_integer_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), M
 
 // ---- conv NCHW<->NHWC transforms (mlx convs are channels-last) ----------------------------------
 
-fn to_channels_last(ctx: &mut TranslationContext, x: mlx::mlx_array, spatial_rank: usize) -> Result<mlx::mlx_array, MlxError> {
+fn to_channels_last(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    spatial_rank: usize,
+) -> Result<mlx::mlx_array, MlxError> {
     let t = if spatial_rank == 1 {
         ctx.transpose(x, &[0, 2, 1])?
     } else {
@@ -574,7 +617,11 @@ fn to_channels_last(ctx: &mut TranslationContext, x: mlx::mlx_array, spatial_ran
     ctx.contiguous(t)
 }
 
-fn from_channels_last(ctx: &mut TranslationContext, x: mlx::mlx_array, spatial_rank: usize) -> Result<mlx::mlx_array, MlxError> {
+fn from_channels_last(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    spatial_rank: usize,
+) -> Result<mlx::mlx_array, MlxError> {
     let t = if spatial_rank == 1 {
         ctx.transpose(x, &[0, 2, 1])?
     } else {
@@ -583,7 +630,11 @@ fn from_channels_last(ctx: &mut TranslationContext, x: mlx::mlx_array, spatial_r
     ctx.contiguous(t)
 }
 
-fn weight_to_channels_last(ctx: &mut TranslationContext, w: mlx::mlx_array, spatial_rank: usize) -> Result<mlx::mlx_array, MlxError> {
+fn weight_to_channels_last(
+    ctx: &mut TranslationContext,
+    w: mlx::mlx_array,
+    spatial_rank: usize,
+) -> Result<mlx::mlx_array, MlxError> {
     let t = if spatial_rank == 1 {
         ctx.transpose(w, &[0, 2, 1])?
     } else {
@@ -675,8 +726,16 @@ fn conv_integer_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), Mlx
 
     let has_x_zp = present(n, 2);
     let has_w_zp = present(n, 3);
-    let x_zp = if has_x_zp { ctx.resolve(&n.inputs[2])? } else { x };
-    let w_zp = if has_w_zp { ctx.resolve(&n.inputs[3])? } else { w };
+    let x_zp = if has_x_zp {
+        ctx.resolve(&n.inputs[2])?
+    } else {
+        x
+    };
+    let w_zp = if has_w_zp {
+        ctx.resolve(&n.inputs[3])?
+    } else {
+        w
+    };
 
     let out = centered_conv(ctx, n, x, w, has_x_zp, x_zp, has_w_zp, w_zp, spatial_rank)?;
     let r = round_e(ctx, out)?;
@@ -781,8 +840,16 @@ fn qlinear_conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), Mlx
 
     let has_x_zp = present(n, 2);
     let has_w_zp = present(n, 5);
-    let x_zp = if has_x_zp { ctx.resolve(&n.inputs[2])? } else { x };
-    let w_zp = if has_w_zp { ctx.resolve(&n.inputs[5])? } else { w };
+    let x_zp = if has_x_zp {
+        ctx.resolve(&n.inputs[2])?
+    } else {
+        x
+    };
+    let w_zp = if has_w_zp {
+        ctx.resolve(&n.inputs[5])?
+    } else {
+        w
+    };
 
     let mut acc = centered_conv(ctx, n, x, w, has_x_zp, x_zp, has_w_zp, w_zp, spatial_rank)?;
     let out_rank = ctx.shape_of(acc).len();
@@ -841,7 +908,12 @@ fn is_dequant_input(t: ort::ONNXTensorElementDataType) -> bool {
 
 /// A zero-point / scale parameter is claimable when absent, or present with dtype `want` and shape
 /// scalar or 1-D of length `axis_len` (per-axis). `axis_len < 0` disables per-axis (scalar only).
-fn param_ok(node: &NodeView, i: usize, want: ort::ONNXTensorElementDataType, axis_len: i64) -> bool {
+fn param_ok(
+    node: &NodeView,
+    i: usize,
+    want: ort::ONNXTensorElementDataType,
+    axis_len: i64,
+) -> bool {
     if !node.input_present(i) {
         return true;
     }
@@ -910,7 +982,10 @@ fn matmulnbits_claim(node: &NodeView) -> ClaimResult {
     let bits = node.int_attr("bits", 4);
     let block = node.int_attr("block_size", 32);
     require!(bits == 4, "only 4-bit weights are supported");
-    require!(matches!(block, 16 | 32 | 64 | 128), "block_size must be 16, 32, 64, or 128 (got {block})");
+    require!(
+        matches!(block, 16 | 32 | 64 | 128),
+        "block_size must be 16, 32, 64, or 128 (got {block})"
+    );
     Ok(())
 }
 
@@ -937,34 +1012,51 @@ fn gather_block_quantized_claim(node: &NodeView) -> ClaimResult {
             _ => deny!("zero_points must be uint8 when present"),
         }
     }
-    require!(node.int_attr("bits", 4) == 4, "only 4-bit data is supported");
-    require!(node.int_attr("gather_axis", 0) == 0 && node.int_attr("quantize_axis", 1) == 1,
-        "only gather_axis=0 and quantize_axis=1 are supported");
-    require!(node.int_attr("block_size", 128) >= 16, "block_size must be at least 16");
+    require!(
+        node.int_attr("bits", 4) == 4,
+        "only 4-bit data is supported"
+    );
+    require!(
+        node.int_attr("gather_axis", 0) == 0 && node.int_attr("quantize_axis", 1) == 1,
+        "only gather_axis=0 and quantize_axis=1 are supported"
+    );
+    require!(
+        node.int_attr("block_size", 128) >= 16,
+        "block_size must be at least 16"
+    );
     Ok(())
 }
 
 fn quantize_linear_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!((2..=3).contains(&nin) && node.num_outputs() >= 1,
-        "expects 2 or 3 inputs and at least one output");
+    require!(
+        (2..=3).contains(&nin) && node.num_outputs() >= 1,
+        "expects 2 or 3 inputs and at least one output"
+    );
     let (x, s, o) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
         (Some(x), Some(s), Some(o)) => (x, s, o),
         _ => deny!("missing tensor type/shape info on an input or the output"),
     };
     if !is_float(x.dtype) || !is_float(s.dtype) {
-        deny!("input and scale dtypes must be float32; got {} and {}",
-            crate::registry::ort_dtype_name(x.dtype), crate::registry::ort_dtype_name(s.dtype));
+        deny!(
+            "input and scale dtypes must be float32; got {} and {}",
+            crate::registry::ort_dtype_name(x.dtype),
+            crate::registry::ort_dtype_name(s.dtype)
+        );
     }
     if s.shape.len() > 1 || !is_quant_output(o.dtype) {
-        deny!("scale must be scalar or rank-1 and output dtype {} must be int8, uint8, int16, or uint16",
-            crate::registry::ort_dtype_name(o.dtype));
+        deny!(
+            "scale must be scalar or rank-1 and output dtype {} must be int8, uint8, int16, or uint16",
+            crate::registry::ort_dtype_name(o.dtype)
+        );
     }
     if node.input_present(2) {
         match node.input_info(2) {
             Some(z) if z.dtype == o.dtype && z.shape.len() <= 1 => {}
-            _ => deny!("zero_point must match output dtype {} and be scalar or rank-1",
-                crate::registry::ort_dtype_name(o.dtype)),
+            _ => deny!(
+                "zero_point must match output dtype {} and be scalar or rank-1",
+                crate::registry::ort_dtype_name(o.dtype)
+            ),
         }
     }
     Ok(())
@@ -972,16 +1064,21 @@ fn quantize_linear_claim(node: &NodeView) -> ClaimResult {
 
 fn dequantize_linear_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!((2..=3).contains(&nin) && node.num_outputs() >= 1,
-        "expects 2 or 3 inputs and at least one output");
+    require!(
+        (2..=3).contains(&nin) && node.num_outputs() >= 1,
+        "expects 2 or 3 inputs and at least one output"
+    );
     let (x, s, o) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
         (Some(x), Some(s), Some(o)) => (x, s, o),
         _ => deny!("missing tensor type/shape info on an input or the output"),
     };
     if !is_dequant_input(x.dtype) || !is_float(s.dtype) || !is_float(o.dtype) {
-        deny!("input dtype {} must be int8, uint8, int16, uint16, or int32; scale/output must be float32 (got {} -> {})",
-            crate::registry::ort_dtype_name(x.dtype), crate::registry::ort_dtype_name(s.dtype),
-            crate::registry::ort_dtype_name(o.dtype));
+        deny!(
+            "input dtype {} must be int8, uint8, int16, uint16, or int32; scale/output must be float32 (got {} -> {})",
+            crate::registry::ort_dtype_name(x.dtype),
+            crate::registry::ort_dtype_name(s.dtype),
+            crate::registry::ort_dtype_name(o.dtype)
+        );
     }
     if s.shape.len() > 1 {
         deny!("scale must be scalar or rank-1");
@@ -989,16 +1086,22 @@ fn dequantize_linear_claim(node: &NodeView) -> ClaimResult {
     if node.input_present(2) {
         match node.input_info(2) {
             Some(z) if z.dtype == x.dtype && z.shape.len() <= 1 => {}
-            _ => deny!("zero_point must match input dtype {} and be scalar or rank-1",
-                crate::registry::ort_dtype_name(x.dtype)),
+            _ => deny!(
+                "zero_point must match input dtype {} and be scalar or rank-1",
+                crate::registry::ort_dtype_name(x.dtype)
+            ),
         }
     }
     Ok(())
 }
 
 fn dynamic_quantize_linear_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_inputs() == 1 && node.num_outputs() == 3,
-        "expects 1 input and 3 outputs, got {}in/{}out", node.num_inputs(), node.num_outputs());
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 3,
+        "expects 1 input and 3 outputs, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
     let (x, y, sc, z) = match (
         node.input_info(0),
         node.output_info(0),
@@ -1008,15 +1111,19 @@ fn dynamic_quantize_linear_claim(node: &NodeView) -> ClaimResult {
         (Some(x), Some(y), Some(sc), Some(z)) => (x, y, sc, z),
         _ => deny!("missing tensor type/shape info on an input or output"),
     };
-    require!(is_float(x.dtype) && is_uint8(y.dtype) && is_float(sc.dtype) && is_uint8(z.dtype),
-        "input and scale must be float32; quantized output and zero point must be uint8");
+    require!(
+        is_float(x.dtype) && is_uint8(y.dtype) && is_float(sc.dtype) && is_uint8(z.dtype),
+        "input and scale must be float32; quantized output and zero point must be uint8"
+    );
     Ok(())
 }
 
 fn matmul_integer_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!((2..=4).contains(&nin) && node.num_outputs() >= 1,
-        "expects 2 to 4 inputs and at least one output");
+    require!(
+        (2..=4).contains(&nin) && node.num_outputs() >= 1,
+        "expects 2 to 4 inputs and at least one output"
+    );
     let (a, b, o) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
         (Some(a), Some(b), Some(o)) => (a, b, o),
         _ => deny!("missing tensor type/shape info on an input or the output"),
@@ -1025,9 +1132,12 @@ fn matmul_integer_claim(node: &NodeView) -> ClaimResult {
         || !is_int8or(b.dtype)
         || o.dtype != ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
     {
-        deny!("input dtypes {} and {} must be int8 or uint8, and output dtype {} must be int32",
-            crate::registry::ort_dtype_name(a.dtype), crate::registry::ort_dtype_name(b.dtype),
-            crate::registry::ort_dtype_name(o.dtype));
+        deny!(
+            "input dtypes {} and {} must be int8 or uint8, and output dtype {} must be int32",
+            crate::registry::ort_dtype_name(a.dtype),
+            crate::registry::ort_dtype_name(b.dtype),
+            crate::registry::ort_dtype_name(o.dtype)
+        );
     }
     if a.shape.len() != 2 || b.shape.len() != 2 {
         deny!("inputs must both be rank-2 matrices");
@@ -1039,21 +1149,31 @@ fn matmul_integer_claim(node: &NodeView) -> ClaimResult {
     if node.input_present(2) {
         match node.input_info(2) {
             Some(z) if z.dtype == a.dtype && z.shape.len() <= 1 => {}
-            _ => deny!("a_zero_point must match A dtype {} and be scalar or rank-1",
-                crate::registry::ort_dtype_name(a.dtype)),
+            _ => deny!(
+                "a_zero_point must match A dtype {} and be scalar or rank-1",
+                crate::registry::ort_dtype_name(a.dtype)
+            ),
         }
     }
     if node.input_present(3) {
         match node.input_info(3) {
             Some(z) if z.dtype == b.dtype && z.shape.len() <= 1 => {}
-            _ => deny!("b_zero_point must match B dtype {} and be scalar or rank-1",
-                crate::registry::ort_dtype_name(b.dtype)),
+            _ => deny!(
+                "b_zero_point must match B dtype {} and be scalar or rank-1",
+                crate::registry::ort_dtype_name(b.dtype)
+            ),
         }
     }
     Ok(())
 }
 
-fn conv_attrs_ok(node: &NodeView, spatial_rank: usize, w_shape: &[i64], channels: i64, group: i64) -> bool {
+fn conv_attrs_ok(
+    node: &NodeView,
+    spatial_rank: usize,
+    w_shape: &[i64],
+    channels: i64,
+    group: i64,
+) -> bool {
     if node.string_attr("auto_pad", "NOTSET") != "NOTSET" {
         return false;
     }
@@ -1085,7 +1205,10 @@ fn conv_attrs_ok(node: &NodeView, spatial_rank: usize, w_shape: &[i64], channels
         Some(v) => v,
         None => return false,
     };
-    if strides.iter().any(|&v| v <= 0) || dilations.iter().any(|&v| v <= 0) || pads.iter().any(|&v| v < 0) {
+    if strides.iter().any(|&v| v <= 0)
+        || dilations.iter().any(|&v| v <= 0)
+        || pads.iter().any(|&v| v < 0)
+    {
         return false;
     }
     for i in 0..spatial_rank {
@@ -1117,8 +1240,10 @@ fn conv_accum_exact(w_shape: &[i64]) -> bool {
 
 fn conv_integer_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!((2..=4).contains(&nin) && node.num_outputs() == 1,
-        "expects 2 to 4 inputs and 1 output");
+    require!(
+        (2..=4).contains(&nin) && node.num_outputs() == 1,
+        "expects 2 to 4 inputs and 1 output"
+    );
     let (x, w, o) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
         (Some(x), Some(w), Some(o)) => (x, w, o),
         _ => deny!("missing tensor type/shape info on an input or the output"),
@@ -1127,9 +1252,12 @@ fn conv_integer_claim(node: &NodeView) -> ClaimResult {
         || !is_int8or(w.dtype)
         || o.dtype != ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
     {
-        deny!("input dtypes {} and {} must be int8 or uint8, and output dtype {} must be int32",
-            crate::registry::ort_dtype_name(x.dtype), crate::registry::ort_dtype_name(w.dtype),
-            crate::registry::ort_dtype_name(o.dtype));
+        deny!(
+            "input dtypes {} and {} must be int8 or uint8, and output dtype {} must be int32",
+            crate::registry::ort_dtype_name(x.dtype),
+            crate::registry::ort_dtype_name(w.dtype),
+            crate::registry::ort_dtype_name(o.dtype)
+        );
     }
     if (x.shape.len() != 3 && x.shape.len() != 4) || w.shape.len() != x.shape.len() {
         deny!("input/weight must have matching rank, with input rank 3 or 4");
@@ -1139,20 +1267,34 @@ fn conv_integer_claim(node: &NodeView) -> ClaimResult {
     }
     let spatial_rank = x.shape.len() - 2;
     let group = node.int_attr("group", 1);
-    require!(conv_attrs_ok(node, spatial_rank, &w.shape, x.shape[1], group),
-        "convolution attributes, channels, group, or kernel shape are unsupported");
-    require!(conv_accum_exact(&w.shape), "convolution accumulation size must be 1..={MAX_EXACT_ACCUM}");
-    require!(param_ok(node, 2, x.dtype, -1),
-        "x_zero_point must match input dtype {} and be scalar", crate::registry::ort_dtype_name(x.dtype));
-    require!(param_ok(node, 3, w.dtype, w.shape[0]),
+    require!(
+        conv_attrs_ok(node, spatial_rank, &w.shape, x.shape[1], group),
+        "convolution attributes, channels, group, or kernel shape are unsupported"
+    );
+    require!(
+        conv_accum_exact(&w.shape),
+        "convolution accumulation size must be 1..={MAX_EXACT_ACCUM}"
+    );
+    require!(
+        param_ok(node, 2, x.dtype, -1),
+        "x_zero_point must match input dtype {} and be scalar",
+        crate::registry::ort_dtype_name(x.dtype)
+    );
+    require!(
+        param_ok(node, 3, w.dtype, w.shape[0]),
         "w_zero_point must match weight dtype {} and be scalar or per-output-channel",
-        crate::registry::ort_dtype_name(w.dtype));
+        crate::registry::ort_dtype_name(w.dtype)
+    );
     Ok(())
 }
 
 fn qlinear_matmul_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_inputs() == 8 && node.num_outputs() == 1,
-        "expects 8 inputs and 1 output, got {}in/{}out", node.num_inputs(), node.num_outputs());
+    require!(
+        node.num_inputs() == 8 && node.num_outputs() == 1,
+        "expects 8 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
     let (a, b, o) = match (node.input_info(0), node.input_info(3), node.output_info(0)) {
         (Some(a), Some(b), Some(o)) => (a, b, o),
         _ => deny!("missing tensor type/shape info on an input or the output"),
@@ -1165,22 +1307,44 @@ fn qlinear_matmul_claim(node: &NodeView) -> ClaimResult {
     }
     let (m, k, big_n) = (a.shape[0], a.shape[1], b.shape[1]);
     if k <= 0 || k != b.shape[0] || k > MAX_EXACT_ACCUM || m <= 0 || big_n <= 0 {
-        deny!("matrix dimensions must be positive, inner dimensions match, and K must be 1..={MAX_EXACT_ACCUM}");
+        deny!(
+            "matrix dimensions must be positive, inner dimensions match, and K must be 1..={MAX_EXACT_ACCUM}"
+        );
     }
     let f = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
-    require!(param_ok(node, 1, f, m), "a_scale must be float32 and scalar or length M");
-    require!(param_ok(node, 2, a.dtype, m), "a_zero_point must match A dtype and be scalar or length M");
-    require!(param_ok(node, 4, f, big_n), "b_scale must be float32 and scalar or length N");
-    require!(param_ok(node, 5, b.dtype, big_n), "b_zero_point must match B dtype and be scalar or length N");
-    require!(param_ok(node, 6, f, big_n), "y_scale must be float32 and scalar or length N");
-    require!(param_ok(node, 7, o.dtype, big_n), "y_zero_point must match output dtype and be scalar or length N");
+    require!(
+        param_ok(node, 1, f, m),
+        "a_scale must be float32 and scalar or length M"
+    );
+    require!(
+        param_ok(node, 2, a.dtype, m),
+        "a_zero_point must match A dtype and be scalar or length M"
+    );
+    require!(
+        param_ok(node, 4, f, big_n),
+        "b_scale must be float32 and scalar or length N"
+    );
+    require!(
+        param_ok(node, 5, b.dtype, big_n),
+        "b_zero_point must match B dtype and be scalar or length N"
+    );
+    require!(
+        param_ok(node, 6, f, big_n),
+        "y_scale must be float32 and scalar or length N"
+    );
+    require!(
+        param_ok(node, 7, o.dtype, big_n),
+        "y_zero_point must match output dtype and be scalar or length N"
+    );
     Ok(())
 }
 
 fn qlinear_conv_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
-    require!((8..=9).contains(&nin) && node.num_outputs() == 1,
-        "expects 8 or 9 inputs and 1 output");
+    require!(
+        (8..=9).contains(&nin) && node.num_outputs() == 1,
+        "expects 8 or 9 inputs and 1 output"
+    );
     let (x, w, o) = match (node.input_info(0), node.input_info(3), node.output_info(0)) {
         (Some(x), Some(w), Some(o)) => (x, w, o),
         _ => deny!("missing tensor type/shape info on an input or the output"),
@@ -1197,20 +1361,38 @@ fn qlinear_conv_claim(node: &NodeView) -> ClaimResult {
     let spatial_rank = x.shape.len() - 2;
     let big_m = w.shape[0];
     let group = node.int_attr("group", 1);
-    require!(conv_attrs_ok(node, spatial_rank, &w.shape, x.shape[1], group),
-        "convolution attributes, channels, group, or kernel shape are unsupported");
-    require!(conv_accum_exact(&w.shape), "convolution accumulation size must be 1..={MAX_EXACT_ACCUM}");
+    require!(
+        conv_attrs_ok(node, spatial_rank, &w.shape, x.shape[1], group),
+        "convolution attributes, channels, group, or kernel shape are unsupported"
+    );
+    require!(
+        conv_accum_exact(&w.shape),
+        "convolution accumulation size must be 1..={MAX_EXACT_ACCUM}"
+    );
     let f = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
     require!(param_ok(node, 1, f, -1), "x_scale must be a scalar float32");
-    require!(param_ok(node, 2, x.dtype, -1), "x_zero_point must match input dtype and be scalar");
-    require!(param_ok(node, 4, f, big_m), "w_scale must be float32 and scalar or per-output-channel");
-    require!(param_ok(node, 5, w.dtype, big_m), "w_zero_point must match weight dtype and be scalar or per-output-channel");
+    require!(
+        param_ok(node, 2, x.dtype, -1),
+        "x_zero_point must match input dtype and be scalar"
+    );
+    require!(
+        param_ok(node, 4, f, big_m),
+        "w_scale must be float32 and scalar or per-output-channel"
+    );
+    require!(
+        param_ok(node, 5, w.dtype, big_m),
+        "w_zero_point must match weight dtype and be scalar or per-output-channel"
+    );
     require!(param_ok(node, 6, f, -1), "y_scale must be a scalar float32");
-    require!(param_ok(node, 7, o.dtype, -1), "y_zero_point must match output dtype and be scalar");
+    require!(
+        param_ok(node, 7, o.dtype, -1),
+        "y_zero_point must match output dtype and be scalar"
+    );
     if node.input_present(8) {
         match node.input_info(8) {
             Some(bi)
-                if bi.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+                if bi.dtype
+                    == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
                     && bi.shape.len() == 1
                     && bi.shape[0] == big_m => {}
             _ => deny!("bias must be int32 with one element per output channel"),
@@ -1260,7 +1442,9 @@ fn qmoe_dequant(
 ) -> Result<mlx::mlx_array, MlxError> {
     let pack = 8 / bits;
     if block_size > 0 && k % block_size != 0 {
-        return Err(format!("QMoE: K={k} not divisible by block_size={block_size}"));
+        return Err(format!(
+            "QMoE: K={k} not divisible by block_size={block_size}"
+        ));
     }
     let blocks = if block_size > 0 { k / block_size } else { 1 };
     let block = if block_size > 0 { block_size } else { k };
@@ -1388,7 +1572,11 @@ fn qmoe_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         .unwrap_or_else(|| "relu".to_string());
     let alpha = *n.floats.get("activation_alpha").unwrap_or(&1.0);
     let beta = *n.floats.get("activation_beta").unwrap_or(&0.0);
-    let limit = n.floats.get("swiglu_limit").copied().unwrap_or(f32::INFINITY);
+    let limit = n
+        .floats
+        .get("swiglu_limit")
+        .copied()
+        .unwrap_or(f32::INFINITY);
 
     let x = ctx.resolve(&n.inputs[QMOE_IN_INPUT])?;
     let out_dt = ctx.dtype_of(x);
@@ -1432,10 +1620,28 @@ fn qmoe_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
 
     // Dequantize experts to dense [E, F*I, H] and [E, H, I].
     let w1 = qmoe_dequant(
-        ctx, n, QMOE_IN_FC1_W, QMOE_IN_FC1_S, e, fi, hidden, bits, block_size, comp_dt,
+        ctx,
+        n,
+        QMOE_IN_FC1_W,
+        QMOE_IN_FC1_S,
+        e,
+        fi,
+        hidden,
+        bits,
+        block_size,
+        comp_dt,
     )?;
     let w2 = qmoe_dequant(
-        ctx, n, QMOE_IN_FC2_W, QMOE_IN_FC2_S, e, hidden, inter, bits, block_size, comp_dt,
+        ctx,
+        n,
+        QMOE_IN_FC2_W,
+        QMOE_IN_FC2_S,
+        e,
+        hidden,
+        inter,
+        bits,
+        block_size,
+        comp_dt,
     )?;
 
     // FC1: C1[e,t,:] = X[t,:] @ W1[e]^T  ->  [E, T, F*I].
@@ -1513,9 +1719,16 @@ fn qmoe_claim(node: &NodeView) -> ClaimResult {
         None => deny!("input lacks tensor type/shape info"),
     }
     let qt = node.string_attr("quant_type", "int");
-    require!(qt == "int", "only quant_type='int' is supported (got {:?})", qt);
+    require!(
+        qt == "int",
+        "only quant_type='int' is supported (got {:?})",
+        qt
+    );
     let bits = node.int_attr("expert_weight_bits", 4);
-    require!(bits == 4 || bits == 8, "expert_weight_bits must be 4 or 8 (got {bits})");
+    require!(
+        bits == 4 || bits == 8,
+        "expert_weight_bits must be 4 or 8 (got {bits})"
+    );
     require!(
         node.input_present(QMOE_IN_FC1_W) && node.input_present(QMOE_IN_FC2_W),
         "requires fc1/fc2 expert weights"
@@ -1542,15 +1755,24 @@ fn qmoe_claim(node: &NodeView) -> ClaimResult {
     );
     let act = node.string_attr("activation_type", "relu");
     require!(
-        matches!(act.as_str(), "swiglu" | "silu" | "gelu" | "relu" | "identity"),
+        matches!(
+            act.as_str(),
+            "swiglu" | "silu" | "gelu" | "relu" | "identity"
+        ),
         "unsupported activation_type {:?}",
         act
     );
     let fusion = node.int_attr("swiglu_fusion", 0);
     if act == "swiglu" {
-        require!(fusion == 1, "SwiGLU requires swiglu_fusion=1 (interleaved), got {fusion}");
+        require!(
+            fusion == 1,
+            "SwiGLU requires swiglu_fusion=1 (interleaved), got {fusion}"
+        );
     } else {
-        require!(fusion == 0, "swiglu_fusion is only valid with activation_type=swiglu");
+        require!(
+            fusion == 0,
+            "swiglu_fusion is only valid with activation_type=swiglu"
+        );
     }
     let k_top = node.int_attr("k", 1);
     require!(k_top >= 1, "k must be >= 1 (got {k_top})");
@@ -1593,7 +1815,13 @@ fn reg(
 }
 
 pub fn register(registry: &mut OpRegistry) {
-    reg(registry, "com.microsoft", "MatMulNBits", matmulnbits_op, matmulnbits_claim);
+    reg(
+        registry,
+        "com.microsoft",
+        "MatMulNBits",
+        matmulnbits_op,
+        matmulnbits_claim,
+    );
     reg(registry, "com.microsoft", "QMoE", qmoe_op, qmoe_claim);
     reg(
         registry,
@@ -1602,8 +1830,20 @@ pub fn register(registry: &mut OpRegistry) {
         gather_block_quantized_op,
         gather_block_quantized_claim,
     );
-    reg(registry, "", "QuantizeLinear", quantize_linear_op, quantize_linear_claim);
-    reg(registry, "", "DequantizeLinear", dequantize_linear_op, dequantize_linear_claim);
+    reg(
+        registry,
+        "",
+        "QuantizeLinear",
+        quantize_linear_op,
+        quantize_linear_claim,
+    );
+    reg(
+        registry,
+        "",
+        "DequantizeLinear",
+        dequantize_linear_op,
+        dequantize_linear_claim,
+    );
     reg(
         registry,
         "",
@@ -1611,8 +1851,32 @@ pub fn register(registry: &mut OpRegistry) {
         dynamic_quantize_linear_op,
         dynamic_quantize_linear_claim,
     );
-    reg(registry, "", "MatMulInteger", matmul_integer_op, matmul_integer_claim);
-    reg(registry, "", "ConvInteger", conv_integer_op, conv_integer_claim);
-    reg(registry, "", "QLinearMatMul", qlinear_matmul_op, qlinear_matmul_claim);
-    reg(registry, "", "QLinearConv", qlinear_conv_op, qlinear_conv_claim);
+    reg(
+        registry,
+        "",
+        "MatMulInteger",
+        matmul_integer_op,
+        matmul_integer_claim,
+    );
+    reg(
+        registry,
+        "",
+        "ConvInteger",
+        conv_integer_op,
+        conv_integer_claim,
+    );
+    reg(
+        registry,
+        "",
+        "QLinearMatMul",
+        qlinear_matmul_op,
+        qlinear_matmul_claim,
+    );
+    reg(
+        registry,
+        "",
+        "QLinearConv",
+        qlinear_conv_op,
+        qlinear_conv_claim,
+    );
 }

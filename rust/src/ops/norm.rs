@@ -16,7 +16,7 @@
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::registry::{
-    is_mlx_float, ClaimResult, NodeView, OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -645,10 +645,7 @@ fn group_norm_claim(node: &NodeView) -> ClaimResult {
         None => deny!("missing tensor type/shape info on bias"),
     };
     require!(
-        is_mlx_float(x.dtype)
-            && scale.dtype == x.dtype
-            && bias == x.dtype
-            && out.dtype == x.dtype,
+        is_mlx_float(x.dtype) && scale.dtype == x.dtype && bias == x.dtype && out.dtype == x.dtype,
         "X, scale, bias, and output must share one float dtype (fp32/fp16/bf16), got {}, {}, {} -> {}",
         crate::registry::ort_dtype_name(x.dtype),
         crate::registry::ort_dtype_name(scale.dtype),

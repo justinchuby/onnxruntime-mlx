@@ -22,7 +22,7 @@ use std::os::raw::{c_char, c_void};
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
-    is_mlx_float, ClaimResult, NodeView, OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -1400,7 +1400,14 @@ fn rotary_embedding_claim(node: &NodeView) -> ClaimResult {
         Some(o) => o.dtype,
         None => deny!("output lacks tensor type/shape info"),
     };
-    require!(is_mlx_float(xd) && cd == xd && sd == xd && od == xd, "input, cos cache, sin cache, and output must share one MLX float dtype, got {}, {}, {}, {}", crate::registry::ort_dtype_name(xd), crate::registry::ort_dtype_name(cd), crate::registry::ort_dtype_name(sd), crate::registry::ort_dtype_name(od));
+    require!(
+        is_mlx_float(xd) && cd == xd && sd == xd && od == xd,
+        "input, cos cache, sin cache, and output must share one MLX float dtype, got {}, {}, {}, {}",
+        crate::registry::ort_dtype_name(xd),
+        crate::registry::ort_dtype_name(cd),
+        crate::registry::ort_dtype_name(sd),
+        crate::registry::ort_dtype_name(od)
+    );
     let rank = xshape.len();
     if rank == 3 {
         let nh = node.int_attr("num_heads", 0);
@@ -1504,7 +1511,10 @@ fn reg(
 /// Read an integer input tensor (int32 or int64) to a host `Vec<i64>`, normalizing dtype through
 /// MLX (astype + eval) — unlike `read_ints`, which reinterprets the raw bytes as i64 and so mangles
 /// an int32 tensor. PagedAttention's control tensors (cum_seqlens/past_seqlens/block_table) are int32.
-fn read_int_input(ctx: &mut TranslationContext, r: &crate::engine::TensorRef) -> Result<Vec<i64>, MlxError> {
+fn read_int_input(
+    ctx: &mut TranslationContext,
+    r: &crate::engine::TensorRef,
+) -> Result<Vec<i64>, MlxError> {
     let a = ctx.resolve(r)?;
     let a = ctx.astype(a, mlx::mlx_dtype__MLX_INT64)?;
     let a = ctx.contiguous_eval(a)?;
@@ -1581,7 +1591,9 @@ fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
     let past = read_int_input(ctx, &n.inputs[6])?; // [batch]
     let bt = read_int_input(ctx, &n.inputs[7])?; // [batch, max_blocks] flattened
     if cum.len() < 2 {
-        return Err("PagedAttention: cumulative_sequence_length must have length batch+1".to_string());
+        return Err(
+            "PagedAttention: cumulative_sequence_length must have length batch+1".to_string(),
+        );
     }
     let batch = cum.len() - 1;
     let max_blocks = bt.len() / batch;
@@ -1631,11 +1643,13 @@ fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
             let nblk = ((pastb + block_size - 1) / block_size) as usize;
             let idx: Vec<i32> = (0..nblk).map(|j| bt[b * max_blocks + j] as i32).collect();
             let idx_arr = i32_host_array(ctx, &idx);
-            let gk = ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, kcache, idx_arr, 0, s) })?;
+            let gk =
+                ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, kcache, idx_arr, 0, s) })?;
             let gk = ctx.reshape(gk, &[1, (nblk as i32) * block_size, kv_hidden])?;
             let gk = split_heads(ctx, gk, 1, (nblk as i32) * block_size, kv_heads, head)?; // [1,kv,N,head]
             let gk = slice(ctx, gk, &[0, 0, 0, 0], &[1, kv_heads, pastb, head])?;
-            let gv = ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, vcache, idx_arr, 0, s) })?;
+            let gv =
+                ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, vcache, idx_arr, 0, s) })?;
             let gv = ctx.reshape(gv, &[1, (nblk as i32) * block_size, kv_hidden])?;
             let gv = split_heads(ctx, gv, 1, (nblk as i32) * block_size, kv_heads, head)?;
             let gv = slice(ctx, gv, &[0, 0, 0, 0], &[1, kv_heads, pastb, head])?;
@@ -1678,7 +1692,10 @@ fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
 }
 
 fn paged_attention_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_outputs() >= 1, "PagedAttention requires at least 1 output");
+    require!(
+        node.num_outputs() >= 1,
+        "PagedAttention requires at least 1 output"
+    );
     // T = fp16/bf16 only; output dtype must match the query.
     let out_dt = match node.output_info(0) {
         Some(o) if is_mlx_float(o.dtype) => o.dtype,
@@ -1708,7 +1725,10 @@ fn paged_attention_claim(node: &NodeView) -> ClaimResult {
                 "input {} must share the output float dtype",
                 idx
             ),
-            None => deny!("input {} (Q/K/V/cache) must be present with a float dtype", idx),
+            None => deny!(
+                "input {} (Q/K/V/cache) must be present with a float dtype",
+                idx
+            ),
         }
     }
     // Positional inputs are int32.

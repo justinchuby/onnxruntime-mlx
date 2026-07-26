@@ -14,53 +14,92 @@ use std::os::raw::c_char;
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::registry::{
-    is_mlx_float, ClaimResult, NodeView, OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::{deny, require};
 
 // ---- small arithmetic/movement helpers ----------------------------------------------------------
 
-fn add(ctx: &mut TranslationContext, a: mlx::mlx_array, b: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn add(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    b: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     ctx.binary(mlx::mlx_add, a, b)
 }
 fn abs_(ctx: &mut TranslationContext, a: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
     ctx.unary(mlx::mlx_abs, a)
 }
-fn power(ctx: &mut TranslationContext, a: mlx::mlx_array, b: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn power(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    b: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     ctx.binary(mlx::mlx_power, a, b)
 }
 
 /// A 0-d scalar of dtype `dt` holding `v` (kept), so no unwanted upcast happens in the compute path.
-fn scalar_for_dtype(ctx: &mut TranslationContext, v: f32, dt: mlx::mlx_dtype) -> Result<mlx::mlx_array, MlxError> {
+fn scalar_for_dtype(
+    ctx: &mut TranslationContext,
+    v: f32,
+    dt: mlx::mlx_dtype,
+) -> Result<mlx::mlx_array, MlxError> {
     let s = ctx.scalar_f32(v);
     ctx.astype(s, dt)
 }
 
 /// ONNX NCHW -> MLX NHWC (channels last), forced contiguous.
-fn to_channels_last(ctx: &mut TranslationContext, x: mlx::mlx_array, spatial_rank: i32) -> Result<mlx::mlx_array, MlxError> {
-    let axes: Vec<i32> = if spatial_rank == 1 { vec![0, 2, 1] } else { vec![0, 2, 3, 1] };
+fn to_channels_last(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    spatial_rank: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let axes: Vec<i32> = if spatial_rank == 1 {
+        vec![0, 2, 1]
+    } else {
+        vec![0, 2, 3, 1]
+    };
     let t = ctx.transpose(x, &axes)?;
     ctx.contiguous(t)
 }
 
 /// MLX NHWC -> ONNX NCHW, forced contiguous.
-fn from_channels_last(ctx: &mut TranslationContext, x: mlx::mlx_array, spatial_rank: i32) -> Result<mlx::mlx_array, MlxError> {
-    let axes: Vec<i32> = if spatial_rank == 1 { vec![0, 2, 1] } else { vec![0, 3, 1, 2] };
+fn from_channels_last(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    spatial_rank: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let axes: Vec<i32> = if spatial_rank == 1 {
+        vec![0, 2, 1]
+    } else {
+        vec![0, 3, 1, 2]
+    };
     let t = ctx.transpose(x, &axes)?;
     ctx.contiguous(t)
 }
 
 /// ONNX conv weight `[O, I/g, k...]` -> MLX `[O, k..., I/g]`, forced contiguous.
-fn conv_weight_to_mlx(ctx: &mut TranslationContext, w: mlx::mlx_array, spatial_rank: i32) -> Result<mlx::mlx_array, MlxError> {
-    let axes: Vec<i32> = if spatial_rank == 1 { vec![0, 2, 1] } else { vec![0, 2, 3, 1] };
+fn conv_weight_to_mlx(
+    ctx: &mut TranslationContext,
+    w: mlx::mlx_array,
+    spatial_rank: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let axes: Vec<i32> = if spatial_rank == 1 {
+        vec![0, 2, 1]
+    } else {
+        vec![0, 2, 3, 1]
+    };
     let t = ctx.transpose(w, &axes)?;
     ctx.contiguous(t)
 }
 
 /// `int_arrays[name]` or a default vector of `value` repeated `size` times.
 fn attr_or(n: &NodeDesc, name: &str, size: usize, value: i64) -> Vec<i64> {
-    n.int_arrays.get(name).cloned().unwrap_or_else(|| vec![value; size])
+    n.int_arrays
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| vec![value; size])
 }
 
 fn present(n: &NodeDesc, i: usize) -> bool {
@@ -78,14 +117,20 @@ fn conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     {
         let xs = ctx.shape_of(x0);
         if (0..spatial_rank as usize).any(|i| xs[i + 2] <= 0) {
-            return Err(format!("Conv: non-positive spatial dim at trace time: {xs:?}"));
+            return Err(format!(
+                "Conv: non-positive spatial dim at trace time: {xs:?}"
+            ));
         }
     }
     let strides = attr_or(n, "strides", spatial_rank as usize, 1);
     let dilations = attr_or(n, "dilations", spatial_rank as usize, 1);
     let group = n.ints.get("group").copied().unwrap_or(1) as i32;
 
-    let auto_pad = n.strings.get("auto_pad").map(String::as_str).unwrap_or("NOTSET");
+    let auto_pad = n
+        .strings
+        .get("auto_pad")
+        .map(String::as_str)
+        .unwrap_or("NOTSET");
     let x = to_channels_last(ctx, x0, spatial_rank)?;
     let w0 = ctx.resolve(&n.inputs[1])?;
     let pads: Vec<i64> = if auto_pad == "NOTSET" {
@@ -254,7 +299,11 @@ fn sliding_windows_2d(
     })
 }
 
-fn reduce_pool_windows(ctx: &mut TranslationContext, windows: mlx::mlx_array, average: bool) -> Result<mlx::mlx_array, MlxError> {
+fn reduce_pool_windows(
+    ctx: &mut TranslationContext,
+    windows: mlx::mlx_array,
+    average: bool,
+) -> Result<mlx::mlx_array, MlxError> {
     let axes = [3i32, 4];
     if average {
         ctx.emit(|res, s| unsafe { mlx::mlx_mean_axes(res, windows, axes.as_ptr(), 2, false, s) })
@@ -263,28 +312,41 @@ fn reduce_pool_windows(ctx: &mut TranslationContext, windows: mlx::mlx_array, av
     }
 }
 
-fn sum_axes34(ctx: &mut TranslationContext, a: mlx::mlx_array, keepdims: bool) -> Result<mlx::mlx_array, MlxError> {
+fn sum_axes34(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    keepdims: bool,
+) -> Result<mlx::mlx_array, MlxError> {
     let axes = [3i32, 4];
     ctx.emit(|res, s| unsafe { mlx::mlx_sum_axes(res, a, axes.as_ptr(), 2, keepdims, s) })
 }
 
 fn pool_op(ctx: &mut TranslationContext, n: &NodeDesc, average: bool) -> Result<(), MlxError> {
-    let kernel = n.int_arrays.get("kernel_shape").cloned().unwrap_or_default();
+    let kernel = n
+        .int_arrays
+        .get("kernel_shape")
+        .cloned()
+        .unwrap_or_default();
     let strides = attr_or(n, "strides", 2, 1);
-    let count_include_pad =
-        average && n.ints.get("count_include_pad").copied().unwrap_or(0) != 0;
+    let count_include_pad = average && n.ints.get("count_include_pad").copied().unwrap_or(0) != 0;
 
     let x0 = ctx.resolve(&n.inputs[0])?;
     // Guard against a genuinely-unresolvable (<=0) spatial dim at trace time (see `conv_op`).
     {
         let xs = ctx.shape_of(x0);
         if xs.len() != 4 || xs[2] <= 0 || xs[3] <= 0 {
-            return Err(format!("Pool: non-positive spatial dim at trace time: {xs:?}"));
+            return Err(format!(
+                "Pool: non-positive spatial dim at trace time: {xs:?}"
+            ));
         }
     }
     // `auto_pad` (SAME_UPPER/SAME_LOWER/VALID) → explicit pads from the static input spatial shape
     // (dilations are 1 for the claimed pool forms); NOTSET reads the `pads` attribute.
-    let auto_pad = n.strings.get("auto_pad").map(String::as_str).unwrap_or("NOTSET");
+    let auto_pad = n
+        .strings
+        .get("auto_pad")
+        .map(String::as_str)
+        .unwrap_or("NOTSET");
     let pads: Vec<i64> = if auto_pad == "NOTSET" {
         attr_or(n, "pads", 4, 0)
     } else {
@@ -309,9 +371,8 @@ fn pool_op(ctx: &mut TranslationContext, n: &NodeDesc, average: bool) -> Result<
         let sums = sum_axes34(ctx, windows, false)?;
         let x_shape = ctx.shape_of(x);
         let mask_shape = [x_shape[0], x_shape[1], x_shape[2], 1];
-        let mask = ctx.emit(|res, s| unsafe {
-            mlx::mlx_ones(res, mask_shape.as_ptr(), 4, dt, s)
-        })?;
+        let mask =
+            ctx.emit(|res, s| unsafe { mlx::mlx_ones(res, mask_shape.as_ptr(), 4, dt, s) })?;
         let zero = scalar_for_dtype(ctx, 0.0, dt)?;
         let padded_mask = pad_spatial(ctx, mask, &pads, zero)?;
         let mask_windows = sliding_windows_2d(ctx, padded_mask, &kernel, &strides)?;
@@ -331,7 +392,11 @@ fn max_pool_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErro
     pool_op(ctx, n, false)
 }
 
-fn global_pool_op(ctx: &mut TranslationContext, n: &NodeDesc, average: bool) -> Result<(), MlxError> {
+fn global_pool_op(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    average: bool,
+) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
     let axes = [2i32, 3];
     let out = if average {
@@ -354,7 +419,11 @@ fn global_max_pool_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
 // ---- LpPool / GlobalLpPool (from normpool.cc) ---------------------------------------------------
 
 fn lp_pool_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
-    let kernel = n.int_arrays.get("kernel_shape").cloned().unwrap_or_default();
+    let kernel = n
+        .int_arrays
+        .get("kernel_shape")
+        .cloned()
+        .unwrap_or_default();
     let strides = attr_or(n, "strides", 2, 1);
     let pads = attr_or(n, "pads", 4, 0);
     let p = n.ints.get("p").copied().unwrap_or(2) as f32;
@@ -397,7 +466,12 @@ fn global_lp_pool_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), M
 
 // ---- claim helpers (port of op_claim.h + conv.cc/normpool.cc local helpers) ----------------------
 
-fn read_spatial_attribute(node: &NodeView, name: &str, spatial_rank: usize, default: i64) -> Option<Vec<i64>> {
+fn read_spatial_attribute(
+    node: &NodeView,
+    name: &str,
+    spatial_rank: usize,
+    default: i64,
+) -> Option<Vec<i64>> {
     let (present, mut values) = node.ints_attr(name);
     if !present {
         values = vec![default; spatial_rank];
@@ -494,7 +568,11 @@ fn same_known_shape(actual: &[i64], expected: &[i64]) -> bool {
         .all(|(&a, &e)| a <= 0 || e <= 0 || a == e)
 }
 
-fn optional_bias_is_valid(node: &NodeView, dtype: crate::sys::ort::ONNXTensorElementDataType, channels: i64) -> bool {
+fn optional_bias_is_valid(
+    node: &NodeView,
+    dtype: crate::sys::ort::ONNXTensorElementDataType,
+    channels: i64,
+) -> bool {
     if !node.input_present(2) {
         return true;
     }
@@ -575,10 +653,7 @@ fn conv_claim(node: &NodeView) -> ClaimResult {
         // Explicit pads are static regardless of dynamic spatial dims.
         match read_pads(node, spatial_rank) {
             Some(v) => Some(v),
-            None => deny!(
-                "pads must contain {} non-negative values",
-                spatial_rank * 2
-            ),
+            None => deny!("pads must contain {} non-negative values", spatial_rank * 2),
         }
     } else if spatial_dynamic {
         // auto_pad + dynamic spatial: pads depend on the runtime spatial extent, so they cannot be
@@ -1092,11 +1167,31 @@ fn reg(
 
 pub fn register_conv(registry: &mut OpRegistry) {
     reg(registry, "Conv", conv_op, conv_claim);
-    reg(registry, "ConvTranspose", conv_transpose_op, conv_transpose_claim);
+    reg(
+        registry,
+        "ConvTranspose",
+        conv_transpose_op,
+        conv_transpose_claim,
+    );
     reg(registry, "AveragePool", average_pool_op, average_pool_claim);
     reg(registry, "MaxPool", max_pool_op, max_pool_claim);
-    reg(registry, "GlobalAveragePool", global_average_pool_op, global_pool_claim);
-    reg(registry, "GlobalMaxPool", global_max_pool_op, global_pool_claim);
+    reg(
+        registry,
+        "GlobalAveragePool",
+        global_average_pool_op,
+        global_pool_claim,
+    );
+    reg(
+        registry,
+        "GlobalMaxPool",
+        global_max_pool_op,
+        global_pool_claim,
+    );
     reg(registry, "LpPool", lp_pool_op, lp_pool_claim);
-    reg(registry, "GlobalLpPool", global_lp_pool_op, global_lp_pool_claim);
+    reg(
+        registry,
+        "GlobalLpPool",
+        global_lp_pool_op,
+        global_lp_pool_claim,
+    );
 }

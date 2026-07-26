@@ -7,7 +7,7 @@
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::registry::{
-    is_mlx_float, ClaimResult, NodeView, OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::{deny, require};
@@ -17,7 +17,11 @@ fn present(n: &NodeDesc, i: usize) -> bool {
 }
 
 /// A dtype-matched scalar (float value cast to `dt`) so alpha/beta scaling keeps the GEMM dtype.
-fn scalar_like(ctx: &mut TranslationContext, value: f32, dt: mlx::mlx_dtype) -> Result<mlx::mlx_array, MlxError> {
+fn scalar_like(
+    ctx: &mut TranslationContext,
+    value: f32,
+    dt: mlx::mlx_dtype,
+) -> Result<mlx::mlx_array, MlxError> {
     let s = ctx.scalar_f32(value);
     ctx.astype(s, dt)
 }

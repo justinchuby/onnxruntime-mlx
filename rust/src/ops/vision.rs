@@ -9,10 +9,10 @@
 
 use std::os::raw::c_void;
 
-use crate::engine::{mlx_dtype_from_onnx, MlxError, NodeDesc, TensorRef, TranslationContext};
+use crate::engine::{MlxError, NodeDesc, TensorRef, TranslationContext, mlx_dtype_from_onnx};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
-    is_int_index, is_mlx_float, ClaimResult, NodeView, OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_int_index, is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -703,7 +703,10 @@ fn col2im_claim(node: &NodeView) -> ClaimResult {
     );
     let mut kk: i64 = 1;
     for &b in &block_shape {
-        require!(b >= 1, "Col2Im `block_shape` dims must all be >= 1, got {block_shape:?}");
+        require!(
+            b >= 1,
+            "Col2Im `block_shape` dims must all be >= 1, got {block_shape:?}"
+        );
         kk *= b;
     }
     require!(

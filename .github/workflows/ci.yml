@@ -7,6 +7,24 @@ on:
 
 # Apple Silicon only: the MLX EP requires Metal + mlx-c (macos-14 runners are arm64).
 jobs:
+  # Layout only, so this needs neither Metal nor ONNX Runtime: rustfmt parses
+  # the sources and never builds them. Kept off the macOS job so a formatting
+  # slip is reported in seconds instead of behind a full build and test run.
+  format:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Rust toolchain (rustup — no third-party action, supply-chain hardening)
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --no-self-update
+          rustup default stable
+          cargo fmt --version
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+
   build-test:
     name: Build + op tests (macOS arm64)
     runs-on: macos-14

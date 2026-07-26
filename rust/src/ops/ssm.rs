@@ -8,8 +8,8 @@
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::registry::{
-    is_mlx_float, ClaimPredicate, ClaimResult, NodeView, OpHandler, OpRegistration, OpRegistry,
-    K_ANY_OPSET,
+    ClaimPredicate, ClaimResult, K_ANY_OPSET, NodeView, OpHandler, OpRegistration, OpRegistry,
+    is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -362,7 +362,11 @@ fn pad_axis_end(
     ctx.contiguous(out)
 }
 
-fn tril(ctx: &mut TranslationContext, a: mlx::mlx_array, k: i32) -> Result<mlx::mlx_array, MlxError> {
+fn tril(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    k: i32,
+) -> Result<mlx::mlx_array, MlxError> {
     ctx.emit(|res, s| unsafe { mlx::mlx_tril(res, a, k, s) })
 }
 
@@ -691,7 +695,7 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
             state = ctx.mul(state, g)?;
         }
         let k_t = time_slab(ctx, k4, t, b, h, d_k)?; // (B, H, d_k)
-                                                     // retrieval = squeeze(k_row @ state)
+        // retrieval = squeeze(k_row @ state)
         let k_row = ctx.expand_dims(k_t, 2)?; // (B,H,1,d_k)
         let retrieval_m = ctx.matmul(k_row, state)?; // (B,H,1,d_v)
         let retrieval = ctx.squeeze(retrieval_m, 2)?; // (B,H,d_v)

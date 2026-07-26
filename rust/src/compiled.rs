@@ -32,9 +32,9 @@ use std::os::raw::c_void;
 use std::panic::AssertUnwindSafe;
 
 use crate::engine::{
-    copy_out_raw_delta, dim_i32, mlx_dtype_from_onnx, read_ctx_input_raw, rope_row_key, DeltaWrite,
-    DynInput, MlxError, NodeDesc, OutRef, Plan, ShapeMode, Slot, Src, SynthRope, TracePayload,
-    TranslationContext,
+    DeltaWrite, DynInput, MlxError, NodeDesc, OutRef, Plan, ShapeMode, Slot, Src, SynthRope,
+    TracePayload, TranslationContext, copy_out_raw_delta, dim_i32, mlx_dtype_from_onnx,
+    read_ctx_input_raw, rope_row_key,
 };
 use crate::mlx::{self, Array, Closure, VectorArray};
 use crate::sys::mlx as mlxsys;
@@ -328,7 +328,10 @@ pub fn try_compiled(
         let plan = unsafe { &*plan_ptr };
         for di in &slot.get(plan).dyn_inputs {
             let (data, shape, dtype) = read_ctx_input_raw(api, kctx, di.ctx_index)?;
-            let ishape: Vec<i32> = shape.iter().map(|&d| dim_i32(d)).collect::<Result<_, _>>()?;
+            let ishape: Vec<i32> = shape
+                .iter()
+                .map(|&d| dim_i32(d))
+                .collect::<Result<_, _>>()?;
             // Zero-copy wrap of the live ORT input buffer: MLX borrows it (no-op deallocator) for
             // this apply only. `arena` keeps the wrapper alive until after eval + copy-out, and the
             // ORT tensor is valid for the whole Compute call, so the borrow never dangles. In
@@ -356,8 +359,7 @@ pub fn try_compiled(
             let plan = unsafe { &*plan_ptr };
             let c = slot.get(plan);
             if c.shared_kv && c.mask_ctx_index >= 0 {
-                let (_d, shape, _t) =
-                    read_ctx_input_raw(api, kctx, c.mask_ctx_index as usize)?;
+                let (_d, shape, _t) = read_ctx_input_raw(api, kctx, c.mask_ctx_index as usize)?;
                 (*shape.get(1).unwrap_or(&0) as i32) - s
             } else {
                 let idx = c.rope_past_ctx_index as usize;
@@ -432,7 +434,11 @@ pub fn try_compiled(
     };
     // Timing attribution: the synchronous GPU-inclusive eval phase of the compiled closure.
     let tr = crate::trace::tracer();
-    let eval_t0 = if tr.active() { Some(std::time::Instant::now()) } else { None };
+    let eval_t0 = if tr.active() {
+        Some(std::time::Instant::now())
+    } else {
+        None
+    };
     let _eval_region = tr.eval_region();
     if mlx::eval(&outs).is_err() {
         slot.get_mut(unsafe { &mut *plan_ptr }).valid = false;
@@ -626,8 +632,11 @@ fn build_closure(
     }
 
     let payload_ptr: *mut c_void = unsafe {
-        slot.get_mut(&mut *plan_ptr).payload.as_mut().unwrap().as_mut() as *mut TracePayload
-            as *mut c_void
+        slot.get_mut(&mut *plan_ptr)
+            .payload
+            .as_mut()
+            .unwrap()
+            .as_mut() as *mut TracePayload as *mut c_void
     };
     // Shapeless (decode) so the growing KV length never triggers a recompile; shape-keyed (general /
     // prefill) so a changed input shape safely retraces (re-invokes the thunk) rather than

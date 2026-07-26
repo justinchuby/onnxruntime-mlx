@@ -138,7 +138,11 @@ pub fn translate(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxEr
         .ok_or_else(|| {
             format!(
                 "MLX: no translation for op {}::{}",
-                if n.domain.is_empty() { "ai.onnx" } else { &n.domain },
+                if n.domain.is_empty() {
+                    "ai.onnx"
+                } else {
+                    &n.domain
+                },
                 n.op_type
             )
         })?;
@@ -151,7 +155,7 @@ pub fn translate(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxEr
     let r = handler(ctx, n);
     if r.is_ok() {
         let mark = ctx.take_path_mark();
-        tr.record_op_path(&n.op_type, start, mark);
+        tr.record_op_path(n, start, mark);
         // Per-op detail span (rich Args always; fine mode also times a per-op eval).
         ctx.trace_node(&n.op_type, n, start);
     }
@@ -386,8 +390,7 @@ impl NodeView {
                 Err(_) => return default,
             };
             let mut attr: *const ort::OrtOpAttr = std::ptr::null();
-            let st =
-                (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
+            let st = (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
             if !st.is_null() {
                 self.release_status(st);
                 return default;
@@ -427,8 +430,7 @@ impl NodeView {
                 Err(_) => return default,
             };
             let mut attr: *const ort::OrtOpAttr = std::ptr::null();
-            let st =
-                (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
+            let st = (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
             if !st.is_null() {
                 self.release_status(st);
                 return default;
@@ -496,13 +498,7 @@ impl NodeView {
             }
             let read = api.ReadOpAttr.unwrap();
             let mut needed: usize = 0;
-            let st0 = read(
-                attr,
-                atype,
-                std::ptr::null_mut(),
-                0,
-                &mut needed,
-            );
+            let st0 = read(attr, atype, std::ptr::null_mut(), 0, &mut needed);
             self.release_status(st0);
             if needed == 0 {
                 return (true, Vec::new());
@@ -664,7 +660,8 @@ impl NodeView {
     }
 
     /// True iff the node carries a genuine (non-UNDEFINED) attribute of `name`.
-    pub fn has_attr(&self, name: &str) -> bool {        unsafe {
+    pub fn has_attr(&self, name: &str) -> bool {
+        unsafe {
             let api = self.api();
             let cname = match std::ffi::CString::new(name) {
                 Ok(c) => c,
@@ -771,8 +768,7 @@ impl NodeView {
         };
         unsafe {
             let mut is_const = false;
-            let st =
-                (self.api().ValueInfo_IsConstantInitializer.unwrap())(vi, &mut is_const);
+            let st = (self.api().ValueInfo_IsConstantInitializer.unwrap())(vi, &mut is_const);
             if !st.is_null() {
                 self.release_status(st);
                 return false;
@@ -846,7 +842,7 @@ impl NodeView {
         }
     }
 
-pub fn read_const_f32(&self, i: usize) -> Option<Vec<f32>> {
+    pub fn read_const_f32(&self, i: usize) -> Option<Vec<f32>> {
         if !matches!(self.input_info(i), Some(info)
             if info.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
             || !self.is_constant_initializer(i)
@@ -1078,14 +1074,21 @@ impl GraphView {
             }
             let mut nodes: Vec<*const ort::OrtNode> = vec![std::ptr::null(); num];
             (api.Graph_GetNodes.unwrap())(self.graph, nodes.as_mut_ptr(), num);
-            nodes.into_iter().map(|n| NodeView::new(self.api, n)).collect()
+            nodes
+                .into_iter()
+                .map(|n| NodeView::new(self.api, n))
+                .collect()
         }
     }
 
     fn value_names(
         &self,
         count_fn: unsafe extern "C" fn(*const ort::OrtGraph, *mut usize) -> *mut ort::OrtStatus,
-        get_fn: unsafe extern "C" fn(*const ort::OrtGraph, *mut *const ort::OrtValueInfo, usize) -> *mut ort::OrtStatus,
+        get_fn: unsafe extern "C" fn(
+            *const ort::OrtGraph,
+            *mut *const ort::OrtValueInfo,
+            usize,
+        ) -> *mut ort::OrtStatus,
     ) -> Vec<String> {
         unsafe {
             let mut num: usize = 0;
@@ -1159,7 +1162,9 @@ pub fn is_unsigned_integer(t: ort::ONNXTensorElementDataType) -> bool {
 /// The most relaxed dtype set the MLX Metal backend can carry: bool, all int/uint widths (8-64),
 /// and fp16/bf16/fp32. EXCLUDES float64/complex/string/fp8. Port of `IsMlxSupportedType`.
 pub fn is_mlx_supported(t: ort::ONNXTensorElementDataType) -> bool {
-    is_mlx_float(t) || is_signed_integer(t) || is_unsigned_integer(t)
+    is_mlx_float(t)
+        || is_signed_integer(t)
+        || is_unsigned_integer(t)
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL
 }
 

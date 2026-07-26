@@ -9,11 +9,11 @@
 //! contiguous before the shared CopyOut memcpy. Zero-size results (Pad/Expand) are re-materialised as
 //! clean zeros arrays rather than rejected to CPU.
 
-use crate::engine::{dim_i32, mlx_dtype_from_onnx, MlxError, NodeDesc, Src, TranslationContext};
+use crate::engine::{MlxError, NodeDesc, Src, TranslationContext, dim_i32, mlx_dtype_from_onnx};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
-    is_int_index, is_mlx_float, is_mlx_numeric, is_movable, is_range_type, ClaimResult, NodeView,
-    OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_int_index, is_mlx_float,
+    is_mlx_numeric, is_movable, is_range_type,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -161,9 +161,13 @@ fn gathernd_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErro
     let dshape = ctx.shape_of(data);
     let ishape = ctx.shape_of(indices);
     let (r, q) = (dshape.len(), ishape.len());
-    let m = *ishape.last().ok_or("GatherND: indices must have rank >= 1")? as usize;
+    let m = *ishape
+        .last()
+        .ok_or("GatherND: indices must have rank >= 1")? as usize;
     if m == 0 || m > r {
-        return Err(format!("GatherND: indices last dim {m} out of range for data rank {r}"));
+        return Err(format!(
+            "GatherND: indices last dim {m} out of range for data rank {r}"
+        ));
     }
     let rows: i32 = dshape[..m].iter().product();
     let tail: i32 = dshape[m..].iter().product::<i32>().max(1);
@@ -256,7 +260,8 @@ fn scatter_elements_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     let axis = norm_axis(int_attr(n, "axis", 0), rank);
     let dim = ctx.dim(data, axis);
     let idx = normalize_indices(ctx, indices, dim)?;
-    let r = ctx.emit(|res, s| unsafe { mlx::mlx_put_along_axis(res, data, idx, updates, axis, s) })?;
+    let r =
+        ctx.emit(|res, s| unsafe { mlx::mlx_put_along_axis(res, data, idx, updates, axis, s) })?;
     let r = ctx.contiguous(r)?;
     ctx.bind(&n.outputs[0], r);
     Ok(())
@@ -317,7 +322,8 @@ fn unsqueeze_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
     let out_rank = ctx.ndim(data) as i32 + axes.len() as i32;
     let mut a: Vec<i32> = axes.iter().map(|&x| norm_axis(x, out_rank)).collect();
     a.sort_unstable();
-    let r = ctx.emit(|res, s| unsafe { mlx::mlx_expand_dims_axes(res, data, a.as_ptr(), a.len(), s) })?;
+    let r =
+        ctx.emit(|res, s| unsafe { mlx::mlx_expand_dims_axes(res, data, a.as_ptr(), a.len(), s) })?;
     ctx.bind(&n.outputs[0], r);
     Ok(())
 }
@@ -390,7 +396,9 @@ fn expand_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
     let r = if incompatible {
         ctx.zeros(&result, dt)?
     } else {
-        ctx.emit(|res, s| unsafe { mlx::mlx_broadcast_to(res, data, result.as_ptr(), result.len(), s) })?
+        ctx.emit(|res, s| unsafe {
+            mlx::mlx_broadcast_to(res, data, result.as_ptr(), result.len(), s)
+        })?
     };
     // Broadcast is a zero-copy stride-0 view; contiguous is deferred to the output boundary.
     ctx.bind(&n.outputs[0], r);
@@ -420,7 +428,11 @@ fn slice_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
     for i in 0..starts.len() {
         let ax = norm_axis(axes[i], rank as i32) as usize;
         let dim = shape[ax] as i64;
-        let s = if starts[i] < 0 { starts[i] + dim } else { starts[i] };
+        let s = if starts[i] < 0 {
+            starts[i] + dim
+        } else {
+            starts[i]
+        };
         let e = if ends[i] < 0 { ends[i] + dim } else { ends[i] };
         start[ax] = clamp_i64(s, 0, dim) as i32;
         stop[ax] = clamp_i64(e, 0, dim) as i32;
@@ -481,7 +493,8 @@ fn split_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
         pv
     } else {
         let mut pv = VectorArray::new();
-        let rc = unsafe { mlx::mlx_split(pv.as_mut_ptr(), data, num_out as i32, axis, ctx.stream()) };
+        let rc =
+            unsafe { mlx::mlx_split(pv.as_mut_ptr(), data, num_out as i32, axis, ctx.stream()) };
         if rc != 0 {
             return Err("mlx_split failed".to_string());
         }
@@ -583,13 +596,13 @@ fn read_range_scalar(ctx: &TranslationContext, n: &NodeDesc, i: usize) -> Result
     }
     match h.dtype {
         t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16 => {
-                Ok(unsafe { *(h.data as *const i16) } as f64)
+            Ok(unsafe { *(h.data as *const i16) } as f64)
         }
         t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 => {
-                Ok(unsafe { *(h.data as *const i32) } as f64)
+            Ok(unsafe { *(h.data as *const i32) } as f64)
         }
         t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => {
-                Ok(unsafe { *(h.data as *const i64) } as f64)
+            Ok(unsafe { *(h.data as *const i64) } as f64)
         }
         _ => Err("Range initializer dtype is not supported".to_string()),
     }
@@ -602,7 +615,9 @@ fn shape_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
     let start_attr = int_attr(n, "start", 0);
     let end_attr = int_attr(n, "end", rank);
     let (start, end) = shape_interval(rank, start_attr, end_attr);
-    let result: Vec<i64> = (start..end).map(|i| input_shape[i as usize] as i64).collect();
+    let result: Vec<i64> = (start..end)
+        .map(|i| input_shape[i as usize] as i64)
+        .collect();
     let out = ctx.from_host_i64(&result, &[result.len() as i32]);
     ctx.bind(&n.outputs[0], out);
     Ok(())
@@ -633,7 +648,16 @@ fn constant_of_shape_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<()
     let out_type = n.outputs[0].otype;
     let r = if out_type == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 {
         let value = ctx.scalar_i64(-1);
-        ctx.emit(|res, st| unsafe { mlx::mlx_full(res, s.as_ptr(), s.len(), value, mlx::mlx_dtype__MLX_INT64, st) })?
+        ctx.emit(|res, st| unsafe {
+            mlx::mlx_full(
+                res,
+                s.as_ptr(),
+                s.len(),
+                value,
+                mlx::mlx_dtype__MLX_INT64,
+                st,
+            )
+        })?
     } else {
         ctx.zeros(&s, mlx::mlx_dtype__MLX_FLOAT32)?
     };
@@ -782,7 +806,12 @@ fn resize_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
 
 // ---- claim predicates --------------------------------------------------------------------------
 
-fn movable_io(node: &NodeView) -> Option<(ort::ONNXTensorElementDataType, ort::ONNXTensorElementDataType)> {
+fn movable_io(
+    node: &NodeView,
+) -> Option<(
+    ort::ONNXTensorElementDataType,
+    ort::ONNXTensorElementDataType,
+)> {
     match (node.input_info(0), node.output_info(0)) {
         (Some(i), Some(o)) => Some((i.dtype, o.dtype)),
         _ => None,
@@ -1167,7 +1196,10 @@ fn split_claim(node: &NodeView) -> ClaimResult {
     if have_sizes {
         let mut total = 0i64;
         for &s in &sizes {
-            require!(s >= 0, "Split: `split` sizes must be non-negative (got {s})");
+            require!(
+                s >= 0,
+                "Split: `split` sizes must be non-negative (got {s})"
+            );
             total += s;
         }
         require!(
@@ -1490,7 +1522,8 @@ fn resize_claim(node: &NodeView) -> ClaimResult {
     require!(
         mode != "nearest"
             || matches!(
-                node.string_attr("nearest_mode", "round_prefer_floor").as_str(),
+                node.string_attr("nearest_mode", "round_prefer_floor")
+                    .as_str(),
                 "round_prefer_floor" | "round_prefer_ceil" | "floor" | "ceil"
             ),
         "Resize: nearest_mode={} is unsupported (only round_prefer_floor|round_prefer_ceil|floor|ceil are claimed)",
@@ -1657,8 +1690,18 @@ fn reg(
 pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Gather", gather_op, gather_like_claim);
     reg(registry, "GatherND", gathernd_op, gathernd_claim);
-    reg(registry, "GatherElements", gather_elements_op, gather_like_claim);
-    reg(registry, "ScatterElements", scatter_elements_op, scatter_elements_claim);
+    reg(
+        registry,
+        "GatherElements",
+        gather_elements_op,
+        gather_like_claim,
+    );
+    reg(
+        registry,
+        "ScatterElements",
+        scatter_elements_op,
+        scatter_elements_claim,
+    );
     reg(registry, "Concat", concat_op, concat_claim);
     reg(registry, "Reshape", reshape_op, reshape_claim);
     reg(registry, "Transpose", transpose_op, transpose_claim);
@@ -1674,7 +1717,12 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Range", range_op, range_claim);
     reg(registry, "Shape", shape_op, shape_claim);
     reg(registry, "Size", size_op, size_claim);
-    reg(registry, "ConstantOfShape", constant_of_shape_op, constant_of_shape_claim);
+    reg(
+        registry,
+        "ConstantOfShape",
+        constant_of_shape_op,
+        constant_of_shape_claim,
+    );
     reg(registry, "Where", where_handler, where_claim);
     reg(registry, "Resize", resize_op, resize_claim);
 }

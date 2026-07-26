@@ -7,8 +7,8 @@ use std::f64::consts::PI;
 
 use crate::engine::{MlxError, NodeDesc, TensorRef, TranslationContext};
 use crate::registry::{
-    is_mlx_float, ClaimPredicate, ClaimResult, NodeView, OpHandler, OpRegistration, OpRegistry,
-    K_ANY_OPSET,
+    ClaimPredicate, ClaimResult, K_ANY_OPSET, NodeView, OpHandler, OpRegistration, OpRegistry,
+    is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::sys::ort;

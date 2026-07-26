@@ -9,7 +9,7 @@
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::registry::{
-    is_mlx_float, is_mlx_numeric, ClaimResult, NodeView, OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float, is_mlx_numeric,
 };
 use crate::sys::mlx;
 use crate::sys::ort;

@@ -53,6 +53,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::engine::NodeDesc;
 use onnx_runtime_tracer::{Args, MemoryCollector, SpanGuard, TraceContext};
 use std::sync::Arc;
 
@@ -93,6 +94,31 @@ pub const GPU_CAPTURE_EVAL_ENV: &str = "ONNXRUNTIME_EP_MLX_GPU_CAPTURE_EVAL";
 /// full JSON tracing is off. When JSON tracing IS on the summary is always emitted (to
 /// stderr AND as trace metadata). Unset + no JSON trace → nothing printed (zero cost).
 pub const VERBOSE_ENV: &str = "ONNXRUNTIME_EP_MLX_VERBOSE";
+
+/// Shared trace arg key: numeric ONNX Runtime graph node id.
+pub const ARG_NODE_ID: &str = "node_id";
+/// Shared trace arg key: ONNX node name.
+pub const ARG_NODE: &str = "node";
+/// Shared trace arg key: non-default ONNX operator domain.
+pub const ARG_DOMAIN: &str = "domain";
+/// Shared trace arg key: device a kernel ran on.
+pub const ARG_DEVICE: &str = "device";
+/// Shared trace arg key: bytes moved or produced by the recorded kernel/work.
+pub const ARG_BYTES: &str = "bytes";
+/// Shared trace arg key: floating-point operation estimate.
+#[allow(dead_code)]
+pub const ARG_FLOPS: &str = "flops";
+/// Shared trace arg key: selected implementation variant.
+pub const ARG_KERNEL_VARIANT: &str = "kernel_variant";
+/// Shared trace arg key: why the implementation variant was selected.
+pub const ARG_KERNEL_VARIANT_REASON: &str = "kernel_variant_reason";
+/// Shared trace category for one worker slice of a fanned-out op. The MLX EP does
+/// not currently emit this because it serializes CPU translation and dispatches
+/// fused work to MLX/Metal rather than slicing one node across CPU workers.
+#[allow(dead_code)]
+pub const CAT_OP_WORKER: &str = "op.worker";
+
+const DEVICE_METAL: &str = "metal";
 
 /// Which execution path a fused subgraph's Compute took — the "execution-path view".
 /// Mirrors the dispatch order in [`crate::ep`]'s `compute`: compiled decode → compiled
@@ -199,6 +225,24 @@ thread_local! {
     static THREAD_NAMED: Cell<bool> = const { Cell::new(false) };
 }
 
+fn is_default_domain(domain: &str) -> bool {
+    domain.is_empty() || domain == "ai.onnx"
+}
+
+fn standard_op_args(node: &NodeDesc) -> Args {
+    let mut args = Args::new()
+        .with(ARG_NODE_ID, node.node_id as u64)
+        .with(ARG_NODE, node.name.clone())
+        .with(ARG_DEVICE, DEVICE_METAL)
+        // Keep the old key as a compatibility alias; the span name is now the
+        // canonical bare op type for aggregation.
+        .with("op_type", node.op_type.clone());
+    if !is_default_domain(&node.domain) {
+        args = args.with(ARG_DOMAIN, node.domain.clone());
+    }
+    args
+}
+
 /// One sampled counter point (rendered as a Chrome `"C"` phase event at export).
 struct CounterSample {
     track: String,
@@ -292,7 +336,11 @@ impl MlxTracer {
         let device = if trace_on { gpu::default_device() } else { 0 };
 
         // Best-effort IOReport GPU-utilisation sampler (private framework, no sudo).
-        let gpu_util = if trace_on { ioreport::GpuUtil::new() } else { None };
+        let gpu_util = if trace_on {
+            ioreport::GpuUtil::new()
+        } else {
+            None
+        };
 
         // The verbose human summary can be forced on independently of JSON tracing.
         let verbose = trace_on
@@ -402,7 +450,8 @@ impl MlxTracer {
                 }
                 args = args.with(format!("fallback_{op}"), val);
             }
-            self.ctx.instant("mlx.getcapability", "ep.claim", Some(args));
+            self.ctx
+                .instant("mlx.getcapability", "ep.claim", Some(args));
             self.push_counter("mlx.claimed_nodes", "nodes", claimed as f64);
             self.push_counter("mlx.unclaimed_nodes", "nodes", unclaimed as f64);
             self.push_counter("mlx.fused_subgraphs", "subgraphs", subgraphs as f64);
@@ -462,7 +511,10 @@ impl MlxTracer {
                 other => other,
             };
             if !shape_key.is_empty() {
-                s.seen_shape_keys.entry(tag).or_default().insert(shape_key.to_string());
+                s.seen_shape_keys
+                    .entry(tag)
+                    .or_default()
+                    .insert(shape_key.to_string());
             }
             match resolved {
                 CacheState::Hit => s.cache_hit += 1,
@@ -480,7 +532,8 @@ impl MlxTracer {
             if !shape_key.is_empty() {
                 args = args.with("shape_key", shape_key.to_string());
             }
-            self.ctx.instant(format!("mlx.compute[{tag}]"), "ep.path", Some(args));
+            self.ctx
+                .instant(format!("mlx.compute[{tag}]"), "ep.path", Some(args));
             self.push_counter("mlx.compute_path", tag, 1.0);
         }
         resolved
@@ -549,7 +602,11 @@ impl MlxTracer {
             e.1 += 1;
         }
         if self.is_enabled() {
-            self.push_counter("mlx.copyout_bytes", if delta { "delta" } else { "full" }, bytes as f64);
+            self.push_counter(
+                "mlx.copyout_bytes",
+                if delta { "delta" } else { "full" },
+                bytes as f64,
+            );
         }
     }
 
@@ -618,7 +675,11 @@ impl MlxTracer {
             items.sort_by_key(|a| std::cmp::Reverse(a.1.0));
             out.push_str("           unclaimed (→ CPU):\n");
             for (op, (n, reason)) in items.iter().take(8) {
-                let why = if reason.is_empty() { "no MLX handler / opset" } else { reason };
+                let why = if reason.is_empty() {
+                    "no MLX handler / opset"
+                } else {
+                    reason
+                };
                 out.push_str(&format!("             - {op} x{n}: {why}\n"));
             }
         }
@@ -639,8 +700,10 @@ impl MlxTracer {
         ));
         out.push_str(&format!(
             "           copy-out: delta {} ({:.2} MiB) vs full {} ({:.2} MiB)\n",
-            s.delta_copyout_count, s.delta_copyout_bytes as f64 / (1024.0 * 1024.0),
-            s.full_copyout_count, s.full_copyout_bytes as f64 / (1024.0 * 1024.0)
+            s.delta_copyout_count,
+            s.delta_copyout_bytes as f64 / (1024.0 * 1024.0),
+            s.full_copyout_count,
+            s.full_copyout_bytes as f64 / (1024.0 * 1024.0)
         ));
 
         // Timing attribution.
@@ -674,7 +737,8 @@ impl MlxTracer {
                 .with("managed_wrap_aligned", s.managed_wrap_aligned)
                 .with("delta_copyout_bytes", s.delta_copyout_bytes)
                 .with("full_copyout_bytes", s.full_copyout_bytes);
-            self.ctx.instant("mlx.session_summary", "summary", Some(args));
+            self.ctx
+                .instant("mlx.session_summary", "summary", Some(args));
         }
     }
 
@@ -698,7 +762,10 @@ impl MlxTracer {
             .span("mlx.subgraph", "ep")
             .with_args(Args::new().with("nodes", node_count as u64));
         let sp = signpost::interval_begin(self.signpost_log, SP_SUBGRAPH);
-        Region { _span: span, signpost: sp }
+        Region {
+            _span: span,
+            signpost: sp,
+        }
     }
 
     /// Span + signpost interval around the synchronous `mlx_eval` (GPU-inclusive time).
@@ -708,17 +775,19 @@ impl MlxTracer {
             .span("mlx.eval", "gpu")
             .with_args(Args::new().device("gpu"));
         let sp = signpost::interval_begin(self.signpost_log, SP_EVAL);
-        Region { _span: span, signpost: sp }
+        Region {
+            _span: span,
+            signpost: sp,
+        }
     }
 
     /// Lightweight build-time span for one node (records the op structure of a subgraph).
-    pub fn op_span(&self, op_type: &str, num_inputs: usize, num_outputs: usize) -> SpanGuard {
+    pub fn op_span(&self, node: &NodeDesc, num_inputs: usize, num_outputs: usize) -> SpanGuard {
         if !self.is_enabled() {
-            return self.ctx.span(op_type, "op"); // inert guard, no allocation
+            return self.ctx.span(&node.op_type, "op"); // inert guard, no allocation
         }
-        self.ctx.span(op_type.to_string(), "op").with_args(
-            Args::new()
-                .with("op_type", op_type.to_string())
+        self.ctx.span(node.op_type.clone(), "op").with_args(
+            standard_op_args(node)
                 .with("inputs", num_inputs as u64)
                 .with("outputs", num_outputs as u64),
         )
@@ -746,26 +815,31 @@ impl MlxTracer {
     /// * `None` → neutral op, nothing emitted.
     ///
     /// No-op when tracing is disabled.
-    pub fn record_op_path(&self, op_type: &str, start: Option<Instant>, mark: Option<PathMark>) {
+    pub fn record_op_path(&self, node: &NodeDesc, start: Option<Instant>, mark: Option<PathMark>) {
         if !self.is_enabled() {
             return;
         }
         let Some(mark) = mark else {
             return;
         };
+        let op_type = node.op_type.as_str();
         match mark {
             PathMark::Fast(kernel) => {
                 if let Some(start) = start {
                     self.ctx.complete(
-                        format!("{op_type} [fast]"),
+                        op_type.to_string(),
                         "op.fast",
                         start,
                         start.elapsed(),
                         Some(
-                            Args::new()
-                                .with("op_type", op_type.to_string())
+                            standard_op_args(node)
                                 .with("optimized", true)
-                                .with("kernel", kernel),
+                                .with("kernel", kernel)
+                                .with(ARG_KERNEL_VARIANT, kernel)
+                                .with(
+                                    ARG_KERNEL_VARIANT_REASON,
+                                    "MLX handler selected fused fast path",
+                                ),
                         ),
                     );
                 }
@@ -773,13 +847,12 @@ impl MlxTracer {
             PathMark::Composed(reason) => {
                 if let Some(start) = start {
                     self.ctx.complete(
-                        format!("{op_type} [composed]"),
+                        op_type.to_string(),
                         "op.composed",
                         start,
                         start.elapsed(),
                         Some(
-                            Args::new()
-                                .with("op_type", op_type.to_string())
+                            standard_op_args(node)
                                 .with("optimized", false)
                                 .with("reason", reason.clone()),
                         ),
@@ -790,8 +863,7 @@ impl MlxTracer {
                     format!("⚠ composed-path: {op_type} ({reason})"),
                     "op.composed",
                     Some(
-                        Args::new()
-                            .with("op_type", op_type.to_string())
+                        standard_op_args(node)
                             .with("optimized", false)
                             .with("reason", reason),
                     ),
@@ -826,7 +898,6 @@ impl MlxTracer {
         });
     }
 
-
     /// Emit a rich per-op span (cat `op`) for a node whose outputs are already bound.
     /// Carries input/output shapes, dtype, element count and byte size so every op span
     /// has resource context even without fine mode. Also feeds the slowest-ops summary
@@ -834,7 +905,7 @@ impl MlxTracer {
     #[allow(clippy::too_many_arguments)]
     pub fn record_op_meta(
         &self,
-        op_type: &str,
+        node: &NodeDesc,
         start: Instant,
         dur: Duration,
         out_shapes: &str,
@@ -847,21 +918,20 @@ impl MlxTracer {
             return;
         }
         self.ctx.complete(
-            op_type.to_string(),
+            node.op_type.clone(),
             "op",
             start,
             dur,
             Some(
-                Args::new()
-                    .with("op_type", op_type.to_string())
+                standard_op_args(node)
                     .with("output_shapes", out_shapes.to_string())
                     .with("input_shapes", in_shapes.to_string())
                     .with("dtype", dtype.to_string())
                     .with("elements", elements)
-                    .with("bytes", bytes),
+                    .with(ARG_BYTES, bytes),
             ),
         );
-        self.record_op_time(op_type, dur.as_micros() as u64);
+        self.record_op_time(&node.op_type, dur.as_micros() as u64);
     }
 
     /// Accumulate one op-type timing sample for the end-of-run slowest-ops summary.
@@ -905,7 +975,8 @@ impl MlxTracer {
         ranked.sort_by_key(|a| std::cmp::Reverse(a.1));
         ranked.truncate(10);
 
-        let kind = "build-time (fusion intact; per-kernel GPU detail: ONNXRUNTIME_EP_MLX_GPU_CAPTURE)";
+        let kind =
+            "build-time (fusion intact; per-kernel GPU detail: ONNXRUNTIME_EP_MLX_GPU_CAPTURE)";
         let denom = total.max(1) as f64;
 
         let mut lines = String::new();
@@ -913,7 +984,9 @@ impl MlxTracer {
             "[rust-mlx-ep] slowest ops ({kind}), total {total} us across {} op-type(s):\n",
             ranked.len()
         ));
-        let mut args = Args::new().with("timing_kind", kind).with("total_us", total);
+        let mut args = Args::new()
+            .with("timing_kind", kind)
+            .with("total_us", total);
         for (i, (op, us, calls)) in ranked.iter().enumerate() {
             let pct = (*us as f64 / denom) * 100.0;
             lines.push_str(&format!(
@@ -992,7 +1065,6 @@ impl MlxTracer {
             None
         }
     }
-
 
     /// Sample GPU usage counters (cheap; only when tracing is enabled).
     ///
@@ -1113,7 +1185,10 @@ impl MlxTracer {
                 counters.len(),
                 path.display()
             ),
-            Err(e) => eprintln!("[rust-mlx-ep] trace export to {} failed: {e}", path.display()),
+            Err(e) => eprintln!(
+                "[rust-mlx-ep] trace export to {} failed: {e}",
+                path.display()
+            ),
         }
     }
 }
@@ -1309,7 +1384,11 @@ mod signpost {
                 buf.as_mut_ptr(),
                 buf.len() as u32,
             );
-            Some(Interval { log, id, name: name_ptr })
+            Some(Interval {
+                log,
+                id,
+                name: name_ptr,
+            })
         }
     }
 }
@@ -1397,13 +1476,8 @@ mod ioreport {
     type CFReleaseFn = unsafe extern "C" fn(CFTypeRef);
 
     // IOReport private functions.
-    type IOReportCopyChannelsInGroupFn = unsafe extern "C" fn(
-        CFStringRef,
-        CFStringRef,
-        u64,
-        u64,
-        u64,
-    ) -> CFMutableDictionaryRef;
+    type IOReportCopyChannelsInGroupFn =
+        unsafe extern "C" fn(CFStringRef, CFStringRef, u64, u64, u64) -> CFMutableDictionaryRef;
     type IOReportCreateSubscriptionFn = unsafe extern "C" fn(
         *mut c_void,
         CFMutableDictionaryRef,
@@ -1421,13 +1495,11 @@ mod ioreport {
     // IOReportIterate takes an Objective-C block; we pass a no-capture global block.
     type IOReportIterateFn = unsafe extern "C" fn(CFDictionaryRef, *const c_void);
     type IOReportChannelGetGroupFn = unsafe extern "C" fn(IOReportSampleRef) -> CFStringRef;
-    type IOReportChannelGetChannelNameFn =
-        unsafe extern "C" fn(IOReportSampleRef) -> CFStringRef;
+    type IOReportChannelGetChannelNameFn = unsafe extern "C" fn(IOReportSampleRef) -> CFStringRef;
     type IOReportStateGetCountFn = unsafe extern "C" fn(IOReportSampleRef) -> c_int;
     type IOReportStateGetNameForIndexFn =
         unsafe extern "C" fn(IOReportSampleRef, c_int) -> CFStringRef;
-    type IOReportStateGetResidencyFn =
-        unsafe extern "C" fn(IOReportSampleRef, c_int) -> c_longlong;
+    type IOReportStateGetResidencyFn = unsafe extern "C" fn(IOReportSampleRef, c_int) -> c_longlong;
 
     /// One GPU-utilisation reading (active-residency %; freq is best-effort/None here).
     pub struct Reading {
@@ -1579,10 +1651,7 @@ mod ioreport {
                 // IOReport's symbols live in /usr/lib/libIOReport.dylib (the framework
                 // bundle path is not dlopen-able — it is cache-only under a different
                 // install name). Fall back to the framework path just in case.
-                let mut ior = dlopen(
-                    c"/usr/lib/libIOReport.dylib".as_ptr(),
-                    RTLD_NOW,
-                );
+                let mut ior = dlopen(c"/usr/lib/libIOReport.dylib".as_ptr(), RTLD_NOW);
                 if ior.is_null() {
                     ior = dlopen(
                         c"/System/Library/PrivateFrameworks/IOReport.framework/IOReport".as_ptr(),
@@ -1602,27 +1671,20 @@ mod ioreport {
                     sym(ior, b"IOReportCopyChannelsInGroup\0")?;
                 let create_sub: IOReportCreateSubscriptionFn =
                     sym(ior, b"IOReportCreateSubscription\0")?;
-                let create_samples: IOReportCreateSamplesFn =
-                    sym(ior, b"IOReportCreateSamples\0")?;
+                let create_samples: IOReportCreateSamplesFn = sym(ior, b"IOReportCreateSamples\0")?;
                 let create_delta: IOReportCreateSamplesDeltaFn =
                     sym(ior, b"IOReportCreateSamplesDelta\0")?;
                 let iterate: IOReportIterateFn = sym(ior, b"IOReportIterate\0")?;
-                let get_group: IOReportChannelGetGroupFn =
-                    sym(ior, b"IOReportChannelGetGroup\0")?;
+                let get_group: IOReportChannelGetGroupFn = sym(ior, b"IOReportChannelGetGroup\0")?;
                 let get_channel: IOReportChannelGetChannelNameFn =
                     sym(ior, b"IOReportChannelGetChannelName\0")?;
-                let state_count: IOReportStateGetCountFn =
-                    sym(ior, b"IOReportStateGetCount\0")?;
+                let state_count: IOReportStateGetCountFn = sym(ior, b"IOReportStateGetCount\0")?;
                 let state_name: IOReportStateGetNameForIndexFn =
                     sym(ior, b"IOReportStateGetNameForIndex\0")?;
                 let state_resid: IOReportStateGetResidencyFn =
                     sym(ior, b"IOReportStateGetResidency\0")?;
 
-                let group = cfstr_create(
-                    std::ptr::null(),
-                    c"GPU Stats".as_ptr(),
-                    CF_UTF8,
-                );
+                let group = cfstr_create(std::ptr::null(), c"GPU Stats".as_ptr(), CF_UTF8);
                 if group.is_null() {
                     return None;
                 }

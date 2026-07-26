@@ -2,10 +2,10 @@
 //! their ACTUAL dtype, and MLX carries fp32/fp16/bf16 through unchanged). Port of the wave-1 subset
 //! of the C++ `ops/elementwise.cc`.
 
-use crate::engine::{mlx_dtype_from_onnx, MlxError, NodeDesc, TranslationContext};
+use crate::engine::{MlxError, NodeDesc, TranslationContext, mlx_dtype_from_onnx};
 use crate::registry::{
-    is_int_index, is_mlx_float, is_mlx_numeric, is_signed_integer, is_unsigned_integer,
-    scalar_or_suffix_broadcast, ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_int_index, is_mlx_float,
+    is_mlx_numeric, is_signed_integer, is_unsigned_integer, scalar_or_suffix_broadcast,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -50,7 +50,11 @@ fn softmax_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError
     // only accepts non-last axes for opset>=13, so the simple per-axis meaning always applies here.
     let rank = ctx.ndim(x) as i64;
     let axis_attr = n.ints.get("axis").copied().unwrap_or(-1);
-    let axis = if axis_attr < 0 { axis_attr + rank } else { axis_attr } as i32;
+    let axis = if axis_attr < 0 {
+        axis_attr + rank
+    } else {
+        axis_attr
+    } as i32;
     let r = ctx.softmax_axis(x, axis)?;
     ctx.bind(&n.outputs[0], r);
     Ok(())
@@ -402,8 +406,8 @@ fn variadic_claim(node: &NodeView, allow_int: bool) -> ClaimResult {
     for i in 0..node.num_inputs() {
         match node.input_info(i) {
             Some(inf)
-                if inf.dtype == out.dtype
-                    && scalar_or_suffix_broadcast(&inf.shape, &out.shape) => {}
+                if inf.dtype == out.dtype && scalar_or_suffix_broadcast(&inf.shape, &out.shape) => {
+            }
             Some(inf) => deny!(
                 "input[{i}] (dtype {}, shape {:?}) must match the output dtype {} and \
                  scalar/trailing-suffix broadcast to shape {:?}",
@@ -690,8 +694,18 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Equal", equal_op, equal_claim);
     reg(registry, "Greater", greater_op, ordered_comparison_claim);
     reg(registry, "Less", less_op, ordered_comparison_claim);
-    reg(registry, "GreaterOrEqual", greater_equal_op, ordered_comparison_claim);
-    reg(registry, "LessOrEqual", less_equal_op, ordered_comparison_claim);
+    reg(
+        registry,
+        "GreaterOrEqual",
+        greater_equal_op,
+        ordered_comparison_claim,
+    );
+    reg(
+        registry,
+        "LessOrEqual",
+        less_equal_op,
+        ordered_comparison_claim,
+    );
 
     // Logical (bool).
     reg(registry, "And", and_op, logical_binary_claim);

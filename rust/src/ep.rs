@@ -11,13 +11,15 @@
 //! Raw `unsafe`/FFI is confined to this boundary layer + `sys`; the ops use the safe `Array` wrappers.
 
 use std::collections::{HashMap, HashSet};
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
 
-use crate::engine::{InitData, NodeDesc, OutRef, Plan, Slot, Src, SubgraphDesc, TensorRef, TranslationContext};
+use crate::engine::{
+    InitData, NodeDesc, OutRef, Plan, Slot, Src, SubgraphDesc, TensorRef, TranslationContext,
+};
 use crate::factory::ORT_API_VERSION;
 use crate::mlx::Stream;
-use crate::registry::{claimable, NodeView};
+use crate::registry::{NodeView, claimable};
 use crate::sys::{mlx, ort};
 
 #[repr(C)]
@@ -83,9 +85,7 @@ unsafe fn this(p: *const ort::OrtEp) -> *const MlxEp {
 }
 
 unsafe extern "C" fn get_name(p: *const ort::OrtEp) -> *const c_char {
-    unsafe {
-        (*this(p)).name.as_ptr()
-    }
+    unsafe { (*this(p)).name.as_ptr() }
 }
 
 unsafe extern "C" fn get_default_memory_device(
@@ -110,7 +110,9 @@ unsafe extern "C" fn get_capability(
 ) -> *mut ort::OrtStatus {
     let api = unsafe { (*this(p)).ort_api };
     unsafe {
-        crate::guard_ffi_status(api, "get_capability", || get_capability_impl(p, graph, support))
+        crate::guard_ffi_status(api, "get_capability", || {
+            get_capability_impl(p, graph, support)
+        })
     }
 }
 
@@ -550,7 +552,14 @@ unsafe extern "C" fn compile(
     let api = unsafe { (*this(p)).ort_api };
     unsafe {
         crate::guard_ffi_status(api, "compile", || {
-            compile_impl(p, graphs, fused_nodes, count, node_compute_infos, ep_context_nodes)
+            compile_impl(
+                p,
+                graphs,
+                fused_nodes,
+                count,
+                node_compute_infos,
+                ep_context_nodes,
+            )
         })
     }
 }
@@ -573,11 +582,12 @@ unsafe fn compile_impl(
             match build_plan(api, graph, fused_node) {
                 Ok(plan) => {
                     let info = SubgraphComputeInfo::new(ep.ort_api, ep.stream.as_raw(), plan);
-                    *node_compute_infos.add(i) = Box::into_raw(info) as *mut ort::OrtNodeComputeInfo;
+                    *node_compute_infos.add(i) =
+                        Box::into_raw(info) as *mut ort::OrtNodeComputeInfo;
                 }
                 Err(msg) => {
-                    let c =
-                        CString::new(msg).unwrap_or_else(|_| CString::new("MLX compile error").unwrap());
+                    let c = CString::new(msg)
+                        .unwrap_or_else(|_| CString::new("MLX compile error").unwrap());
                     return (api.CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, c.as_ptr());
                 }
             }
@@ -637,12 +647,17 @@ unsafe fn build_plan(
             let domain = node_domain(api, node);
             let since_version = node_since_version(api, node);
             let mut nd = NodeDesc::new(op_type, domain, since_version);
+            let tr = crate::trace::tracer();
+            if tr.is_enabled() {
+                nd.node_id = node_id(api, node);
+                nd.name = node_name(api, node);
+            }
 
             collect_attributes(api, node, &mut nd);
 
             // Build-time span so each subgraph's op structure is visible in the trace.
-            let _op_span = crate::trace::tracer().op_span(
-                &nd.op_type,
+            let _op_span = tr.op_span(
+                &nd,
                 node_input_names(api, node).len(),
                 node_output_names(api, node).len(),
             );
@@ -729,8 +744,13 @@ unsafe fn build_plan(
             let is_random = |op: &str| {
                 matches!(
                     op,
-                    "RandomNormal" | "RandomUniform" | "RandomNormalLike" | "RandomUniformLike"
-                        | "Bernoulli" | "Multinomial" | "Dropout"
+                    "RandomNormal"
+                        | "RandomUniform"
+                        | "RandomNormalLike"
+                        | "RandomUniformLike"
+                        | "Bernoulli"
+                        | "Multinomial"
+                        | "Dropout"
                 )
             };
             for nd in nodes.iter_mut() {
@@ -762,17 +782,14 @@ unsafe fn build_plan(
         // recursively over the captured body subgraphs.
         fn any_control_flow(nodes: &[NodeDesc]) -> bool {
             nodes.iter().any(|n| {
-                !n.subgraphs.is_empty()
-                    || n.subgraphs.iter().any(|sg| any_control_flow(&sg.nodes))
+                !n.subgraphs.is_empty() || n.subgraphs.iter().any(|sg| any_control_flow(&sg.nodes))
             })
         }
         let has_control_flow = any_control_flow(&nodes);
         let mut plan = Plan::new(nodes);
         plan.compiled.enabled = crate::compiled::compile_enabled(has_control_flow);
-        plan.prefill.enabled =
-            crate::compiled::prefill_enabled(has_control_flow, &plan.nodes);
-        plan.general.enabled =
-            crate::compiled::general_enabled(has_control_flow, &plan.nodes);
+        plan.prefill.enabled = crate::compiled::prefill_enabled(has_control_flow, &plan.nodes);
+        plan.general.enabled = crate::compiled::general_enabled(has_control_flow, &plan.nodes);
         Ok(plan)
     }
 }
@@ -851,8 +868,9 @@ unsafe fn own_init_data(src: &InitData) -> InitData {
         return src.clone();
     }
     let nbytes = src.count * width;
-    let owned: std::sync::Arc<Vec<u8>> =
-        std::sync::Arc::new(unsafe { std::slice::from_raw_parts(src.data as *const u8, nbytes) }.to_vec());
+    let owned: std::sync::Arc<Vec<u8>> = std::sync::Arc::new(
+        unsafe { std::slice::from_raw_parts(src.data as *const u8, nbytes) }.to_vec(),
+    );
     let data = owned.as_ptr() as *const c_void;
     InitData {
         data,
@@ -953,7 +971,9 @@ unsafe fn build_subgraphs(
             let attr_name = if attr_names[si].is_null() {
                 String::new()
             } else {
-                CStr::from_ptr(attr_names[si]).to_string_lossy().into_owned()
+                CStr::from_ptr(attr_names[si])
+                    .to_string_lossy()
+                    .into_owned()
             };
 
             let input_names = graph_value_names(
@@ -977,8 +997,10 @@ unsafe fn build_subgraphs(
             // EXECUTE time (the taken If branch, each Scan/Loop step), long after this compile-time walk,
             // so any such pointer would dangle. Copy them into owned storage now so translate-time reads
             // (shape/axes/indices operands like Squeeze `axes`) see the correct bytes at run time.
-            let mut inits: HashMap<String, InitData> =
-                enclosing_inits.iter().map(|(k, v)| (k.clone(), own_init_data(v))).collect();
+            let mut inits: HashMap<String, InitData> = enclosing_inits
+                .iter()
+                .map(|(k, v)| (k.clone(), own_init_data(v)))
+                .collect();
             let mut num_init: usize = 0;
             (api.Graph_GetNumInitializers.unwrap())(body, &mut num_init);
             if num_init > 0 {
@@ -1050,7 +1072,11 @@ unsafe fn build_subgraphs(
                     }
                 }
             }
-            let formal: HashSet<String> = input_names.iter().filter(|n| !n.is_empty()).cloned().collect();
+            let formal: HashSet<String> = input_names
+                .iter()
+                .filter(|n| !n.is_empty())
+                .cloned()
+                .collect();
 
             // Names visible to a NESTED control-flow node inside this body: enclosing ∪ formal ∪ producers.
             let mut child_enclosing = enclosing_names.clone();
@@ -1060,6 +1086,7 @@ unsafe fn build_subgraphs(
             let order = topo_order(api, &bnodes, &producer);
 
             let mut nodes: Vec<NodeDesc> = Vec::with_capacity(bnodes.len());
+            let trace_on = crate::trace::tracer().is_enabled();
             for &idx in &order {
                 let node = bnodes[idx];
                 let mut mnd = NodeDesc::new(
@@ -1067,6 +1094,10 @@ unsafe fn build_subgraphs(
                     node_domain(api, node),
                     node_since_version(api, node),
                 );
+                if trace_on {
+                    mnd.node_id = node_id(api, node);
+                    mnd.name = node_name(api, node);
+                }
                 collect_attributes(api, node, &mut mnd);
 
                 for name in node_input_names(api, node) {
@@ -1109,7 +1140,9 @@ unsafe fn build_subgraphs(
                             init: None,
                         }
                     } else {
-                        return Err(format!("MLX could not resolve control-flow body input {name}"));
+                        return Err(format!(
+                            "MLX could not resolve control-flow body input {name}"
+                        ));
                     };
                     mnd.inputs.push(tr);
                 }
@@ -1192,6 +1225,33 @@ unsafe fn node_op_type(api: &ort::OrtApi, node: *const ort::OrtNode) -> String {
     unsafe {
         let mut p: *const c_char = ptr::null();
         (api.Node_GetOperatorType.unwrap())(node, &mut p);
+        if p.is_null() {
+            String::new()
+        } else {
+            CStr::from_ptr(p).to_string_lossy().into_owned()
+        }
+    }
+}
+
+unsafe fn node_id(api: &ort::OrtApi, node: *const ort::OrtNode) -> usize {
+    unsafe {
+        let mut id: usize = 0;
+        let st = (api.Node_GetId.unwrap())(node, &mut id);
+        if !st.is_null() {
+            release_status(api, st);
+        }
+        id
+    }
+}
+
+unsafe fn node_name(api: &ort::OrtApi, node: *const ort::OrtNode) -> String {
+    unsafe {
+        let mut p: *const c_char = ptr::null();
+        let st = (api.Node_GetName.unwrap())(node, &mut p);
+        if !st.is_null() {
+            release_status(api, st);
+            return String::new();
+        }
         if p.is_null() {
             String::new()
         } else {
@@ -1337,7 +1397,13 @@ unsafe fn collect_attributes(api: &ort::OrtApi, node: *const ort::OrtNode, nd: &
                     if needed > 0 {
                         let mut buf: Vec<u8> = vec![0u8; needed];
                         let mut out: usize = 0;
-                        let st = read(attr, atype, buf.as_mut_ptr() as *mut c_void, needed, &mut out);
+                        let st = read(
+                            attr,
+                            atype,
+                            buf.as_mut_ptr() as *mut c_void,
+                            needed,
+                            &mut out,
+                        );
                         if st.is_null() {
                             buf.truncate(out.min(needed));
                             if let Ok(s) = String::from_utf8(buf) {
@@ -1478,7 +1544,8 @@ unsafe fn compute_impl(
                          InferenceSession per thread for concurrent inference."
                     );
                     let c = CString::new(msg).unwrap_or_else(|_| {
-                        CString::new("onnxruntime-mlx: cross-thread Run() is not supported").unwrap()
+                        CString::new("onnxruntime-mlx: cross-thread Run() is not supported")
+                            .unwrap()
                     });
                     return (api.CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, c.as_ptr());
                 }
@@ -1506,10 +1573,25 @@ unsafe fn compute_impl(
             // Cache state: replay (HIT) if the shapeless closure is already compiled, else first
             // trace+compile (MISS). Decode is shapeless, so it never retraces (empty shape key).
             let pre_valid = (*plan_ptr).compiled.valid;
-            match crate::compiled::try_compiled(plan_ptr, Slot::Decode, info.ort_api, kctx, info.stream) {
+            match crate::compiled::try_compiled(
+                plan_ptr,
+                Slot::Decode,
+                info.ort_api,
+                kctx,
+                info.stream,
+            ) {
                 Ok(true) => {
-                    let cache = if pre_valid { crate::trace::CacheState::Hit } else { crate::trace::CacheState::Miss };
-                    tr.record_compute_path(crate::trace::ComputePath::Decode, cache, "", node_count);
+                    let cache = if pre_valid {
+                        crate::trace::CacheState::Hit
+                    } else {
+                        crate::trace::CacheState::Miss
+                    };
+                    tr.record_compute_path(
+                        crate::trace::ComputePath::Decode,
+                        cache,
+                        "",
+                        node_count,
+                    );
                     return ptr::null_mut();
                 }
                 Ok(false) => { /* not eligible — fall back to eager below */ }
@@ -1527,12 +1609,27 @@ unsafe fn compute_impl(
         // fused closure for repeats. Declines (=> eager) for any non-decoder / partial-rotary shape.
         if (*plan_ptr).prefill.enabled && matches!(seq_len, Some(s) if s > 1) {
             let pre_valid = (*plan_ptr).prefill.valid;
-            match crate::compiled::try_compiled(plan_ptr, Slot::Prefill, info.ort_api, kctx, info.stream) {
+            match crate::compiled::try_compiled(
+                plan_ptr,
+                Slot::Prefill,
+                info.ort_api,
+                kctx,
+                info.stream,
+            ) {
                 Ok(true) => {
                     // Shape-keyed on the query length S: a changed key means MLX retraced under us.
-                    let cache = if pre_valid { crate::trace::CacheState::Hit } else { crate::trace::CacheState::Miss };
+                    let cache = if pre_valid {
+                        crate::trace::CacheState::Hit
+                    } else {
+                        crate::trace::CacheState::Miss
+                    };
                     let key = seq_len.map(|s| format!("S{s}")).unwrap_or_default();
-                    tr.record_compute_path(crate::trace::ComputePath::Prefill, cache, &key, node_count);
+                    tr.record_compute_path(
+                        crate::trace::ComputePath::Prefill,
+                        cache,
+                        &key,
+                        node_count,
+                    );
                     return ptr::null_mut();
                 }
                 Ok(false) => { /* not eligible — fall back to eager below */ }
@@ -1557,11 +1654,24 @@ unsafe fn compute_impl(
                 info.stream,
             ) {
                 Ok(true) => {
-                    let cache = if pre_valid { crate::trace::CacheState::Hit } else { crate::trace::CacheState::Miss };
+                    let cache = if pre_valid {
+                        crate::trace::CacheState::Hit
+                    } else {
+                        crate::trace::CacheState::Miss
+                    };
                     // Shape key from the primary dynamic input so a changed audio/frame size shows as
                     // a RETRACE (only read when observability is active).
-                    let key = if tr.active() { compute_shape_key(info.ort_api, kctx) } else { String::new() };
-                    tr.record_compute_path(crate::trace::ComputePath::General, cache, &key, node_count);
+                    let key = if tr.active() {
+                        compute_shape_key(info.ort_api, kctx)
+                    } else {
+                        String::new()
+                    };
+                    tr.record_compute_path(
+                        crate::trace::ComputePath::General,
+                        cache,
+                        &key,
+                        node_count,
+                    );
                     return ptr::null_mut();
                 }
                 Ok(false) => { /* not eligible — fall back to eager below */ }
@@ -1576,7 +1686,12 @@ unsafe fn compute_impl(
         let mut tctx = TranslationContext::new(&mut *plan_ptr, info.ort_api, kctx, info.stream);
         match tctx.execute() {
             Ok(()) => {
-                tr.record_compute_path(crate::trace::ComputePath::Eager, crate::trace::CacheState::Na, "", node_count);
+                tr.record_compute_path(
+                    crate::trace::ComputePath::Eager,
+                    crate::trace::CacheState::Na,
+                    "",
+                    node_count,
+                );
                 ptr::null_mut()
             }
             Err(msg) => {

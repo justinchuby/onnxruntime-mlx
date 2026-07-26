@@ -22,7 +22,13 @@ crate-type = ["cdylib"]
 [dependencies]
 # Pure-Rust Chrome/Perfetto tracer, from crates.io. `default-features = false`
 # drops the `perfetto` (prost) feature — we export Chrome Trace JSON only.
-onnx-runtime-tracer = { version = "0.1.0-dev.2", default-features = false }
+#
+# Pinned to a release with the absolute UNIX-microsecond clock. Every copy of
+# the crate -- the host's and this dylib's, which has its own statics and so
+# could never have shared a process-global epoch -- reports the same instant as
+# the same number, which is what lets a trace from this plugin be laid over a
+# host trace with no offset to negotiate.
+onnx-runtime-tracer = { version = "0.1.0-dev.4", default-features = false }
 
 [build-dependencies]
 bindgen = "0.72"

@@ -34,7 +34,8 @@ pub struct InitData {
     #[allow(dead_code)]
     pub count: usize,
     /// Owned copy of the bytes (control-flow body initializers), keeping `data` valid.
-    #[allow(dead_code)] // RAII: backs the `data` pointer above; must outlive it even if not read.
+    #[allow(dead_code)]
+    // RAII: backs the `data` pointer above; must outlive it even if not read.
     pub owned: Option<std::sync::Arc<Vec<u8>>>,
 }
 
@@ -123,6 +124,8 @@ pub struct SubgraphDesc {
 /// One ONNX node with just the metadata the MLX translator needs.
 #[derive(Clone)]
 pub struct NodeDesc {
+    pub node_id: usize,
+    pub name: String,
     pub op_type: String,
     pub domain: String,
     pub since_version: i32,
@@ -143,6 +146,8 @@ pub struct NodeDesc {
 impl NodeDesc {
     pub fn new(op_type: String, domain: String, since_version: i32) -> Self {
         NodeDesc {
+            node_id: 0,
+            name: String::new(),
             op_type,
             domain,
             since_version,
@@ -409,7 +414,9 @@ pub fn mlx_dtype_from_onnx(t: ort::ONNXTensorElementDataType) -> mlxsys::mlx_dty
     use ort::*;
     #[allow(non_upper_case_globals)]
     match t {
-        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => mlxsys::mlx_dtype__MLX_FLOAT32,
+        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => {
+            mlxsys::mlx_dtype__MLX_FLOAT32
+        }
         ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => {
             mlxsys::mlx_dtype__MLX_FLOAT16
         }
@@ -420,10 +427,18 @@ pub fn mlx_dtype_from_onnx(t: ort::ONNXTensorElementDataType) -> mlxsys::mlx_dty
             mlxsys::mlx_dtype__MLX_FLOAT64
         }
         ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8 => mlxsys::mlx_dtype__MLX_INT8,
-        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16 => mlxsys::mlx_dtype__MLX_INT16,
-        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 => mlxsys::mlx_dtype__MLX_INT32,
-        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => mlxsys::mlx_dtype__MLX_INT64,
-        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8 => mlxsys::mlx_dtype__MLX_UINT8,
+        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16 => {
+            mlxsys::mlx_dtype__MLX_INT16
+        }
+        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32 => {
+            mlxsys::mlx_dtype__MLX_INT32
+        }
+        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => {
+            mlxsys::mlx_dtype__MLX_INT64
+        }
+        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8 => {
+            mlxsys::mlx_dtype__MLX_UINT8
+        }
         ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16 => {
             mlxsys::mlx_dtype__MLX_UINT16
         }
@@ -630,7 +645,12 @@ impl<'a> TranslationContext<'a> {
     /// fused. When [`fine_enabled`](crate::trace::MlxTracer::fine_enabled) is set, additionally
     /// forces an `mlx_array_eval` of this node's outputs to time it individually — a
     /// GPU-inclusive per-op bar that BREAKS fusion (debug-only, slower).
-    pub fn trace_node(&mut self, op_type: &str, node: &NodeDesc, start: Option<std::time::Instant>) {
+    pub fn trace_node(
+        &mut self,
+        _op_type: &str,
+        node: &NodeDesc,
+        start: Option<std::time::Instant>,
+    ) {
         if !self.trace_enabled {
             return;
         }
@@ -675,7 +695,16 @@ impl<'a> TranslationContext<'a> {
 
         // A build-time span with resource metadata. The fused subgraph runs as a single
         // `mlx.eval` (see finish_boundary); per-kernel GPU detail is the Xcode GPU capture.
-        tr.record_op_meta(op_type, start, start.elapsed(), &out_s, &in_s, dtype, elements, bytes);
+        tr.record_op_meta(
+            node,
+            start,
+            start.elapsed(),
+            &out_s,
+            &in_s,
+            dtype,
+            elements,
+            bytes,
+        );
     }
 
     /// Resolve a node input to a raw MLX array handle (intermediate env / wrapped ctx input /
@@ -696,7 +725,10 @@ impl<'a> TranslationContext<'a> {
                     return Ok(*a);
                 }
                 let (data, shape, dtype) = self.read_ctx_input(r.ctx_index)?;
-                let ishape: Vec<i32> = shape.iter().map(|&d| dim_i32(d)).collect::<Result<_, _>>()?;
+                let ishape: Vec<i32> = shape
+                    .iter()
+                    .map(|&d| dim_i32(d))
+                    .collect::<Result<_, _>>()?;
                 if r.constant {
                     // Constants are cached and reused across Compute calls, so they must OWN a copy
                     // (the ORT ctx-input buffer is not guaranteed stable past this Compute).
@@ -724,8 +756,11 @@ impl<'a> TranslationContext<'a> {
                     .init
                     .as_ref()
                     .ok_or_else(|| format!("MLX: initializer {} has no data", r.name))?;
-                let ishape: Vec<i32> =
-                    init.shape.iter().map(|&d| dim_i32(d)).collect::<Result<_, _>>()?;
+                let ishape: Vec<i32> = init
+                    .shape
+                    .iter()
+                    .map(|&d| dim_i32(d))
+                    .collect::<Result<_, _>>()?;
                 let arr = Array::from_data(init.data, &ishape, mlx_dtype_from_onnx(init.dtype));
                 let raw = arr.as_raw();
                 self.plan.cache.insert(r.name.clone(), arr);
@@ -777,7 +812,6 @@ impl<'a> TranslationContext<'a> {
         Ok(unsafe { std::slice::from_raw_parts(p, h.count) }.to_vec())
     }
 
-
     fn read_ctx_input(
         &self,
         index: usize,
@@ -812,7 +846,11 @@ impl<'a> TranslationContext<'a> {
     /// Apply a unary `mlx_*(res, a, stream)` op.
     pub fn unary(
         &mut self,
-        op: unsafe extern "C" fn(*mut mlxsys::mlx_array, mlxsys::mlx_array, mlxsys::mlx_stream) -> i32,
+        op: unsafe extern "C" fn(
+            *mut mlxsys::mlx_array,
+            mlxsys::mlx_array,
+            mlxsys::mlx_stream,
+        ) -> i32,
         a: mlxsys::mlx_array,
     ) -> Result<mlxsys::mlx_array, MlxError> {
         let mut res = Array::new();
@@ -953,11 +991,19 @@ impl<'a> TranslationContext<'a> {
 
     // ---- common data-movement helpers -------------------------------------------------------------
 
-    pub fn reshape(&mut self, a: mlxsys::mlx_array, shape: &[i32]) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn reshape(
+        &mut self,
+        a: mlxsys::mlx_array,
+        shape: &[i32],
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, s| unsafe { mlxsys::mlx_reshape(res, a, shape.as_ptr(), shape.len(), s) })
     }
 
-    pub fn transpose(&mut self, a: mlxsys::mlx_array, axes: &[i32]) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn transpose(
+        &mut self,
+        a: mlxsys::mlx_array,
+        axes: &[i32],
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, s| unsafe {
             mlxsys::mlx_transpose_axes(res, a, axes.as_ptr(), axes.len(), s)
         })
@@ -969,7 +1015,11 @@ impl<'a> TranslationContext<'a> {
         self.emit(|res, s| unsafe { mlxsys::mlx_contiguous(res, a, false, s) })
     }
 
-    pub fn zeros(&mut self, shape: &[i32], dtype: mlxsys::mlx_dtype) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn zeros(
+        &mut self,
+        shape: &[i32],
+        dtype: mlxsys::mlx_dtype,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, s| unsafe { mlxsys::mlx_zeros(res, shape.as_ptr(), shape.len(), dtype, s) })
     }
 
@@ -993,27 +1043,48 @@ impl<'a> TranslationContext<'a> {
     // ---- extra op helpers shared by the signal/random/recurrent/ssm/misc/controlflow ops ---------
 
     /// `a * b` (elementwise, with MLX broadcast).
-    pub fn mul(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn mul(
+        &mut self,
+        a: mlxsys::mlx_array,
+        b: mlxsys::mlx_array,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.binary(mlxsys::mlx_multiply, a, b)
     }
 
     /// `a + b`.
-    pub fn add(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn add(
+        &mut self,
+        a: mlxsys::mlx_array,
+        b: mlxsys::mlx_array,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.binary(mlxsys::mlx_add, a, b)
     }
 
     /// `a - b`.
-    pub fn sub(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn sub(
+        &mut self,
+        a: mlxsys::mlx_array,
+        b: mlxsys::mlx_array,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.binary(mlxsys::mlx_subtract, a, b)
     }
 
     /// `a @ b` (matmul).
-    pub fn matmul(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn matmul(
+        &mut self,
+        a: mlxsys::mlx_array,
+        b: mlxsys::mlx_array,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, s| unsafe { mlxsys::mlx_matmul(res, a, b, s) })
     }
 
     /// Concatenate two arrays along `axis`.
-    pub fn concat2(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array, axis: i32) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn concat2(
+        &mut self,
+        a: mlxsys::mlx_array,
+        b: mlxsys::mlx_array,
+        axis: i32,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         let mut vec = VectorArray::new();
         vec.append(a);
         vec.append(b);
@@ -1021,33 +1092,64 @@ impl<'a> TranslationContext<'a> {
     }
 
     /// Contiguous strided slice with unit stride (`start`/`stop` per axis).
-    pub fn slice(&mut self, a: mlxsys::mlx_array, start: &[i32], stop: &[i32]) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn slice(
+        &mut self,
+        a: mlxsys::mlx_array,
+        start: &[i32],
+        stop: &[i32],
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         let stride = vec![1i32; start.len()];
         self.emit(|res, s| unsafe {
             mlxsys::mlx_slice(
-                res, a, start.as_ptr(), start.len(), stop.as_ptr(), stop.len(),
-                stride.as_ptr(), stride.len(), s,
+                res,
+                a,
+                start.as_ptr(),
+                start.len(),
+                stop.as_ptr(),
+                stop.len(),
+                stride.as_ptr(),
+                stride.len(),
+                s,
             )
         })
     }
 
     /// `expand_dims(a, axis)`.
-    pub fn expand_dims(&mut self, a: mlxsys::mlx_array, axis: i32) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn expand_dims(
+        &mut self,
+        a: mlxsys::mlx_array,
+        axis: i32,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, s| unsafe { mlxsys::mlx_expand_dims(res, a, axis, s) })
     }
 
     /// `arange(start, stop, step)` of the given dtype.
-    pub fn arange(&mut self, start: f64, stop: f64, step: f64, dtype: mlxsys::mlx_dtype) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn arange(
+        &mut self,
+        start: f64,
+        stop: f64,
+        step: f64,
+        dtype: mlxsys::mlx_dtype,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, s| unsafe { mlxsys::mlx_arange(res, start, stop, step, dtype, s) })
     }
 
     /// Elementwise `a <= b` (broadcasting), producing a bool array.
-    pub fn less_equal(&mut self, a: mlxsys::mlx_array, b: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn less_equal(
+        &mut self,
+        a: mlxsys::mlx_array,
+        b: mlxsys::mlx_array,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.binary(mlxsys::mlx_less_equal, a, b)
     }
 
     /// `where(cond, x, y)` (elementwise select with broadcasting).
-    pub fn where_(&mut self, cond: mlxsys::mlx_array, x: mlxsys::mlx_array, y: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn where_(
+        &mut self,
+        cond: mlxsys::mlx_array,
+        x: mlxsys::mlx_array,
+        y: mlxsys::mlx_array,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, s| unsafe { mlxsys::mlx_where(res, cond, x, y, s) })
     }
 
@@ -1066,12 +1168,20 @@ impl<'a> TranslationContext<'a> {
     }
 
     /// `squeeze(a, axis)`.
-    pub fn squeeze(&mut self, a: mlxsys::mlx_array, axis: i32) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn squeeze(
+        &mut self,
+        a: mlxsys::mlx_array,
+        axis: i32,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, s| unsafe { mlxsys::mlx_squeeze_axis(res, a, axis, s) })
     }
 
     /// Stack a list of same-shaped arrays along a new `axis`.
-    pub fn stack(&mut self, parts: &[mlxsys::mlx_array], axis: i32) -> Result<mlxsys::mlx_array, MlxError> {
+    pub fn stack(
+        &mut self,
+        parts: &[mlxsys::mlx_array],
+        axis: i32,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         let mut vec = VectorArray::new();
         for &p in parts {
             vec.append(p);
@@ -1081,7 +1191,9 @@ impl<'a> TranslationContext<'a> {
 
     /// A kept 0-d complex64 scalar array (real, imag).
     pub fn scalar_complex(&mut self, re: f32, im: f32) -> mlxsys::mlx_array {
-        self.keep(Array::from_raw(unsafe { mlxsys::mlx_array_new_complex(re, im) }))
+        self.keep(Array::from_raw(unsafe {
+            mlxsys::mlx_array_new_complex(re, im)
+        }))
     }
 
     /// A kept 0-d bool scalar array.
@@ -1092,7 +1204,12 @@ impl<'a> TranslationContext<'a> {
     /// A kept array wrapping host bytes of the given `dtype` and `shape`.
     // builder-style: constructs an mlx_array from host data into the ctx arena.
     #[allow(clippy::wrong_self_convention)]
-    pub fn from_host(&mut self, data: *const c_void, shape: &[i32], dtype: mlxsys::mlx_dtype) -> mlxsys::mlx_array {
+    pub fn from_host(
+        &mut self,
+        data: *const c_void,
+        shape: &[i32],
+        dtype: mlxsys::mlx_dtype,
+    ) -> mlxsys::mlx_array {
         self.keep(Array::from_data(data, shape, dtype))
     }
 
@@ -1122,7 +1239,10 @@ impl<'a> TranslationContext<'a> {
     /// Like [`Self::contiguous_eval`] but permitted inside a general trace. ONLY call when the array
     /// is provably shape-const (a `Shape`/`Size`-derived value or a chain over constants): it has no
     /// tracer dependency, so eval computes a genuine constant rather than aborting on a tracer.
-    fn contiguous_eval_const(&mut self, a: mlxsys::mlx_array) -> Result<mlxsys::mlx_array, MlxError> {
+    fn contiguous_eval_const(
+        &mut self,
+        a: mlxsys::mlx_array,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
         let r = self.contiguous(a)?;
         let mut v = VectorArray::new();
         v.append(r);
@@ -1215,7 +1335,10 @@ impl<'a> TranslationContext<'a> {
         inputs: &[mlxsys::mlx_array],
     ) -> Result<Vec<mlxsys::mlx_array>, MlxError> {
         if inputs.len() != sg.input_names.len() {
-            return Err(format!("MLX RunSubgraph: input arity mismatch for body '{}'", sg.attr_name));
+            return Err(format!(
+                "MLX RunSubgraph: input arity mismatch for body '{}'",
+                sg.attr_name
+            ));
         }
         // Names this body binds (formal inputs + every produced output); snapshot shadowed outer ones.
         let mut body_names: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1255,7 +1378,7 @@ impl<'a> TranslationContext<'a> {
                     return Err(format!(
                         "MLX RunSubgraph: body '{}' did not produce output {on}",
                         sg.attr_name
-                    ))
+                    ));
                 }
             }
         }
@@ -1290,7 +1413,13 @@ impl<'a> TranslationContext<'a> {
     /// COMPILED trace (`rope_dynamic`) `offset` is still the capacity placeholder, so we only remember
     /// `(name, past_ctx_index)` on the plan; the real per-token offset/count/pointer are supplied at
     /// apply time by `try_compiled_decode`.
-    pub fn record_kv_present(&mut self, out_name: &str, offset: i64, count: i64, past_ctx_index: usize) {
+    pub fn record_kv_present(
+        &mut self,
+        out_name: &str,
+        offset: i64,
+        count: i64,
+        past_ctx_index: usize,
+    ) {
         if self.rope_dynamic {
             if !self.compiled_kv_present.iter().any(|(n, _)| n == out_name) {
                 self.compiled_kv_present
@@ -1303,7 +1432,12 @@ impl<'a> TranslationContext<'a> {
                 .unwrap_or(0);
             self.kv_deltas.insert(
                 out_name.to_string(),
-                DeltaWrite { axis: 2, offset, count, alias_ptr },
+                DeltaWrite {
+                    axis: 2,
+                    offset,
+                    count,
+                    alias_ptr,
+                },
             );
         }
     }
@@ -1320,7 +1454,12 @@ impl<'a> TranslationContext<'a> {
     /// closure body (replaces the old decode-only `new_trace`). `shape_keyed` marks a prefill trace
     /// (static shapes for the key); `valid_past` is the static valid-past for that key (only used when
     /// `shape_keyed` is set, to statically narrow the shared-buffer attention to the valid prefix).
-    pub(crate) fn set_compiled_trace(&mut self, shared_kv: bool, shape_keyed: bool, valid_past: i32) {
+    pub(crate) fn set_compiled_trace(
+        &mut self,
+        shared_kv: bool,
+        shape_keyed: bool,
+        valid_past: i32,
+    ) {
         self.rope_dynamic = true;
         self.shared_kv = shared_kv;
         self.compiled_shape_keyed = shape_keyed;
@@ -1398,7 +1537,11 @@ impl<'a> TranslationContext<'a> {
                 .env_get(&o.name)
                 .ok_or_else(|| format!("MLX: compiled trace missing output {}", o.name))?;
             let casted = self.astype(a, mlx_dtype_from_onnx(o.otype))?;
-            let casted = if contiguous { self.contiguous(casted)? } else { casted };
+            let casted = if contiguous {
+                self.contiguous(casted)?
+            } else {
+                casted
+            };
             res.append(casted);
         }
         Ok(res)
@@ -1478,7 +1621,9 @@ impl<'a> TranslationContext<'a> {
         let mut ext: Vec<(OutRef, mlxsys::mlx_array)> = Vec::new();
         for node in nodes {
             for o in &node.outputs {
-                if o.external && let Some(&a) = self.env.get(&o.name) {
+                if o.external
+                    && let Some(&a) = self.env.get(&o.name)
+                {
                     let casted = self.astype(a, mlx_dtype_from_onnx(o.otype))?;
                     // Materialise to row-major contiguous HERE (once, at the boundary) so the
                     // flat copy_out memcpy is valid. Intermediate view ops (transpose/slice/
@@ -1496,7 +1641,11 @@ impl<'a> TranslationContext<'a> {
         // Sample GPU-memory counters just before and after so the curve shows the eval.
         let tr = crate::trace::tracer();
         tr.sample_gpu_counters();
-        let eval_t0 = if tr.active() { Some(std::time::Instant::now()) } else { None };
+        let eval_t0 = if tr.active() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         {
             // Wrap the FIRST eval in a Metal GPU capture when requested (one-shot; the
             // guard stops the capture on drop). `None`/near-zero cost otherwise.
@@ -1581,7 +1730,10 @@ pub(crate) fn copy_out_raw_delta(
             &mut out,
         );
         if !st.is_null() || out.is_null() {
-            return Err(format!("MLX: KernelContext_GetOutput({}) failed", o.ctx_index));
+            return Err(format!(
+                "MLX: KernelContext_GetOutput({}) failed",
+                o.ctx_index
+            ));
         }
         let mut dst: *mut c_void = std::ptr::null_mut();
         (api.GetTensorMutableData.unwrap())(out, &mut dst);
@@ -1592,7 +1744,11 @@ pub(crate) fn copy_out_raw_delta(
         // Memory + timing view: record whether this copy-out took the delta (new-rows-only) or full
         // path, the bytes moved, and the wall time. Gated so a traced-off run pays one atomic load.
         let tr = crate::trace::tracer();
-        let t0 = if tr.active() { Some(std::time::Instant::now()) } else { None };
+        let t0 = if tr.active() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let mut was_delta = false;
         let mut moved_bytes: u64 = (count * itemsize) as u64;
         match delta {
@@ -1613,10 +1769,16 @@ pub(crate) fn copy_out_raw_delta(
                 if n_rows == 0 {
                     return Ok(());
                 }
-                let outer: usize =
-                    shape[..d.axis].iter().map(|&x| x as usize).product::<usize>().max(1);
-                let inner: usize =
-                    shape[d.axis + 1..].iter().map(|&x| x as usize).product::<usize>().max(1);
+                let outer: usize = shape[..d.axis]
+                    .iter()
+                    .map(|&x| x as usize)
+                    .product::<usize>()
+                    .max(1);
+                let inner: usize = shape[d.axis + 1..]
+                    .iter()
+                    .map(|&x| x as usize)
+                    .product::<usize>()
+                    .max(1);
                 let run = n_rows * inner * itemsize; // bytes per outer slab
                 let stride = axis_len * inner * itemsize; // bytes between slabs
                 let start = offset * inner * itemsize; // byte offset of first row within a slab
