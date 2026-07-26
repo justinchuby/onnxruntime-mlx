@@ -177,6 +177,41 @@ fn causal_mask_topleft(
     ctx.where_(allow, zero, neg)
 }
 
+/// The ONNX causal mask, with any supplied `attn_mask` folded into it.
+///
+/// ONNX `Attention` applies `is_causal` *and* `attn_mask` when both are given,
+/// and both are expressible as one additive array, so they are combined rather
+/// than sent through two dispatches:
+///
+/// * a float mask is additive already, so the two are added — `-inf` from either
+///   side wins, and `0 + 0` leaves an attended position attended;
+/// * a bool mask means "true = attend", so it becomes `0`/`-inf` first.
+///
+/// Neither side ever contributes `+inf`, so no addition can produce `NaN`.
+fn combined_causal_mask(
+    ctx: &mut TranslationContext,
+    q_len: i32,
+    k_len: i32,
+    past_seq: i32,
+    dt: mlx::mlx_dtype,
+    mask: Option<mlx::mlx_array>,
+) -> Result<mlx::mlx_array, MlxError> {
+    let causal = causal_mask_topleft(ctx, q_len, k_len, past_seq, dt)?;
+    let Some(mask) = mask else {
+        return Ok(causal);
+    };
+    let additive = if ctx.dtype_of(mask) == mlx::mlx_dtype__MLX_BOOL {
+        let zero = ctx.scalar_f32(0.0);
+        let zero = ctx.astype(zero, dt)?;
+        let neg = ctx.scalar_f32(f32::NEG_INFINITY);
+        let neg = ctx.astype(neg, dt)?;
+        ctx.where_(mask, zero, neg)?
+    } else {
+        ctx.astype(mask, dt)?
+    };
+    ctx.add(causal, additive)
+}
+
 /// GQA eager SDPA over the attended keys `[0, k_len)`, with the queries at positions
 /// `[valid_past, valid_past+S)`. Without an `attention_bias` this is plain causal SDPA (bit-for-bit
 /// the legacy behavior). With the 11-input Gemma3n `attention_bias` (input 10, `[B,1,S,total]`
@@ -712,7 +747,7 @@ fn attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
         let k_len = ctx.shape_of(present_k)[2];
         let cur_kv = ctx.shape_of(kh4)[2];
         let past_seq = k_len - cur_kv;
-        let cmask = causal_mask_topleft(ctx, s, k_len, past_seq, dt)?;
+        let cmask = combined_causal_mask(ctx, s, k_len, past_seq, dt, mask)?;
         sdpa(ctx, qh4, present_k, present_v, scale, b"array\0", cmask)?
     } else {
         sdpa_dispatch(ctx, qh4, present_k, present_v, scale, false, mask, dt)?
@@ -1141,18 +1176,20 @@ fn check_kv_cache(
     true
 }
 
-/// An attn/attention_bias mask must be bool or the query float dtype, and cannot co-exist with causal.
-fn check_mask(
-    node: &NodeView,
-    mask_idx: usize,
-    causal: bool,
-    _qd: ort::ONNXTensorElementDataType,
-) -> bool {
+/// An attn/attention_bias mask must be bool or an MLX-supported float dtype.
+///
+/// A mask alongside `is_causal` is accepted: ONNX applies both, and both reduce
+/// to one additive array, so the two are folded together before dispatch (see
+/// [`combined_causal_mask`]). This is the same trick `gqa_eager_sdpa` already
+/// uses for Gemma3n's `attention_bias`.
+///
+/// Declining the combination instead is expensive out of proportion to the op:
+/// exported decoders routinely emit `is_causal` *and* a padding mask, so every
+/// attention node in the model falls back to CPU and the graph is cut into a
+/// fused subgraph per layer.
+fn check_mask(node: &NodeView, mask_idx: usize) -> bool {
     if !node.input_present(mask_idx) {
         return true;
-    }
-    if causal {
-        return false;
     }
     match dtype_of(node, mask_idx) {
         Some(md) => {
@@ -1248,8 +1285,10 @@ fn attention_claim(node: &NodeView) -> ClaimResult {
     );
     require!(!node.output_present(3), "qk_matmul_output is unsupported");
     require!(!node.input_present(6), "nonpad_kv_seqlen is unsupported");
-    let causal = node.int_attr("is_causal", 0) != 0;
-    require!(check_mask(node, 3, causal, qd), "attention mask must be bool or float and cannot be used with is_causal; this guards SDPA mask dispatch");
+    require!(
+        check_mask(node, 3),
+        "attention mask must be bool or the query float dtype; this guards SDPA mask dispatch"
+    );
     require!(
         check_kv_cache(node, 4, 5, qd),
         "past K/V must be paired and match query dtype {}; present K/V require a cache",

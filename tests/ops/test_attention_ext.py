@@ -19,6 +19,9 @@ placeholders in the node's input list while being excluded from the graph inputs
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import numpy as np
 import onnx_ir as ir
 import pytest
@@ -128,9 +131,13 @@ def check(model: bytes, feeds: dict[str, np.ndarray]) -> None:
 #
 # NOTE on past-KV cases: ONNX places attn_mask at input #3 and past_key/past_value at #4/#5. The MLX
 # EP's subgraph builder cannot consume an interior *omitted* optional (it becomes a null value info),
-# so a past-KV node must also supply attn_mask (#3) to stay gap-free. Because MLX fast SDPA cannot mix
-# a causal mode with an array mask, the past-KV cases here are non-causal with an explicit mask (the
-# causal + past decode form is left on CPU — see attention_ext.cc).
+# so a past-KV node must also supply attn_mask (#3) to stay gap-free.
+#
+# `is_causal` together with an explicit mask is the shape exported decoders
+# actually emit (a causal flag plus a padding mask), so it is covered here in
+# both bool and float form, with and without past KV. MLX fast SDPA cannot mix
+# its own causal mode with an array mask, so the EP folds the two into one
+# additive array instead — the cases below are what pins that folding to ORT CPU.
 ATTN_CASES = [
     # name, opset, batch, q_heads, kv_heads, head, seq, past, causal, mask("none"|"float"|"bool"),
     # layout("3d"|"4d")
@@ -146,6 +153,13 @@ ATTN_CASES = [
     ("o24-self-causal-4d", 24, 1, 4, 4, 16, 5, 0, True, "none", "4d"),
     ("o24-gqa-full-4d", 24, 1, 6, 3, 16, 4, 0, False, "none", "4d"),
     ("o24-gqa-floatmask-past-4d", 24, 1, 6, 3, 16, 2, 5, False, "float", "4d"),
+    # Causal *and* masked: what a real exported decoder emits.
+    ("o24-gqa-causal-boolmask-past-3d", 24, 1, 14, 2, 64, 1, 40, True, "bool", "3d"),
+    ("o24-gqa-causal-boolmask-prefill-3d", 24, 1, 14, 2, 64, 6, 0, True, "bool", "3d"),
+    ("o24-gqa-causal-floatmask-past-3d", 24, 1, 4, 2, 16, 3, 8, True, "float", "3d"),
+    ("o24-gqa-causal-boolmask-past-4d", 24, 1, 6, 3, 16, 2, 5, True, "bool", "4d"),
+    ("o24-mha-causal-floatmask-4d", 24, 1, 4, 4, 16, 5, 0, True, "float", "4d"),
+    ("o23-gqa-causal-boolmask-3d", 23, 1, 4, 2, 16, 5, 0, True, "bool", "3d"),
 ]
 
 
@@ -252,3 +266,67 @@ def test_multihead_attention(case: tuple) -> None:
     if not _cpu_supports(model, feeds):
         pytest.skip("ORT CPU EP has no MultiHeadAttention kernel for this build/form")
     check(model, feeds)
+
+
+# --- Claim coverage ------------------------------------------------------------------------------
+# The numeric cases above cannot tell a claimed node from one ORT quietly ran on
+# CPU: a declined node falls back and still produces the right answer. These
+# assert the EP actually took the node, which is the whole point of accepting
+# `is_causal` together with a mask — every attention node in an exported decoder
+# carries both, and declining them leaves the model's whole attention on CPU.
+CLAIM_CASES = [
+    "o24-gqa-causal-boolmask-past-3d",
+    "o24-gqa-causal-floatmask-past-3d",
+    "o24-gqa-causal-boolmask-prefill-3d",
+    "o24-gqa-causal-boolmask-past-4d",
+]
+
+
+# Set in the child process below. Recursion here forks without bound, so the
+# guard is structural rather than left to the selection expression being right.
+_CHILD_ENV = "ONNXRUNTIME_EP_MLX_CLAIM_TEST_CHILD"
+
+
+@pytest.mark.skipif(
+    os.environ.get(_CHILD_ENV) == "1",
+    reason="child process of the claim test: it runs the numeric case, not this",
+)
+@pytest.mark.parametrize("case_id", CLAIM_CASES)
+def test_attention_causal_with_mask_is_claimed(case_id: str, tmp_path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    trace = tmp_path / "trace.json"
+    # A subprocess because the EP reads its trace configuration once per process,
+    # and this suite has already run sessions without it.
+    #
+    # The child is selected by exact node id, never by `-k`. A substring filter
+    # here matches this test as well as the numeric one it means to run, so the
+    # child re-runs *this* test, spawns its own child, and forks without bound —
+    # which is not a slow test but a machine that stops responding.
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            f"{Path(__file__).name}::test_attention[{case_id}]",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ],
+        check=True,
+        env={**os.environ, "ONNXRUNTIME_EP_MLX_TRACE": str(trace), _CHILD_ENV: "1"},
+        cwd=str(Path(__file__).parent),
+        timeout=300,
+    )
+
+    events = json.loads(trace.read_text())
+    claims = [event for event in events if event.get("cat") == "ep.claim"]
+    assert claims, "the EP recorded no capability decision"
+    for claim in claims:
+        args = claim["args"]
+        assert args["unclaimed"] == 0, (
+            f"the EP declined {args['unclaimed']} of {args['total']} node(s): causal "
+            "attention with a mask must be claimed, not left on CPU"
+        )

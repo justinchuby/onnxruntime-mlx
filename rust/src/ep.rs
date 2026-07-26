@@ -185,7 +185,12 @@ unsafe fn get_capability_impl(
             for (&node, &ok) in nodes.iter().zip(supported.iter()) {
                 if !ok {
                     let view = NodeView::new(ep.ort_api, node);
-                    let e = acc.entry(view.op_type()).or_insert((0, String::new(), Vec::new()));
+                    // Keyed by the domain-qualified name: `Attention` exists in
+                    // both the default domain and `com.microsoft`, and merging
+                    // them would report one count for two different ops.
+                    let e = acc
+                        .entry(crate::registry::qualified_op_name(&view))
+                        .or_insert((0, String::new(), Vec::new()));
                     e.0 += 1;
                     if e.1.is_empty() {
                         e.1 = if in_cf_body {

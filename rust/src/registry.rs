@@ -182,6 +182,25 @@ pub fn claim_decision(node: &NodeView) -> ClaimResult {
     }
 }
 
+/// A node's op type, qualified by its domain when it has one.
+///
+/// `Attention`, `MatMulNBits`, and others exist in both the default ONNX domain
+/// and `com.microsoft` with different contracts, so a diagnostic that prints the
+/// bare op type cannot say which one it declined — and grouping counts by that
+/// bare name silently merges two different ops into one line.
+///
+/// The default domain (empty, or the explicit `ai.onnx`) stays unqualified,
+/// because writing `ai.onnx.Softmax` would be noise on the common case.
+pub fn qualified_op_name(node: &NodeView) -> String {
+    let op = node.op_type();
+    let domain = node.domain();
+    if domain.is_empty() || domain == "ai.onnx" {
+        op
+    } else {
+        format!("{domain}.{op}")
+    }
+}
+
 /// Claim-time node predicate consulted from GetCapability. True iff `claim_decision` succeeds.
 pub fn claimable(node: &NodeView) -> bool {
     claim_decision(node).is_ok()
