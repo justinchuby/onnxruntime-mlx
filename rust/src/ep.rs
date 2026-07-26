@@ -637,12 +637,17 @@ unsafe fn build_plan(
             let domain = node_domain(api, node);
             let since_version = node_since_version(api, node);
             let mut nd = NodeDesc::new(op_type, domain, since_version);
+            let tr = crate::trace::tracer();
+            if tr.is_enabled() {
+                nd.node_id = node_id(api, node);
+                nd.name = node_name(api, node);
+            }
 
             collect_attributes(api, node, &mut nd);
 
             // Build-time span so each subgraph's op structure is visible in the trace.
-            let _op_span = crate::trace::tracer().op_span(
-                &nd.op_type,
+            let _op_span = tr.op_span(
+                &nd,
                 node_input_names(api, node).len(),
                 node_output_names(api, node).len(),
             );
@@ -1060,6 +1065,7 @@ unsafe fn build_subgraphs(
             let order = topo_order(api, &bnodes, &producer);
 
             let mut nodes: Vec<NodeDesc> = Vec::with_capacity(bnodes.len());
+            let trace_on = crate::trace::tracer().is_enabled();
             for &idx in &order {
                 let node = bnodes[idx];
                 let mut mnd = NodeDesc::new(
@@ -1067,6 +1073,10 @@ unsafe fn build_subgraphs(
                     node_domain(api, node),
                     node_since_version(api, node),
                 );
+                if trace_on {
+                    mnd.node_id = node_id(api, node);
+                    mnd.name = node_name(api, node);
+                }
                 collect_attributes(api, node, &mut mnd);
 
                 for name in node_input_names(api, node) {
@@ -1192,6 +1202,33 @@ unsafe fn node_op_type(api: &ort::OrtApi, node: *const ort::OrtNode) -> String {
     unsafe {
         let mut p: *const c_char = ptr::null();
         (api.Node_GetOperatorType.unwrap())(node, &mut p);
+        if p.is_null() {
+            String::new()
+        } else {
+            CStr::from_ptr(p).to_string_lossy().into_owned()
+        }
+    }
+}
+
+unsafe fn node_id(api: &ort::OrtApi, node: *const ort::OrtNode) -> usize {
+    unsafe {
+        let mut id: usize = 0;
+        let st = (api.Node_GetId.unwrap())(node, &mut id);
+        if !st.is_null() {
+            release_status(api, st);
+        }
+        id
+    }
+}
+
+unsafe fn node_name(api: &ort::OrtApi, node: *const ort::OrtNode) -> String {
+    unsafe {
+        let mut p: *const c_char = ptr::null();
+        let st = (api.Node_GetName.unwrap())(node, &mut p);
+        if !st.is_null() {
+            release_status(api, st);
+            return String::new();
+        }
         if p.is_null() {
             String::new()
         } else {

@@ -53,6 +53,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::engine::NodeDesc;
 use onnx_runtime_tracer::{Args, MemoryCollector, SpanGuard, TraceContext};
 use std::sync::Arc;
 
@@ -93,6 +94,31 @@ pub const GPU_CAPTURE_EVAL_ENV: &str = "ONNXRUNTIME_EP_MLX_GPU_CAPTURE_EVAL";
 /// full JSON tracing is off. When JSON tracing IS on the summary is always emitted (to
 /// stderr AND as trace metadata). Unset + no JSON trace → nothing printed (zero cost).
 pub const VERBOSE_ENV: &str = "ONNXRUNTIME_EP_MLX_VERBOSE";
+
+/// Shared trace arg key: numeric ONNX Runtime graph node id.
+pub const ARG_NODE_ID: &str = "node_id";
+/// Shared trace arg key: ONNX node name.
+pub const ARG_NODE: &str = "node";
+/// Shared trace arg key: non-default ONNX operator domain.
+pub const ARG_DOMAIN: &str = "domain";
+/// Shared trace arg key: device a kernel ran on.
+pub const ARG_DEVICE: &str = "device";
+/// Shared trace arg key: bytes moved or produced by the recorded kernel/work.
+pub const ARG_BYTES: &str = "bytes";
+/// Shared trace arg key: floating-point operation estimate.
+#[allow(dead_code)]
+pub const ARG_FLOPS: &str = "flops";
+/// Shared trace arg key: selected implementation variant.
+pub const ARG_KERNEL_VARIANT: &str = "kernel_variant";
+/// Shared trace arg key: why the implementation variant was selected.
+pub const ARG_KERNEL_VARIANT_REASON: &str = "kernel_variant_reason";
+/// Shared trace category for one worker slice of a fanned-out op. The MLX EP does
+/// not currently emit this because it serializes CPU translation and dispatches
+/// fused work to MLX/Metal rather than slicing one node across CPU workers.
+#[allow(dead_code)]
+pub const CAT_OP_WORKER: &str = "op.worker";
+
+const DEVICE_METAL: &str = "metal";
 
 /// Which execution path a fused subgraph's Compute took — the "execution-path view".
 /// Mirrors the dispatch order in [`crate::ep`]'s `compute`: compiled decode → compiled
@@ -197,6 +223,24 @@ pub fn tracer() -> &'static MlxTracer {
 
 thread_local! {
     static THREAD_NAMED: Cell<bool> = const { Cell::new(false) };
+}
+
+fn is_default_domain(domain: &str) -> bool {
+    domain.is_empty() || domain == "ai.onnx"
+}
+
+fn standard_op_args(node: &NodeDesc) -> Args {
+    let mut args = Args::new()
+        .with(ARG_NODE_ID, node.node_id as u64)
+        .with(ARG_NODE, node.name.clone())
+        .with(ARG_DEVICE, DEVICE_METAL)
+        // Keep the old key as a compatibility alias; the span name is now the
+        // canonical bare op type for aggregation.
+        .with("op_type", node.op_type.clone());
+    if !is_default_domain(&node.domain) {
+        args = args.with(ARG_DOMAIN, node.domain.clone());
+    }
+    args
 }
 
 /// One sampled counter point (rendered as a Chrome `"C"` phase event at export).
@@ -712,13 +756,12 @@ impl MlxTracer {
     }
 
     /// Lightweight build-time span for one node (records the op structure of a subgraph).
-    pub fn op_span(&self, op_type: &str, num_inputs: usize, num_outputs: usize) -> SpanGuard {
+    pub fn op_span(&self, node: &NodeDesc, num_inputs: usize, num_outputs: usize) -> SpanGuard {
         if !self.is_enabled() {
-            return self.ctx.span(op_type, "op"); // inert guard, no allocation
+            return self.ctx.span(&node.op_type, "op"); // inert guard, no allocation
         }
-        self.ctx.span(op_type.to_string(), "op").with_args(
-            Args::new()
-                .with("op_type", op_type.to_string())
+        self.ctx.span(node.op_type.clone(), "op").with_args(
+            standard_op_args(node)
                 .with("inputs", num_inputs as u64)
                 .with("outputs", num_outputs as u64),
         )
@@ -746,26 +789,28 @@ impl MlxTracer {
     /// * `None` → neutral op, nothing emitted.
     ///
     /// No-op when tracing is disabled.
-    pub fn record_op_path(&self, op_type: &str, start: Option<Instant>, mark: Option<PathMark>) {
+    pub fn record_op_path(&self, node: &NodeDesc, start: Option<Instant>, mark: Option<PathMark>) {
         if !self.is_enabled() {
             return;
         }
         let Some(mark) = mark else {
             return;
         };
+        let op_type = node.op_type.as_str();
         match mark {
             PathMark::Fast(kernel) => {
                 if let Some(start) = start {
                     self.ctx.complete(
-                        format!("{op_type} [fast]"),
+                        op_type.to_string(),
                         "op.fast",
                         start,
                         start.elapsed(),
                         Some(
-                            Args::new()
-                                .with("op_type", op_type.to_string())
+                            standard_op_args(node)
                                 .with("optimized", true)
-                                .with("kernel", kernel),
+                                .with("kernel", kernel)
+                                .with(ARG_KERNEL_VARIANT, kernel)
+                                .with(ARG_KERNEL_VARIANT_REASON, "MLX handler selected fused fast path"),
                         ),
                     );
                 }
@@ -773,13 +818,12 @@ impl MlxTracer {
             PathMark::Composed(reason) => {
                 if let Some(start) = start {
                     self.ctx.complete(
-                        format!("{op_type} [composed]"),
+                        op_type.to_string(),
                         "op.composed",
                         start,
                         start.elapsed(),
                         Some(
-                            Args::new()
-                                .with("op_type", op_type.to_string())
+                            standard_op_args(node)
                                 .with("optimized", false)
                                 .with("reason", reason.clone()),
                         ),
@@ -790,8 +834,7 @@ impl MlxTracer {
                     format!("⚠ composed-path: {op_type} ({reason})"),
                     "op.composed",
                     Some(
-                        Args::new()
-                            .with("op_type", op_type.to_string())
+                        standard_op_args(node)
                             .with("optimized", false)
                             .with("reason", reason),
                     ),
@@ -834,7 +877,7 @@ impl MlxTracer {
     #[allow(clippy::too_many_arguments)]
     pub fn record_op_meta(
         &self,
-        op_type: &str,
+        node: &NodeDesc,
         start: Instant,
         dur: Duration,
         out_shapes: &str,
@@ -847,21 +890,20 @@ impl MlxTracer {
             return;
         }
         self.ctx.complete(
-            op_type.to_string(),
+            node.op_type.clone(),
             "op",
             start,
             dur,
             Some(
-                Args::new()
-                    .with("op_type", op_type.to_string())
+                standard_op_args(node)
                     .with("output_shapes", out_shapes.to_string())
                     .with("input_shapes", in_shapes.to_string())
                     .with("dtype", dtype.to_string())
                     .with("elements", elements)
-                    .with("bytes", bytes),
+                    .with(ARG_BYTES, bytes),
             ),
         );
-        self.record_op_time(op_type, dur.as_micros() as u64);
+        self.record_op_time(&node.op_type, dur.as_micros() as u64);
     }
 
     /// Accumulate one op-type timing sample for the end-of-run slowest-ops summary.

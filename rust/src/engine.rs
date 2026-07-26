@@ -123,6 +123,8 @@ pub struct SubgraphDesc {
 /// One ONNX node with just the metadata the MLX translator needs.
 #[derive(Clone)]
 pub struct NodeDesc {
+    pub node_id: usize,
+    pub name: String,
     pub op_type: String,
     pub domain: String,
     pub since_version: i32,
@@ -143,6 +145,8 @@ pub struct NodeDesc {
 impl NodeDesc {
     pub fn new(op_type: String, domain: String, since_version: i32) -> Self {
         NodeDesc {
+            node_id: 0,
+            name: String::new(),
             op_type,
             domain,
             since_version,
@@ -630,7 +634,7 @@ impl<'a> TranslationContext<'a> {
     /// fused. When [`fine_enabled`](crate::trace::MlxTracer::fine_enabled) is set, additionally
     /// forces an `mlx_array_eval` of this node's outputs to time it individually — a
     /// GPU-inclusive per-op bar that BREAKS fusion (debug-only, slower).
-    pub fn trace_node(&mut self, op_type: &str, node: &NodeDesc, start: Option<std::time::Instant>) {
+    pub fn trace_node(&mut self, _op_type: &str, node: &NodeDesc, start: Option<std::time::Instant>) {
         if !self.trace_enabled {
             return;
         }
@@ -675,7 +679,7 @@ impl<'a> TranslationContext<'a> {
 
         // A build-time span with resource metadata. The fused subgraph runs as a single
         // `mlx.eval` (see finish_boundary); per-kernel GPU detail is the Xcode GPU capture.
-        tr.record_op_meta(op_type, start, start.elapsed(), &out_s, &in_s, dtype, elements, bytes);
+        tr.record_op_meta(node, start, start.elapsed(), &out_s, &in_s, dtype, elements, bytes);
     }
 
     /// Resolve a node input to a raw MLX array handle (intermediate env / wrapped ctx input /

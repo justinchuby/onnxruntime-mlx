@@ -22,6 +22,12 @@ crate-type = ["cdylib"]
 [dependencies]
 # Pure-Rust Chrome/Perfetto tracer, from crates.io. `default-features = false`
 # drops the `perfetto` (prost) feature — we export Chrome Trace JSON only.
+#
+# Timestamps here are still relative to this library's own `TraceClock` epoch,
+# so they cannot yet be laid over a host trace without an offset. The fix lives
+# in the tracer itself (an absolute UNIX-microsecond origin shared by every copy
+# of the crate, including one linked into a plugin dylib) and arrives here on
+# the next published release; nothing in this crate has to change for it.
 onnx-runtime-tracer = { version = "0.1.0-dev.2", default-features = false }
 
 [build-dependencies]
