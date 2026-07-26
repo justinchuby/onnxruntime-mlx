@@ -1176,7 +1176,7 @@ fn check_kv_cache(
     true
 }
 
-/// An attn/attention_bias mask must be bool or the query float dtype.
+/// An attn/attention_bias mask must be bool or an MLX-supported float dtype.
 ///
 /// A mask alongside `is_causal` is accepted: ONNX applies both, and both reduce
 /// to one additive array, so the two are folded together before dispatch (see
