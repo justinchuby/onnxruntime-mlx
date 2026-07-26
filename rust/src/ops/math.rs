@@ -1,10 +1,10 @@
 //! Math / activation op handlers (unary + binary elementwise beyond the core set). Port of the
 //! wave-1 subset of the C++ `ops/math.cc`.
 
-use crate::engine::{mlx_dtype_from_onnx, MlxError, NodeDesc, TranslationContext};
+use crate::engine::{MlxError, NodeDesc, TranslationContext, mlx_dtype_from_onnx};
 use crate::registry::{
-    is_mlx_float, is_signed_integer, scalar_or_suffix_broadcast, ClaimResult, K_ANY_OPSET,
-    NodeView, OpRegistration, OpRegistry,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float,
+    is_signed_integer, scalar_or_suffix_broadcast,
 };
 use crate::sys::mlx;
 use crate::{deny, require};
@@ -260,7 +260,11 @@ fn clip_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         let m = ctx.resolve(&n.inputs[1])?;
         Some(ctx.astype(m, dt)?)
     } else {
-        n.floats.get("min").copied().map(|v| scalar_like(ctx, r, v)).transpose()?
+        n.floats
+            .get("min")
+            .copied()
+            .map(|v| scalar_like(ctx, r, v))
+            .transpose()?
     };
     if let Some(mn) = min_arr {
         r = ctx.binary(mlx::mlx_maximum, r, mn)?;
@@ -270,7 +274,11 @@ fn clip_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         let m = ctx.resolve(&n.inputs[2])?;
         Some(ctx.astype(m, dt)?)
     } else {
-        n.floats.get("max").copied().map(|v| scalar_like(ctx, r, v)).transpose()?
+        n.floats
+            .get("max")
+            .copied()
+            .map(|v| scalar_like(ctx, r, v))
+            .transpose()?
     };
     if let Some(mx) = max_arr {
         r = ctx.binary(mlx::mlx_minimum, r, mx)?;
@@ -495,12 +503,23 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Selu", selu_op, float_unary_claim);
     reg(registry, "Celu", celu_op, float_unary_claim);
     reg(registry, "HardSigmoid", hard_sigmoid_op, float_unary_claim);
-    reg(registry, "ThresholdedRelu", thresholded_relu_op, float_unary_claim);
+    reg(
+        registry,
+        "ThresholdedRelu",
+        thresholded_relu_op,
+        float_unary_claim,
+    );
     reg(registry, "Softplus", softplus_op, float_unary_claim);
     reg(registry, "Softsign", softsign_op, float_unary_claim);
     reg(registry, "Gelu", gelu_op, float_unary_claim);
     // Gelu also ships in the com.microsoft fused-activation domain.
-    reg_dom(registry, "com.microsoft", "Gelu", gelu_op, float_unary_claim);
+    reg_dom(
+        registry,
+        "com.microsoft",
+        "Gelu",
+        gelu_op,
+        float_unary_claim,
+    );
 
     // Clip (min/max as optional inputs or opset<11 attrs).
     reg(registry, "Clip", clip_op, clip_claim);

@@ -2,7 +2,7 @@
 
 use crate::engine::{MlxError, NodeDesc, TranslationContext};
 use crate::registry::{
-    is_mlx_float, is_mlx_supported, ClaimResult, NodeView, OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float, is_mlx_supported,
 };
 use crate::sys::{mlx, ort};
 use crate::{deny, require};

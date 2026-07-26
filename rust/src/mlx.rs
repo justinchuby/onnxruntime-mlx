@@ -59,7 +59,11 @@ impl Array {
 
     /// Wrap host bytes into a new MLX array of `dtype` and the given shape (row-major). MLX copies
     /// the data (managed lifetime), so the source buffer need not outlive the array.
-    pub fn from_data(data: *const std::os::raw::c_void, shape: &[i32], dtype: mlx::mlx_dtype) -> Self {
+    pub fn from_data(
+        data: *const std::os::raw::c_void,
+        shape: &[i32],
+        dtype: mlx::mlx_dtype,
+    ) -> Self {
         let arr = Array {
             raw: unsafe {
                 mlx::mlx_array_new_data(data, shape.as_ptr(), shape.len() as i32, dtype)

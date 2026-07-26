@@ -6,15 +6,15 @@
 //! fresh MLX array (mlx-c exposes no det / argwhere / unique primitive). Only statically
 //! translatable, MLX-supported forms are claimed; every other form is left to ORT CPU.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::Hash;
 use std::os::raw::c_void;
 
 use crate::engine::{MlxError, NodeDesc, Src, TensorRef, TranslationContext};
 use crate::registry::{
-    is_mlx_float, is_mlx_supported, is_signed_integer, ClaimPredicate, ClaimResult, NodeView, OpHandler,
-    OpRegistration, OpRegistry, SlotInfo, K_ANY_OPSET,
+    ClaimPredicate, ClaimResult, K_ANY_OPSET, NodeView, OpHandler, OpRegistration, OpRegistry,
+    SlotInfo, is_mlx_float, is_mlx_supported, is_signed_integer,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -38,7 +38,10 @@ fn present(n: &NodeDesc, i: usize) -> bool {
 }
 
 fn str_attr(n: &NodeDesc, name: &str, dflt: &str) -> String {
-    n.strings.get(name).cloned().unwrap_or_else(|| dflt.to_string())
+    n.strings
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| dflt.to_string())
 }
 
 /// Read a constant scalar int (int32/int64) input at translate time.
@@ -55,7 +58,11 @@ fn read_const_i64(ctx: &TranslationContext, r: &TensorRef) -> Result<i64, MlxErr
 }
 
 /// A kept scalar of `val` cast to `x`'s dtype (keeps an int graph in its own dtype).
-fn scalar_like(ctx: &mut TranslationContext, val: i64, x: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+fn scalar_like(
+    ctx: &mut TranslationContext,
+    val: i64,
+    x: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
     let s = ctx.scalar_i64(val);
     ctx.astype(s, ctx.dtype_of(x))
 }
@@ -79,7 +86,11 @@ fn constant_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErro
     } else if let Some(values) = n.int_arrays.get("value_ints") {
         ctx.from_host_i64(values, &[values.len() as i32])
     } else if let Some(values) = n.float_arrays.get("value_floats") {
-        ctx.from_host(values.as_ptr() as *const c_void, &[values.len() as i32], F32)
+        ctx.from_host(
+            values.as_ptr() as *const c_void,
+            &[values.len() as i32],
+            F32,
+        )
     } else {
         return Err("MLX: Constant attribute form is not supported".to_string());
     };
@@ -88,15 +99,21 @@ fn constant_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErro
 }
 
 fn constant_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_inputs() == 0 && node.num_outputs() == 1,
-        "expects 0 inputs and 1 output, got {}in/{}out", node.num_inputs(), node.num_outputs());
+    require!(
+        node.num_inputs() == 0 && node.num_outputs() == 1,
+        "expects 0 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
     let out = match node.output_info(0) {
         Some(i) if static_tensor(&i) => i,
         Some(_) => deny!("output shape must be static"),
         None => deny!("missing output type/shape info"),
     };
-    require!(!node.has_attr("value") && !node.has_attr("sparse_value"),
-        "tensor and sparse Constant value forms are not supported");
+    require!(
+        !node.has_attr("value") && !node.has_attr("sparse_value"),
+        "tensor and sparse Constant value forms are not supported"
+    );
     struct Form {
         name: &'static str,
         attr_type: ort::OrtOpAttrType,
@@ -104,10 +121,30 @@ fn constant_claim(node: &NodeView) -> ClaimResult {
         scalar: bool,
     }
     let forms = [
-        Form { name: "value_int", attr_type: ort::OrtOpAttrType_ORT_OP_ATTR_INT, out_type: T_INT64, scalar: true },
-        Form { name: "value_float", attr_type: ort::OrtOpAttrType_ORT_OP_ATTR_FLOAT, out_type: T_FLOAT, scalar: true },
-        Form { name: "value_ints", attr_type: ort::OrtOpAttrType_ORT_OP_ATTR_INTS, out_type: T_INT64, scalar: false },
-        Form { name: "value_floats", attr_type: ort::OrtOpAttrType_ORT_OP_ATTR_FLOATS, out_type: T_FLOAT, scalar: false },
+        Form {
+            name: "value_int",
+            attr_type: ort::OrtOpAttrType_ORT_OP_ATTR_INT,
+            out_type: T_INT64,
+            scalar: true,
+        },
+        Form {
+            name: "value_float",
+            attr_type: ort::OrtOpAttrType_ORT_OP_ATTR_FLOAT,
+            out_type: T_FLOAT,
+            scalar: true,
+        },
+        Form {
+            name: "value_ints",
+            attr_type: ort::OrtOpAttrType_ORT_OP_ATTR_INTS,
+            out_type: T_INT64,
+            scalar: false,
+        },
+        Form {
+            name: "value_floats",
+            attr_type: ort::OrtOpAttrType_ORT_OP_ATTR_FLOATS,
+            out_type: T_FLOAT,
+            scalar: false,
+        },
     ];
     let mut matched = 0;
     for f in &forms {
@@ -116,7 +153,11 @@ fn constant_claim(node: &NodeView) -> ClaimResult {
             continue;
         }
         if at != f.attr_type || out.dtype != f.out_type {
-            deny!("attribute {} has incompatible type or output dtype {}", f.name, crate::registry::ort_dtype_name(out.dtype));
+            deny!(
+                "attribute {} has incompatible type or output dtype {}",
+                f.name,
+                crate::registry::ort_dtype_name(out.dtype)
+            );
         }
         if f.scalar {
             if !out.shape.is_empty() {
@@ -127,7 +168,10 @@ fn constant_claim(node: &NodeView) -> ClaimResult {
         }
         matched += 1;
     }
-    require!(matched == 1, "requires exactly one supported scalar or list value attribute");
+    require!(
+        matched == 1,
+        "requires exactly one supported scalar or list value attribute"
+    );
     Ok(())
 }
 
@@ -145,7 +189,8 @@ fn one_hot_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError
     }
 
     let idt = ctx.dtype_of(indices);
-    let categories = ctx.emit(|res, s| unsafe { mlx::mlx_arange(res, 0.0, depth as f64, 1.0, idt, s) })?;
+    let categories =
+        ctx.emit(|res, s| unsafe { mlx::mlx_arange(res, 0.0, depth as f64, 1.0, idt, s) })?;
     let mut cat_shape = vec![1i32; output_rank as usize];
     cat_shape[axis as usize] = depth;
     let categories = ctx.reshape(categories, &cat_shape)?;
@@ -154,7 +199,8 @@ fn one_hot_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError
     let negative = ctx.binary(mlx::mlx_less, indices, zero)?;
     let depth_s = scalar_like(ctx, depth as i64, indices)?;
     let wrapped = ctx.add(indices, depth_s)?;
-    let normalized = ctx.emit(|res, s| unsafe { mlx::mlx_where(res, negative, wrapped, indices, s) })?;
+    let normalized =
+        ctx.emit(|res, s| unsafe { mlx::mlx_where(res, negative, wrapped, indices, s) })?;
 
     let expanded = ctx.expand_dims(normalized, axis)?;
     let selected = ctx.binary(mlx::mlx_equal, expanded, categories)?;
@@ -177,20 +223,30 @@ fn is_boundary_value_type(t: ort::ONNXTensorElementDataType) -> bool {
 }
 
 fn one_hot_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_inputs() == 3 && node.num_outputs() == 1,
-        "expects 3 inputs and 1 output, got {}in/{}out", node.num_inputs(), node.num_outputs());
-    let (indices, depth, values, out) =
-        match (node.input_info(0), node.input_info(1), node.input_info(2), node.output_info(0)) {
-            (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
-            _ => deny!("missing tensor type/shape info on an input or the output"),
-        };
+    require!(
+        node.num_inputs() == 3 && node.num_outputs() == 1,
+        "expects 3 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (indices, depth, values, out) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.output_info(0),
+    ) {
+        (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
+        _ => deny!("missing tensor type/shape info on an input or the output"),
+    };
     if !is_int_index(indices.dtype)
         || depth.dtype != T_INT64
         || values.shape != [2]
         || values.dtype != out.dtype
         || !is_boundary_value_type(values.dtype)
     {
-        deny!("indices must be int32/int64; depth int64; values a 2-element supported dtype matching output");
+        deny!(
+            "indices must be int32/int64; depth int64; values a 2-element supported dtype matching output"
+        );
     }
     let depth_val = match node.const_scalar_i64(1) {
         Some(d) if d > 0 => d,
@@ -202,11 +258,16 @@ fn one_hot_claim(node: &NodeView) -> ClaimResult {
         axis += output_rank;
     }
     if axis < 0 || axis >= output_rank || out.shape.len() as i64 != output_rank {
-        deny!("axis must be in output rank and output shape must equal indices shape with depth inserted");
+        deny!(
+            "axis must be in output rank and output shape must equal indices shape with depth inserted"
+        );
     }
     let mut expected = indices.shape.clone();
     expected.insert(axis as usize, depth_val);
-    require!(expected == out.shape, "output shape must equal indices shape with depth inserted at axis");
+    require!(
+        expected == out.shape,
+        "output shape must equal indices shape with depth inserted at axis"
+    );
     Ok(())
 }
 
@@ -234,8 +295,11 @@ fn trilu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
 
 fn trilu_claim(node: &NodeView) -> ClaimResult {
     let ni = node.num_inputs();
-    require!((1..=2).contains(&ni) && node.num_outputs() == 1,
-        "expects 1 or 2 inputs and 1 output, got {ni}in/{}out", node.num_outputs());
+    require!(
+        (1..=2).contains(&ni) && node.num_outputs() == 1,
+        "expects 1 or 2 inputs and 1 output, got {ni}in/{}out",
+        node.num_outputs()
+    );
     let (x, out) = match (node.input_info(0), node.output_info(0)) {
         (Some(a), Some(b)) => (a, b),
         _ => deny!("missing tensor type/shape info on input or output"),
@@ -271,29 +335,50 @@ fn scatter_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError
     let dim_s = ctx.scalar_i32(dim);
     let wrapped = ctx.add(idx, dim_s)?;
     let norm = ctx.emit(|res, s| unsafe { mlx::mlx_where(res, neg, wrapped, idx, s) })?;
-    let r = ctx.emit(|res, s| unsafe { mlx::mlx_put_along_axis(res, data, norm, updates, axis, s) })?;
+    let r =
+        ctx.emit(|res, s| unsafe { mlx::mlx_put_along_axis(res, data, norm, updates, axis, s) })?;
     let cont = ctx.contiguous(r)?;
     ctx.bind(&n.outputs[0], cont);
     Ok(())
 }
 
 fn scatter_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_inputs() == 3 && node.num_outputs() == 1,
-        "expects 3 inputs and 1 output, got {}in/{}out", node.num_inputs(), node.num_outputs());
-    let (data, indices, updates, out) =
-        match (node.input_info(0), node.input_info(1), node.input_info(2), node.output_info(0)) {
-            (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
-            _ => deny!("missing tensor type/shape info on an input or the output"),
-        };
-    if !static_tensor(&data) || !static_tensor(&indices) || !static_tensor(&updates) || !static_tensor(&out) {
+    require!(
+        node.num_inputs() == 3 && node.num_outputs() == 1,
+        "expects 3 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (data, indices, updates, out) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.output_info(0),
+    ) {
+        (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
+        _ => deny!("missing tensor type/shape info on an input or the output"),
+    };
+    if !static_tensor(&data)
+        || !static_tensor(&indices)
+        || !static_tensor(&updates)
+        || !static_tensor(&out)
+    {
         deny!("all input and output shapes must be static");
     }
-    require!(is_mlx_float(data.dtype) && is_int_index(indices.dtype)
-        && updates.dtype == data.dtype && out.dtype == data.dtype,
-        "data/updates/output must share a float dtype and indices must be int32/int64");
-    require!(!data.shape.is_empty() && indices.shape == updates.shape
-        && indices.shape.len() == data.shape.len() && out.shape == data.shape,
-        "data must be non-scalar; indices/updates ranks and shapes must match; output must match data");
+    require!(
+        is_mlx_float(data.dtype)
+            && is_int_index(indices.dtype)
+            && updates.dtype == data.dtype
+            && out.dtype == data.dtype,
+        "data/updates/output must share a float dtype and indices must be int32/int64"
+    );
+    require!(
+        !data.shape.is_empty()
+            && indices.shape == updates.shape
+            && indices.shape.len() == data.shape.len()
+            && out.shape == data.shape,
+        "data must be non-scalar; indices/updates ranks and shapes must match; output must match data"
+    );
     Ok(())
 }
 
@@ -359,8 +444,12 @@ fn det_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
 }
 
 fn det_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_inputs() == 1 && node.num_outputs() == 1,
-        "expects 1 input and 1 output, got {}in/{}out", node.num_inputs(), node.num_outputs());
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "expects 1 input and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
     let (x, out) = match (node.input_info(0), node.output_info(0)) {
         (Some(a), Some(b)) => (a, b),
         _ => deny!("missing tensor type/shape info on input or output"),
@@ -369,8 +458,10 @@ fn det_claim(node: &NodeView) -> ClaimResult {
         deny!("input shape must be static and input/output must share a float dtype");
     }
     let rank = x.shape.len();
-    require!(rank >= 2 && x.shape[rank - 1] > 0 && x.shape[rank - 1] == x.shape[rank - 2],
-        "input must end in non-empty square matrix dimensions");
+    require!(
+        rank >= 2 && x.shape[rank - 1] > 0 && x.shape[rank - 1] == x.shape[rank - 2],
+        "input must end in non-empty square matrix dimensions"
+    );
     Ok(())
 }
 
@@ -408,20 +499,28 @@ fn nonzero_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError
         }
         col += 1;
     }
-    let res = ctx.from_host(out.as_ptr() as *const c_void, &[rank as i32, nnz as i32], I64);
+    let res = ctx.from_host(
+        out.as_ptr() as *const c_void,
+        &[rank as i32, nnz as i32],
+        I64,
+    );
     ctx.bind(&n.outputs[0], res);
     Ok(())
 }
 
 fn nonzero_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_inputs() == 1 && node.num_outputs() == 1,
-        "NonZero: data-dependent output shape with no MLX primitive — stays on CPU");
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "NonZero: data-dependent output shape with no MLX primitive — stays on CPU"
+    );
     let (x, out) = match (node.input_info(0), node.output_info(0)) {
         (Some(a), Some(b)) => (a, b),
         _ => deny!("NonZero: data-dependent output shape with no MLX primitive — stays on CPU"),
     };
-    require!(is_mlx_supported(x.dtype) && out.dtype == T_INT64 && !x.shape.is_empty(),
-        "NonZero: data-dependent output shape with no MLX primitive — stays on CPU");
+    require!(
+        is_mlx_supported(x.dtype) && out.dtype == T_INT64 && !x.shape.is_empty(),
+        "NonZero: data-dependent output shape with no MLX primitive — stays on CPU"
+    );
     Ok(())
 }
 
@@ -454,7 +553,9 @@ fn unique_groups<T: Copy + PartialOrd + Eq + Hash>(
         cnt[g] += 1;
     }
     finalize_groups(vals.len(), &first, &cnt, &group_of, n, sorted, |a, b| {
-        vals[a].partial_cmp(&vals[b]).unwrap_or(std::cmp::Ordering::Equal)
+        vals[a]
+            .partial_cmp(&vals[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
     })
 }
 
@@ -514,7 +615,9 @@ fn unique_groups_f32(vals: &[f32], sorted: bool) -> (Vec<i32>, Vec<i64>, Vec<i64
         cnt[g] += 1;
     }
     finalize_groups(uvals.len(), &first, &cnt, &group_of, n, sorted, |a, b| {
-        uvals[a].partial_cmp(&uvals[b]).unwrap_or(std::cmp::Ordering::Equal)
+        uvals[a]
+            .partial_cmp(&uvals[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
     })
 }
 
@@ -561,16 +664,22 @@ fn bind_i64_opt(ctx: &mut TranslationContext, n: &NodeDesc, slot: usize, data: &
 
 fn unique_claim(node: &NodeView) -> ClaimResult {
     let no = node.num_outputs();
-    require!(node.num_inputs() == 1 && (1..=4).contains(&no),
-        "Unique: data-dependent output shape with no MLX primitive — stays on CPU");
-    require!(!node.has_attr("axis"),
-        "Unique: data-dependent output shape with no MLX primitive — stays on CPU");
+    require!(
+        node.num_inputs() == 1 && (1..=4).contains(&no),
+        "Unique: data-dependent output shape with no MLX primitive — stays on CPU"
+    );
+    require!(
+        !node.has_attr("axis"),
+        "Unique: data-dependent output shape with no MLX primitive — stays on CPU"
+    );
     let x = match node.input_info(0) {
         Some(i) if !i.shape.is_empty() => i,
         _ => deny!("Unique: data-dependent output shape with no MLX primitive — stays on CPU"),
     };
-    require!(x.dtype == T_FLOAT || x.dtype == T_INT32 || x.dtype == T_INT64,
-        "Unique: data-dependent output shape with no MLX primitive — stays on CPU");
+    require!(
+        x.dtype == T_FLOAT || x.dtype == T_INT32 || x.dtype == T_INT64,
+        "Unique: data-dependent output shape with no MLX primitive — stays on CPU"
+    );
     Ok(())
 }
 
@@ -584,9 +693,16 @@ fn optional_has_element_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result
 }
 
 fn optional_has_element_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_inputs() == 1 && node.num_outputs() == 1,
-        "expects 1 input and 1 output, got {}in/{}out", node.num_inputs(), node.num_outputs());
-    require!(node.input_info(0).is_some(), "only tensor-present Optional forms are supported");
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "expects 1 input and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    require!(
+        node.input_info(0).is_some(),
+        "only tensor-present Optional forms are supported"
+    );
     Ok(())
 }
 
@@ -597,12 +713,16 @@ fn optional_get_element_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result
 }
 
 fn optional_get_element_claim(node: &NodeView) -> ClaimResult {
-    require!(node.num_inputs() == 1 && node.num_outputs() == 1 && node.input_present(0),
-        "requires one present input and one output");
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1 && node.input_present(0),
+        "requires one present input and one output"
+    );
     match (node.input_info(0), node.output_info(0)) {
         (Some(a), Some(b)) => {
-            require!(is_mlx_supported(a.dtype) && b.dtype == a.dtype,
-                "input/output must share an MLX-supported dtype");
+            require!(
+                is_mlx_supported(a.dtype) && b.dtype == a.dtype,
+                "input/output must share an MLX-supported dtype"
+            );
             Ok(())
         }
         _ => deny!("missing tensor type/shape info on input or output"),
@@ -612,7 +732,11 @@ fn optional_get_element_claim(node: &NodeView) -> ClaimResult {
 // =============================================================================================
 // NegativeLogLikelihoodLoss / SoftmaxCrossEntropyLoss.
 // =============================================================================================
-fn loss_common(ctx: &mut TranslationContext, n: &NodeDesc, apply_log_softmax: bool) -> Result<(), MlxError> {
+fn loss_common(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    apply_log_softmax: bool,
+) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
     let t = ctx.resolve(&n.inputs[1])?;
     let fdt = ctx.dtype_of(x);
@@ -639,7 +763,8 @@ fn loss_common(ctx: &mut TranslationContext, n: &NodeDesc, apply_log_softmax: bo
     }
 
     let idx_e = ctx.expand_dims(safe_t, 1)?;
-    let gathered = ctx.emit(|res, s| unsafe { mlx::mlx_take_along_axis(res, logp, idx_e, 1, s) })?;
+    let gathered =
+        ctx.emit(|res, s| unsafe { mlx::mlx_take_along_axis(res, logp, idx_e, 1, s) })?;
     let picked = ctx.squeeze(gathered, 1)?;
     let mut loss = ctx.emit(|res, s| unsafe { mlx::mlx_negative(res, picked, s) })?;
 
@@ -699,13 +824,18 @@ fn loss_claim(node: &NodeView, sce: bool) -> ClaimResult {
     require!((2..=3).contains(&ni), "expects 2 or 3 inputs, got {ni}");
     let max_out = if sce { 2 } else { 1 };
     let no = node.num_outputs();
-    require!(no >= 1 && no <= max_out, "expects 1 to {max_out} outputs, got {no}");
+    require!(
+        no >= 1 && no <= max_out,
+        "expects 1 to {max_out} outputs, got {no}"
+    );
     let (x, t) = match (node.input_info(0), node.input_info(1)) {
         (Some(a), Some(b)) => (a, b),
         _ => deny!("missing tensor type/shape info on an input"),
     };
-    require!(is_mlx_float(x.dtype) && is_int_index(t.dtype) && x.shape.len() >= 2,
-        "scores must be rank >= 2 float and targets must be int32/int64");
+    require!(
+        is_mlx_float(x.dtype) && is_int_index(t.dtype) && x.shape.len() >= 2,
+        "scores must be rank >= 2 float and targets must be int32/int64"
+    );
     if node.input_present(2) {
         match node.input_info(2) {
             Some(w) if w.dtype == x.dtype && w.shape.len() == 1 => {}
@@ -713,8 +843,10 @@ fn loss_claim(node: &NodeView, sce: bool) -> ClaimResult {
         }
     }
     let reduction = node.string_attr("reduction", "mean");
-    require!(reduction == "mean" || reduction == "sum" || reduction == "none",
-        "reduction must be mean, sum, or none (got {reduction})");
+    require!(
+        reduction == "mean" || reduction == "sum" || reduction == "none",
+        "reduction must be mean, sum, or none (got {reduction})"
+    );
     Ok(())
 }
 
@@ -736,19 +868,82 @@ fn reg(
     handler: OpHandler,
     claim: ClaimPredicate,
 ) {
-    registry.register(OpRegistration { domain: "", op_type, min_opset, max_opset, handler, claim });
+    registry.register(OpRegistration {
+        domain: "",
+        op_type,
+        min_opset,
+        max_opset,
+        handler,
+        claim,
+    });
 }
 
 pub fn register(registry: &mut OpRegistry) {
-    reg(registry, "Constant", K_ANY_OPSET, K_ANY_OPSET, constant_op, constant_claim);
-    reg(registry, "OneHot", 9, K_ANY_OPSET, one_hot_op, one_hot_claim);
+    reg(
+        registry,
+        "Constant",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        constant_op,
+        constant_claim,
+    );
+    reg(
+        registry,
+        "OneHot",
+        9,
+        K_ANY_OPSET,
+        one_hot_op,
+        one_hot_claim,
+    );
     reg(registry, "Trilu", 14, K_ANY_OPSET, trilu_op, trilu_claim);
     reg(registry, "Scatter", 9, 10, scatter_op, scatter_claim);
     reg(registry, "Det", K_ANY_OPSET, K_ANY_OPSET, det_op, det_claim);
-    reg(registry, "NonZero", K_ANY_OPSET, K_ANY_OPSET, nonzero_op, nonzero_claim);
-    reg(registry, "Unique", K_ANY_OPSET, K_ANY_OPSET, unique_op, unique_claim);
-    reg(registry, "OptionalHasElement", K_ANY_OPSET, K_ANY_OPSET, optional_has_element_op, optional_has_element_claim);
-    reg(registry, "OptionalGetElement", K_ANY_OPSET, K_ANY_OPSET, optional_get_element_op, optional_get_element_claim);
-    reg(registry, "NegativeLogLikelihoodLoss", K_ANY_OPSET, K_ANY_OPSET, nll_loss_op, nll_loss_claim);
-    reg(registry, "SoftmaxCrossEntropyLoss", K_ANY_OPSET, K_ANY_OPSET, sce_loss_op, sce_loss_claim);
+    reg(
+        registry,
+        "NonZero",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        nonzero_op,
+        nonzero_claim,
+    );
+    reg(
+        registry,
+        "Unique",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        unique_op,
+        unique_claim,
+    );
+    reg(
+        registry,
+        "OptionalHasElement",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        optional_has_element_op,
+        optional_has_element_claim,
+    );
+    reg(
+        registry,
+        "OptionalGetElement",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        optional_get_element_op,
+        optional_get_element_claim,
+    );
+    reg(
+        registry,
+        "NegativeLogLikelihoodLoss",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        nll_loss_op,
+        nll_loss_claim,
+    );
+    reg(
+        registry,
+        "SoftmaxCrossEntropyLoss",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        sce_loss_op,
+        sce_loss_claim,
+    );
 }

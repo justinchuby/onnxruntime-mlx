@@ -4,7 +4,7 @@
 //! ORT is pointer-identical to our `*MlxEpFactory` (repr(C), offset 0). We fill
 //! only the entry points we need; everything else stays `None` (zeroed).
 
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{CString, c_char, c_void};
 use std::ptr;
 
 use crate::ep::MlxEp;
@@ -102,7 +102,12 @@ unsafe extern "C" fn get_supported_devices(
     unsafe {
         crate::guard_ffi_status(api, "get_supported_devices", || {
             get_supported_devices_impl(
-                p, devices, num_devices, ep_devices, max_ep_devices, num_ep_devices,
+                p,
+                devices,
+                num_devices,
+                ep_devices,
+                max_ep_devices,
+                num_ep_devices,
             )
         })
     }
@@ -141,13 +146,7 @@ unsafe fn get_supported_devices_impl(
 
         let mut ep_device: *mut ort::OrtEpDevice = ptr::null_mut();
         let create = ep_api.CreateEpDevice.unwrap();
-        let st = create(
-            p,
-            selected,
-            ptr::null(),
-            ptr::null(),
-            &mut ep_device,
-        );
+        let st = create(p, selected, ptr::null(), ptr::null(), &mut ep_device);
         if !st.is_null() {
             return st;
         }
@@ -176,7 +175,15 @@ unsafe extern "C" fn create_ep(
     let api = unsafe { (*this(p)).ort_api };
     unsafe {
         crate::guard_ffi_status(api, "create_ep", || {
-            create_ep_impl(p, devices, ep_metadata, num_devices, session_options, logger, ep)
+            create_ep_impl(
+                p,
+                devices,
+                ep_metadata,
+                num_devices,
+                session_options,
+                logger,
+                ep,
+            )
         })
     }
 }

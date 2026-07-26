@@ -4,11 +4,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::engine::{mlx_dtype_from_onnx, MlxError, NodeDesc, TranslationContext};
+use crate::engine::{MlxError, NodeDesc, TranslationContext, mlx_dtype_from_onnx};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
-    is_mlx_float, is_mlx_supported, ClaimPredicate, ClaimResult, NodeView, OpHandler,
-    OpRegistration, OpRegistry, K_ANY_OPSET,
+    ClaimPredicate, ClaimResult, K_ANY_OPSET, NodeView, OpHandler, OpRegistration, OpRegistry,
+    is_mlx_float, is_mlx_supported,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -439,8 +439,7 @@ fn parse_einsum(raw: &str) -> Option<(Vec<String>, String)> {
     }
     let simple = |t: &str| -> bool {
         let mut seen = HashSet::new();
-        t.chars()
-            .all(|c| c.is_ascii_lowercase() && seen.insert(c))
+        t.chars().all(|c| c.is_ascii_lowercase() && seen.insert(c))
     };
     if !simple(&output) || !terms.iter().all(|t| simple(t)) {
         return None;
