@@ -185,6 +185,34 @@ fn hard_sigmoid_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), Mlx
     bind_as_out(ctx, n, r)
 }
 
+/// Swish: `x * sigmoid(alpha * x)`.
+///
+/// Standard ONNX since opset 24. `alpha` defaults to 1.0, which is SiLU --
+/// the activation every modern gated MLP uses. Worth claiming rather than
+/// leaving to the host: declining a node in the middle of a decoder splits the
+/// surrounding subgraph in two, so the cost is not the activation itself but
+/// the boundary crossings it forces on either side.
+///
+/// Composed from `sigmoid` and `multiply` rather than called directly. MLX has
+/// a SiLU, but in its `nn` layer; `mlx-c`, which this EP binds, exports no
+/// activation functions at all -- not even gelu or relu -- so every activation
+/// here is built from the primitives above. MLX fuses the graph it is handed,
+/// so this is a description of the computation rather than two kernel launches.
+fn swish_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let alpha = n.floats.get("alpha").copied().unwrap_or(1.0);
+    // The alpha=1 case is the common one and needs no multiply at all.
+    let scaled = if alpha == 1.0 {
+        x
+    } else {
+        let alpha_s = scalar_like(ctx, x, alpha)?;
+        ctx.binary(mlx::mlx_multiply, x, alpha_s)?
+    };
+    let gate = ctx.unary(mlx::mlx_sigmoid, scaled)?;
+    let r = ctx.binary(mlx::mlx_multiply, x, gate)?;
+    bind_as_out(ctx, n, r)
+}
+
 /// ThresholdedRelu: `x > alpha ? x : 0`.
 fn thresholded_relu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
@@ -503,6 +531,7 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Selu", selu_op, float_unary_claim);
     reg(registry, "Celu", celu_op, float_unary_claim);
     reg(registry, "HardSigmoid", hard_sigmoid_op, float_unary_claim);
+    reg(registry, "Swish", swish_op, float_unary_claim);
     reg(
         registry,
         "ThresholdedRelu",
