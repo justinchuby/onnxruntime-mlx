@@ -114,6 +114,10 @@ ACT_CASES = [
     ("ThresholdedRelu", {"alpha": 0.6}),
     ("Gelu", {}),
     ("Gelu", {"approximate": "tanh"}),
+    # Swish is opset 24. alpha defaults to 1, which is SiLU -- the activation
+    # a gated MLP uses on every decode step.
+    ("Swish", {}),
+    ("Swish", {"alpha": 1.7}),
 ]
 
 
