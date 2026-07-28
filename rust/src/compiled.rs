@@ -671,7 +671,7 @@ extern "C" fn trace_thunk(
             // Correctness fallback (compiled trace failed → eager). Env-gated so a traced-off run
             // stays silent; the eager path still produces the correct result.
             if crate::trace::tracer().active() {
-                eprintln!("[rust-mlx-ep] compiled trace failed ({e}); falling back to eager");
+                log::debug!("compiled trace failed ({e}); falling back to eager");
             }
             1
         }
@@ -680,8 +680,8 @@ extern "C" fn trace_thunk(
             // decline above — never keep it silent, even with tracing off. The eager path below
             // still produces a correct result.
             let detail = crate::panic_payload_message(&payload);
-            eprintln!(
-                "[onnxruntime-mlx] WARNING: compiled trace panicked ({detail}); falling back to the eager path (result still correct)"
+            log::warn!(
+                "compiled trace panicked ({detail}); falling back to the eager path (result still correct)"
             );
             1
         }

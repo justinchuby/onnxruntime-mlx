@@ -658,7 +658,7 @@ impl MlxTracer {
         }
 
         let mut out = String::new();
-        out.push_str("[rust-mlx-ep] ===== MLX EP session summary =====\n");
+        out.push_str("===== MLX EP session summary =====\n");
 
         // Claiming view.
         let claim_pct = if s.total_nodes > 0 {
@@ -716,9 +716,9 @@ impl MlxTracer {
             out.push_str(&parts.join(", "));
             out.push('\n');
         }
-        out.push_str("[rust-mlx-ep] ===================================\n");
+        out.push_str("===================================");
 
-        eprint!("{out}");
+        log::info!("{out}");
 
         if self.is_enabled() {
             let args = Args::new()
@@ -981,7 +981,7 @@ impl MlxTracer {
 
         let mut lines = String::new();
         lines.push_str(&format!(
-            "[rust-mlx-ep] slowest ops ({kind}), total {total} us across {} op-type(s):\n",
+            "slowest ops ({kind}), total {total} us across {} op-type(s):\n",
             ranked.len()
         ));
         let mut args = Args::new()
@@ -1002,7 +1002,7 @@ impl MlxTracer {
                 format!("{us}us {pct:.1}% x{calls}"),
             );
         }
-        eprint!("{lines}");
+        log::info!("{lines}");
         self.ctx.instant("mlx.slowest_ops", "summary", Some(args));
     }
 
@@ -1028,8 +1028,8 @@ impl MlxTracer {
             return None;
         }
         if !metal_capture::is_available() {
-            eprintln!(
-                "[rust-mlx-ep] GPU capture requested but Metal is unavailable (mlx_metal_is_available=false); skipping"
+            log::warn!(
+                "GPU capture requested but Metal is unavailable (mlx_metal_is_available=false); skipping"
             );
             return None;
         }
@@ -1042,8 +1042,8 @@ impl MlxTracer {
             .map(|v| v == "1")
             .unwrap_or(false);
         if !capture_layer_on {
-            eprintln!(
-                "[rust-mlx-ep] GPU capture requires MTL_CAPTURE_ENABLED=1 to be exported before the \
+            log::warn!(
+                "GPU capture requires MTL_CAPTURE_ENABLED=1 to be exported before the \
                  process starts (the Metal capture layer must be inserted at device creation); \
                  skipping capture. Re-run with: MTL_CAPTURE_ENABLED=1 ONNXRUNTIME_EP_MLX_GPU_CAPTURE={} ...",
                 path.to_string_lossy()
@@ -1052,14 +1052,14 @@ impl MlxTracer {
         }
         let path_str = path.to_string_lossy().to_string();
         if metal_capture::start(&path_str) {
-            eprintln!(
-                "[rust-mlx-ep] Metal GPU capture STARTED → {path_str} (eval #{})",
+            log::info!(
+                "Metal GPU capture STARTED → {path_str} (eval #{})",
                 self.capture_eval_target
             );
             Some(CaptureGuard { path: path_str })
         } else {
-            eprintln!(
-                "[rust-mlx-ep] GPU capture start FAILED for {path_str} \
+            log::warn!(
+                "GPU capture start FAILED for {path_str} \
                  (capture requires MTL_CAPTURE_ENABLED=1 in the environment and a path ending in .gputrace)"
             );
             None
@@ -1179,16 +1179,13 @@ impl MlxTracer {
         }
 
         match std::fs::write(path, &out) {
-            Ok(()) => eprintln!(
-                "[rust-mlx-ep] wrote MLX trace ({} span event(s), {} counter sample(s)) to {}",
+            Ok(()) => log::info!(
+                "wrote MLX trace ({} span event(s), {} counter sample(s)) to {}",
                 mem.len(),
                 counters.len(),
                 path.display()
             ),
-            Err(e) => eprintln!(
-                "[rust-mlx-ep] trace export to {} failed: {e}",
-                path.display()
-            ),
+            Err(e) => log::error!("trace export to {} failed: {e}", path.display()),
         }
     }
 }
@@ -1240,9 +1237,10 @@ pub struct CaptureGuard {
 impl Drop for CaptureGuard {
     fn drop(&mut self) {
         metal_capture::stop();
-        eprintln!(
-            "[rust-mlx-ep] Metal GPU capture STOPPED → wrote {} (open in Xcode: `open {}`)",
-            self.path, self.path
+        log::info!(
+            "Metal GPU capture STOPPED → wrote {} (open in Xcode: `open {}`)",
+            self.path,
+            self.path
         );
     }
 }
