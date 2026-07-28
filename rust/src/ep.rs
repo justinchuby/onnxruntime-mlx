@@ -221,7 +221,7 @@ unsafe fn get_capability_impl(
             rejected.sort_by_key(|a| std::cmp::Reverse(a.1));
             if std::env::var_os("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG").is_some() {
                 for (op, n, why, names) in &rejected {
-                    eprintln!("[rust-mlx-ep] unclaimed {op} x{n} ({why}): {names:?}");
+                    log::debug!("unclaimed {op} x{n} ({why}): {names:?}");
                 }
             }
         }

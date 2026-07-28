@@ -21,6 +21,7 @@ mod compiled;
 mod engine;
 mod ep;
 mod factory;
+mod logging;
 mod mlx;
 mod ops;
 mod registry;
@@ -51,8 +52,8 @@ pub(crate) unsafe fn guard_ffi_status(
             let detail = panic_payload_message(&payload);
             // Never be silent on a caught panic — surface it on stderr regardless of the host's
             // panic hook, then hand ORT an error so it can recover on the CPU EP.
-            eprintln!(
-                "[onnxruntime-mlx] ERROR: caught a panic in {what}: {detail} — returning EP_FAIL; \
+            log::error!(
+                "caught a panic in {what}: {detail} — returning EP_FAIL; \
                  ORT will fall back to the CPU EP (host process protected)."
             );
             if api.is_null() {
@@ -97,6 +98,7 @@ pub unsafe extern "C" fn CreateEpFactories(
 ) -> *mut ort::OrtStatus {
     // Derive a status-capable API up front (outside the guard) so a caught panic can still be
     // reported: prefer the requested version, fall back to the legacy v1 API for the status.
+    logging::init();
     let api_for_status: *const ort::OrtApi = unsafe {
         let get_api = (*ort_api_base).GetApi.unwrap();
         let a = get_api(factory::ORT_API_VERSION);

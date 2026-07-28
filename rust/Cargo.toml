@@ -20,6 +20,16 @@ name = "onnxruntime_mlx_ep"
 crate-type = ["cdylib"]
 
 [dependencies]
+# Structured logging facade — zero-cost when the log level is disabled at
+# compile time (via `max_level_*` features) or when no logger is installed.
+# This is the FACADE only; the in-crate `logging` module provides the minimal
+# subscriber (a 20-line stderr logger gated by env vars). Using `log` rather
+# than `tracing` because this is a cdylib plugin loaded into someone else's
+# process: the `log` facade is lighter, has no global subscriber conflict risk,
+# and the plugin's statically-linked copy of `log` is fully independent of
+# whatever the host process uses.
+log = { version = "0.4", features = ["std"] }
+
 # Pure-Rust Chrome/Perfetto tracer, from crates.io. `default-features = false`
 # drops the `perfetto` (prost) feature — we export Chrome Trace JSON only.
 #

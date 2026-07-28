@@ -157,7 +157,7 @@ unsafe fn get_supported_devices_impl(
         let tr = crate::trace::tracer();
         if tr.active() {
             let dev = if !gpu.is_null() { "GPU" } else { "CPU" };
-            eprintln!("[rust-mlx-ep] GetSupportedDevices: bound to {dev} device");
+            log::info!("GetSupportedDevices: bound to {dev} device");
         }
         ptr::null_mut()
     }
