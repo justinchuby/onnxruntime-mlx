@@ -33,8 +33,8 @@ use std::panic::AssertUnwindSafe;
 
 use crate::engine::{
     DeltaWrite, DynInput, MlxError, NodeDesc, OutRef, Plan, ShapeMode, Slot, Src, SynthRope,
-    TracePayload, TranslationContext, copy_out_raw_delta, dim_i32, mlx_dtype_from_onnx,
-    read_ctx_input_raw, rope_row_key,
+    TracePayload, TranslationContext, attention_cross_kv, attention_past_key, copy_out_raw_delta,
+    dim_i32, is_separate_qkv_attention, mlx_dtype_from_onnx, read_ctx_input_raw, rope_row_key,
 };
 use crate::mlx::{self, Array, Closure, VectorArray};
 use crate::sys::mlx as mlxsys;
@@ -59,16 +59,16 @@ pub fn compile_enabled(has_control_flow: bool) -> bool {
 ///     `mlx_compile` trace (the placeholder has no data), so a subgraph containing one is never
 ///     general-compiled.
 fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
-    matches!(
+    is_separate_qkv_attention(n)
+        || matches!(
         n.op_type.as_str(),
         "GroupQueryAttention"
             | "PagedAttention"
-            | "MultiHeadAttention"
             | "SparseAttention"
             | "Det"
             | "NonZero"
             | "Unique"
-    ) || (n.op_type == "Attention" && n.domain != "com.microsoft")
+    )
 }
 
 /// Decide whether the general compiled fast path is allowed for this plan. Shares the compile
@@ -152,7 +152,7 @@ pub fn detect_seq_len(
             }
         }
     }
-    if plan.nodes.iter().any(|n| n.op_type == "MultiHeadAttention") {
+    if plan.nodes.iter().any(is_separate_qkv_attention) {
         // Whisper's dynamic Range/Tile position-id island can split `input_ids` away from the main
         // decoder partition. The partition still receives a rank-3 token-state boundary tensor
         // [B,S,H], whose middle dimension is the query length.
@@ -192,19 +192,23 @@ pub fn detect_batch_size(
     None
 }
 
-/// Sequence length of the first self-attention past-K cache in a pure-MHA decoder. Cross-attention
-/// K/V arrive directly as boundary inputs, while self-attention K/V are inputs 6/7 and grow each
-/// token. A zero-length self cache marks a new generation and invalidates cached cross K/V.
-pub fn detect_mha_self_past_len(
+fn kv_sequence_length(shape: &[i64]) -> Option<i64> {
+    match shape.len() {
+        3 => shape.get(1).copied(),
+        4 => shape.get(2).copied(),
+        _ => None,
+    }
+}
+
+/// Sequence length of the first self-attention past-K cache. A zero-length self cache marks a new
+/// generation and invalidates cached cross K/V for both contrib MHA and native ONNX Attention.
+pub fn detect_attention_self_past_len(
     api: *const ort::OrtApi,
     kctx: *mut ort::OrtKernelContext,
     plan: &Plan,
 ) -> Option<i64> {
     for node in &plan.nodes {
-        if node.op_type != "MultiHeadAttention" {
-            continue;
-        }
-        let Some(past) = node.inputs.get(6) else {
+        let Some(past) = attention_past_key(node) else {
             continue;
         };
         if past.source != Src::CtxInput {
@@ -216,26 +220,22 @@ pub fn detect_mha_self_past_len(
     None
 }
 
-/// Stable identity for the active pure-MHA generation: the first cross-attention K boundary
+/// Stable identity for the active attention generation: the first long cross-attention K boundary
 /// buffer. Interleaved generators have different buffers, so a key change invalidates private MLX
 /// input reuse instead of accidentally sharing one generator's cache with another.
-pub fn detect_mha_generation_key(
+pub fn detect_attention_generation_key(
     api: *const ort::OrtApi,
     kctx: *mut ort::OrtKernelContext,
     plan: &Plan,
 ) -> Option<usize> {
     for node in &plan.nodes {
-        if node.op_type != "MultiHeadAttention" {
-            continue;
-        }
-        let Some(key) = node.inputs.get(1) else {
+        let Some((key, _value)) = attention_cross_kv(node) else {
             continue;
         };
-        if key.source != Src::CtxInput {
-            continue;
+        let (data, shape, _dtype) = read_ctx_input_raw(api, kctx, key.ctx_index).ok()?;
+        if kv_sequence_length(&shape).is_some_and(|length| length > 1) {
+            return Some(data as usize);
         }
-        let (data, _shape, _dtype) = read_ctx_input_raw(api, kctx, key.ctx_index).ok()?;
-        return Some(data as usize);
     }
     None
 }
@@ -375,7 +375,7 @@ pub fn try_compiled(
             .nodes
             .iter()
             .any(|n| n.op_type == "GroupQueryAttention");
-        let has_mha = plan.nodes.iter().any(|n| n.op_type == "MultiHeadAttention");
+        let has_separate_attention = plan.nodes.iter().any(is_separate_qkv_attention);
         let has_fused_gqa_rope = plan.nodes.iter().any(|n| {
             n.op_type == "GroupQueryAttention" && n.ints.get("do_rotary").copied().unwrap_or(1) != 0
         });
@@ -385,11 +385,11 @@ pub fn try_compiled(
             cfg.rope_as_data = false;
             slot.get_mut(unsafe { &mut *plan_ptr }).config = cfg;
         }
-        if has_mha && !has_gqa {
-            // Whisper-style MHA decode has no RoPE inputs and uses growing (non-aliased) KV outputs.
-            // Its current-token Q/K/V shapes stay fixed at S=1 while concat carries the dynamic past
-            // extent inside MLX, so shapeless compile can replay it without GQA's synthetic RoPE or
-            // shared-buffer machinery.
+        if has_separate_attention && !has_gqa {
+            // Separate-QKV Attention decode has no RoPE inputs and uses growing (non-aliased) KV
+            // outputs. Its current-token Q/K/V shapes stay fixed at S=1 while concat carries the
+            // dynamic past extent inside MLX, so shapeless compile can replay it without GQA's
+            // synthetic RoPE or shared-buffer machinery.
             cfg.rope_as_data = false;
             cfg.kv_alias = false;
             cfg.delta_copyout = false;
@@ -434,7 +434,8 @@ pub fn try_compiled(
     }
 
     // Gather the dynamic ctx inputs in closure order. Cross-attention K/V are immutable for one
-    // generation and very large, so pure-MHA decoders copy them into MLX once and reuse them.
+    // generation and very large, so separate-QKV attention decoders copy them into MLX once and
+    // reuse them for both contrib MHA and native ONNX Attention.
     let mut arena: Vec<Array> = Vec::new();
     let mut input = VectorArray::new();
     {
@@ -459,7 +460,9 @@ pub fn try_compiled(
                 .iter()
                 .map(|&d| dim_i32(d))
                 .collect::<Result<_, _>>()?;
-            if stable_cross_indices.contains(&di.ctx_index) {
+            if stable_cross_indices.contains(&di.ctx_index)
+                && kv_sequence_length(&shape).is_some_and(|length| length > 1)
+            {
                 let arr = Array::from_data(data, &ishape, mlx_dtype_from_onnx(dtype));
                 input.append(arr.as_raw());
                 slot.get_mut(unsafe { &mut *plan_ptr })
@@ -924,9 +927,9 @@ fn trace_body(
 
     let (res_raw, arena, kv_present) = {
         let plan = unsafe { &mut *plan_ptr };
-        let native_mha_decode = plan.native_mha_decode;
+        let native_attention_decode = plan.native_attention_decode;
         let mut tc = TranslationContext::new(plan, api, kctx, stream);
-        if (matches!(cfg.shape_mode, ShapeMode::Shapeless) && native_mha_decode)
+        if (matches!(cfg.shape_mode, ShapeMode::Shapeless) && native_attention_decode)
             || cfg.rope_as_data
             || cfg.kv_alias
         {

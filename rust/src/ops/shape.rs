@@ -512,7 +512,7 @@ fn split_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
 
 fn tile_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let data = ctx.resolve(&n.inputs[0])?;
-    if ctx.native_mha_decode() && ctx.rope_dynamic() && !n.inputs[1].constant {
+    if ctx.native_attention_decode() && ctx.rope_dynamic() && !n.inputs[1].constant {
         // The token-at-a-time decoder repeats are [1, 1]. Keep this as graph data instead of
         // forcing a host read during the shapeless compiled trace.
         ctx.bind(&n.outputs[0], data);
@@ -586,7 +586,9 @@ fn identity_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErro
 }
 
 fn range_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
-    if ctx.native_mha_decode() && ctx.rope_dynamic() && n.inputs.iter().any(|input| !input.constant)
+    if ctx.native_attention_decode()
+        && ctx.rope_dynamic()
+        && n.inputs.iter().any(|input| !input.constant)
     {
         // Decode forms Range(start, start + 1, 1). Its one value is the dynamic start itself.
         let start = ctx.resolve(&n.inputs[0])?;

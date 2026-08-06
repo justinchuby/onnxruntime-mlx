@@ -16,6 +16,7 @@ use std::ptr;
 
 use crate::engine::{
     InitData, NodeDesc, OutRef, Plan, Slot, Src, SubgraphDesc, TensorRef, TranslationContext,
+    is_separate_qkv_attention_op,
 };
 use crate::factory::ORT_API_VERSION;
 use crate::mlx::Stream;
@@ -178,10 +179,10 @@ unsafe fn get_capability_impl(
         // Foundry's Q8 Whisper decoder has runtime Range/Tile nodes for position IDs. Keep the
         // complete decoder on MLX; the translator handles those two dynamic shape nodes inside the
         // EP so they do not create ORT CPU islands.
-        let native_q8_mha_graph = nodes.len() > 32
+        let native_q8_attention_graph = nodes.len() > 32
             && nodes.iter().any(|&node| {
                 let view = NodeView::new(ep.ort_api, node);
-                view.op_type() == "MultiHeadAttention"
+                is_separate_qkv_attention_op(&view.domain(), &view.op_type())
             })
             && nodes.iter().any(|&node| {
                 let view = NodeView::new(ep.ort_api, node);
@@ -214,7 +215,8 @@ unsafe fn get_capability_impl(
                     return false;
                 }
                 let view = NodeView::new(ep.ort_api, node);
-                if native_q8_mha_graph && matches!(view.op_type().as_str(), "Range" | "Tile") {
+                if native_q8_attention_graph && matches!(view.op_type().as_str(), "Range" | "Tile")
+                {
                     return true;
                 }
                 claimable(&view)
@@ -1608,9 +1610,10 @@ unsafe fn compute_impl(
         let plan_ptr: *mut Plan = &mut *plan_guard;
         let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &*plan_ptr);
         let generation_key =
-            crate::compiled::detect_mha_generation_key(info.ort_api, kctx, &*plan_ptr);
+            crate::compiled::detect_attention_generation_key(info.ort_api, kctx, &*plan_ptr);
         let new_generation =
-            crate::compiled::detect_mha_self_past_len(info.ort_api, kctx, &*plan_ptr) == Some(0)
+            crate::compiled::detect_attention_self_past_len(info.ort_api, kctx, &*plan_ptr)
+                == Some(0)
                 || generation_key != (*plan_ptr).compiled.stable_generation_key;
         if new_generation {
             reset_stable_cross_caches(&mut *plan_ptr, generation_key);
@@ -1633,7 +1636,7 @@ unsafe fn compute_impl(
         // Compiled-decode fast path: handle single-token (S==1) decode via the once-compiled
         // shapeless closure; prefill (S>1) is handled by the shape-keyed prefill path below, and
         // ineligible plans fall through to the eager translator.
-        let native_batch_supported = !(*plan_ptr).native_mha_decode
+        let native_batch_supported = !(*plan_ptr).native_attention_decode
             || crate::compiled::detect_batch_size(info.ort_api, kctx, &*plan_ptr) == Some(1);
         if (*plan_ptr).compiled.enabled && seq_len == Some(1) && native_batch_supported {
             // Cache state: replay (HIT) if the shapeless closure is already compiled, else first
