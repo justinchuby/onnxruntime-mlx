@@ -29,6 +29,7 @@ crate-type = ["cdylib"]
 # and the plugin's statically-linked copy of `log` is fully independent of
 # whatever the host process uses.
 log = { version = "0.4", features = ["std"] }
+half = "2"
 
 # Pure-Rust Chrome/Perfetto tracer, from crates.io. `default-features = false`
 # drops the `perfetto` (prost) feature — we export Chrome Trace JSON only.
