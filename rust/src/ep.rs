@@ -26,6 +26,14 @@ fn use_dedicated_decode_stream(enabled: bool, seq_len: Option<i32>) -> bool {
     enabled && seq_len == Some(1)
 }
 
+fn reset_stable_cross_caches(plan: &mut Plan, generation_key: Option<usize>) {
+    for slot in [Slot::Decode, Slot::Prefill] {
+        let compiled = slot.get_mut(plan);
+        compiled.stable_cross_inputs.clear();
+        compiled.stable_generation_key = generation_key;
+    }
+}
+
 #[repr(C)]
 pub struct MlxEp {
     base: ort::OrtEp,
@@ -1599,6 +1607,14 @@ unsafe fn compute_impl(
         let mut plan_guard = info.plan.lock().unwrap_or_else(|e| e.into_inner());
         let plan_ptr: *mut Plan = &mut *plan_guard;
         let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &*plan_ptr);
+        let generation_key =
+            crate::compiled::detect_mha_generation_key(info.ort_api, kctx, &*plan_ptr);
+        let new_generation =
+            crate::compiled::detect_mha_self_past_len(info.ort_api, kctx, &*plan_ptr) == Some(0)
+                || generation_key != (*plan_ptr).compiled.stable_generation_key;
+        if new_generation {
+            reset_stable_cross_caches(&mut *plan_ptr, generation_key);
+        }
         let mut decode_stream_guard = info.decode_stream.lock().unwrap_or_else(|e| e.into_inner());
         let stream = if use_dedicated_decode_stream((*plan_ptr).dedicated_decode_stream, seq_len) {
             decode_stream_guard
@@ -1768,7 +1784,7 @@ unsafe extern "C" fn release_node_compute_infos(
 
 #[cfg(test)]
 mod tests {
-    use super::use_dedicated_decode_stream;
+    use super::{Plan, reset_stable_cross_caches, use_dedicated_decode_stream};
 
     #[test]
     fn dedicated_stream_is_decode_only() {
@@ -1776,5 +1792,13 @@ mod tests {
         assert!(!use_dedicated_decode_stream(true, Some(2)));
         assert!(!use_dedicated_decode_stream(true, None));
         assert!(!use_dedicated_decode_stream(false, Some(1)));
+    }
+
+    #[test]
+    fn generation_reset_covers_decode_and_prefill() {
+        let mut plan = Plan::new(Vec::new());
+        reset_stable_cross_caches(&mut plan, Some(42));
+        assert_eq!(plan.compiled.stable_generation_key, Some(42));
+        assert_eq!(plan.prefill.stable_generation_key, Some(42));
     }
 }

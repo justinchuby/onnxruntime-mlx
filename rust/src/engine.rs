@@ -361,6 +361,11 @@ pub struct CompiledSubgraph {
     /// GQA `present` KV outputs (shared-buffer mode) as `(present_output_name, past_input_ctx_index)`;
     /// their copy-out is a delta write of only the `S` new rows (`delta_copyout`).
     pub kv_present_names: Vec<(String, usize)>,
+    /// Cross-attention K/V boundary inputs copied once per generation and reused for every token.
+    /// Keyed by ORT KernelContext input index; cleared when a new self-attention sequence starts.
+    pub stable_cross_inputs: HashMap<usize, Array>,
+    /// Address of the first cross-attention K tensor for the active generation.
+    pub stable_generation_key: Option<usize>,
 }
 
 impl CompiledSubgraph {
@@ -382,6 +387,8 @@ impl CompiledSubgraph {
             mask_ctx_index: -1,
             total_seq_ctx_index: -1,
             kv_present_names: Vec::new(),
+            stable_cross_inputs: HashMap::new(),
+            stable_generation_key: None,
         }
     }
 }
@@ -393,6 +400,9 @@ pub struct Plan {
     pub cache: HashMap<String, Array>,
     pub native_mha_decode: bool,
     pub dedicated_decode_stream: bool,
+    pub stable_cross_cache_enabled: bool,
+    /// Boundary K/V inputs used directly by cross-attention MHA nodes.
+    pub stable_cross_ctx_indices: Vec<usize>,
     /// Compiled-decode fast-path state (shapeless + decode features; see [`CompiledConfig::decode`]).
     pub compiled: CompiledSubgraph,
     /// Compiled-prefill fast-path state (shape-keyed + decode features; see [`CompiledConfig::prefill`]).
@@ -493,11 +503,33 @@ impl Plan {
             && nodes.iter().any(|node| {
                 node.op_type == "MatMulNBits" && node.ints.get("bits").copied().unwrap_or(4) == 8
             });
+        let mut stable_cross_ctx_indices = Vec::new();
+        for node in nodes
+            .iter()
+            .filter(|node| node.op_type == "MultiHeadAttention")
+        {
+            let Some([key, value]) = node.inputs.get(1..3) else {
+                continue;
+            };
+            if key.source == Src::CtxInput && value.source == Src::CtxInput {
+                for input in [key, value] {
+                    if !stable_cross_ctx_indices.contains(&input.ctx_index) {
+                        stable_cross_ctx_indices.push(input.ctx_index);
+                    }
+                }
+            }
+        }
+        let stable_cross_cache_enabled =
+            !std::env::var_os("ONNXRUNTIME_EP_MLX_NO_STABLE_CROSS_CACHE")
+                .map(|value| value != "0" && !value.is_empty())
+                .unwrap_or(false);
         Plan {
             nodes,
             cache: HashMap::new(),
             native_mha_decode,
             dedicated_decode_stream,
+            stable_cross_cache_enabled,
+            stable_cross_ctx_indices,
             compiled: CompiledSubgraph::new(CompiledConfig::decode()),
             prefill: CompiledSubgraph::new(CompiledConfig::prefill()),
             general: CompiledSubgraph::new(CompiledConfig::general()),
@@ -1922,6 +1954,17 @@ mod tests {
         }
     }
 
+    fn ctx_input(name: &str, ctx_index: usize) -> TensorRef {
+        TensorRef {
+            name: name.to_string(),
+            source: Src::CtxInput,
+            ctx_index,
+            constant: false,
+            shape_const: false,
+            init: None,
+        }
+    }
+
     fn output(name: &str) -> OutRef {
         OutRef {
             name: name.to_string(),
@@ -1978,5 +2021,17 @@ mod tests {
             .filter(|node| node.op_type != "MultiHeadAttention")
             .collect();
         assert!(!Plan::new(no_attention).dedicated_decode_stream);
+    }
+
+    #[test]
+    fn stable_cross_inputs_require_a_boundary_kv_pair() {
+        let mut cross = node("MultiHeadAttention", &["q", "k", "v"], "attention");
+        cross.inputs[1] = ctx_input("k", 4);
+        cross.inputs[2] = ctx_input("v", 5);
+        assert_eq!(Plan::new(vec![cross]).stable_cross_ctx_indices, vec![4, 5]);
+
+        let mut partial = node("MultiHeadAttention", &["q", "k", "v"], "attention");
+        partial.inputs[1] = ctx_input("k", 4);
+        assert!(Plan::new(vec![partial]).stable_cross_ctx_indices.is_empty());
     }
 }

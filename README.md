@@ -230,6 +230,7 @@ fell back to a slower *composed* path (despite a fused kernel existing) are colo
 | `ONNXRUNTIME_EP_MLX_VERBOSE=1` | Print the end-of-run session summary (claim rate, compute-path breakdown, time attribution) to stderr. |
 | `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG=1` | Print each unclaimed node + the actionable reason (why the graph fragmented). |
 | `ONNXRUNTIME_EP_MLX_SIGNPOST=1` | Emit `os_signpost` intervals so an Instruments *Metal System Trace* correlates. |
+| `ONNXRUNTIME_EP_MLX_NO_STABLE_CROSS_CACHE=1` | Disable per-generation MLX reuse of immutable MHA cross-attention K/V inputs for performance A/B. |
 
 **Per-kernel GPU detail (Xcode).** MLX hides its Metal command buffers inside one fused `mlx_eval`, so
 the JSON trace times the fused eval as a whole. To see *inside* it, capture a boundary eval to a
@@ -297,4 +298,3 @@ python -m pytest tests/ops -q
 - `tests/ops` — each translated decoder op via MLX vs. ORT CPU reference (tolerance-gated, pytest)
 - `tests/conformance` — opt-in fuzz-conformance of the MLX EP against the ONNX standard
   (`cbourjau/onnx-tests`); see [`tests/conformance/README.md`](tests/conformance/README.md)
-

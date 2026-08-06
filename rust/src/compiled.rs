@@ -192,6 +192,54 @@ pub fn detect_batch_size(
     None
 }
 
+/// Sequence length of the first self-attention past-K cache in a pure-MHA decoder. Cross-attention
+/// K/V arrive directly as boundary inputs, while self-attention K/V are inputs 6/7 and grow each
+/// token. A zero-length self cache marks a new generation and invalidates cached cross K/V.
+pub fn detect_mha_self_past_len(
+    api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+    plan: &Plan,
+) -> Option<i64> {
+    for node in &plan.nodes {
+        if node.op_type != "MultiHeadAttention" {
+            continue;
+        }
+        let Some(past) = node.inputs.get(6) else {
+            continue;
+        };
+        if past.source != Src::CtxInput {
+            continue;
+        }
+        let (_data, shape, _dtype) = read_ctx_input_raw(api, kctx, past.ctx_index).ok()?;
+        return shape.get(2).copied();
+    }
+    None
+}
+
+/// Stable identity for the active pure-MHA generation: the first cross-attention K boundary
+/// buffer. Interleaved generators have different buffers, so a key change invalidates private MLX
+/// input reuse instead of accidentally sharing one generator's cache with another.
+pub fn detect_mha_generation_key(
+    api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+    plan: &Plan,
+) -> Option<usize> {
+    for node in &plan.nodes {
+        if node.op_type != "MultiHeadAttention" {
+            continue;
+        }
+        let Some(key) = node.inputs.get(1) else {
+            continue;
+        };
+        if key.source != Src::CtxInput {
+            continue;
+        }
+        let (data, _shape, _dtype) = read_ctx_input_raw(api, kctx, key.ctx_index).ok()?;
+        return Some(data as usize);
+    }
+    None
+}
+
 /// Detect whether this session drives a fixed-capacity SHARED KV buffer (present aliased onto past at
 /// a runtime-owned max length) as opposed to the growing past/present contract. Reads live ctx once
 /// at compiled-closure build time: `cap` = a GQA past-KV cache's seq-axis (2) length, and `total` =
@@ -385,18 +433,40 @@ pub fn try_compiled(
         }
     }
 
-    // Gather the dynamic ctx inputs (zero-copy wrap of the live ORT buffers) in closure order.
+    // Gather the dynamic ctx inputs in closure order. Cross-attention K/V are immutable for one
+    // generation and very large, so pure-MHA decoders copy them into MLX once and reuse them.
     let mut arena: Vec<Array> = Vec::new();
     let mut input = VectorArray::new();
     {
-        // Immutable snapshot of the closure input schema — no `&mut Plan` alive here.
-        let plan = unsafe { &*plan_ptr };
-        for di in &slot.get(plan).dyn_inputs {
+        let dyn_inputs = slot.get(unsafe { &*plan_ptr }).dyn_inputs.clone();
+        let stable_cross_indices = if unsafe { &*plan_ptr }.stable_cross_cache_enabled {
+            unsafe { &*plan_ptr }.stable_cross_ctx_indices.clone()
+        } else {
+            Vec::new()
+        };
+        for di in &dyn_inputs {
+            if stable_cross_indices.contains(&di.ctx_index)
+                && let Some(arr) = slot
+                    .get(unsafe { &*plan_ptr })
+                    .stable_cross_inputs
+                    .get(&di.ctx_index)
+            {
+                input.append(arr.as_raw());
+                continue;
+            }
             let (data, shape, dtype) = read_ctx_input_raw(api, kctx, di.ctx_index)?;
             let ishape: Vec<i32> = shape
                 .iter()
                 .map(|&d| dim_i32(d))
                 .collect::<Result<_, _>>()?;
+            if stable_cross_indices.contains(&di.ctx_index) {
+                let arr = Array::from_data(data, &ishape, mlx_dtype_from_onnx(dtype));
+                input.append(arr.as_raw());
+                slot.get_mut(unsafe { &mut *plan_ptr })
+                    .stable_cross_inputs
+                    .insert(di.ctx_index, arr);
+                continue;
+            }
             // Zero-copy wrap of the live ORT input buffer: MLX borrows it (no-op deallocator) for
             // this apply only. `arena` keeps the wrapper alive until after eval + copy-out, and the
             // ORT tensor is valid for the whole Compute call, so the borrow never dangles. In
