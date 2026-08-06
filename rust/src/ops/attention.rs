@@ -5,6 +5,7 @@
 //!     SDPA. Multi-output (attn, present_key, present_value). Decode-critical.
 //!   * Attention (ai.onnx opset 23 & 24)   — MHA / GQA / MQA, 3D (B,S,H*hd) or 4D (B,H,S,hd),
 //!     optional attn_mask, is_causal, custom scale, in-op past/present KV concat.
+//!   * Attention (com.microsoft) — fused QKV projection followed by MHA.
 //!   * MultiHeadAttention (com.microsoft)  — separate Q/K/V with optional projection bias,
 //!     unidirectional (causal), custom scale.
 //!   * RotaryEmbedding (ai.onnx opset 23 & com.microsoft) — standalone RoPE (rotate-half or
@@ -80,6 +81,16 @@ fn slice(
             s,
         )
     })
+}
+
+fn take_1d_range(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    start: i32,
+    stop: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let idx = ctx.arange(start as f64, stop as f64, 1.0, mlx::mlx_dtype__MLX_INT32)?;
+    ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, a, idx, 0, s) })
 }
 
 /// Concatenate two arrays along `axis`.
@@ -774,6 +785,31 @@ fn attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
 
 // ---- MultiHeadAttention (com.microsoft) --------------------------------------------------------
 
+fn ms_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let h = attr_int(n, "num_heads", 0) as i32;
+    let x = ctx.resolve(&n.inputs[0])?;
+    let w = ctx.resolve(&n.inputs[1])?;
+    let bias = ctx.resolve(&n.inputs[2])?;
+    let xs = ctx.shape_of(x);
+    let (b, s, d) = (xs[0], xs[1], xs[2]);
+
+    let qkv = ctx.matmul(x, w)?;
+    let qkv = add(ctx, qkv, bias)?;
+    let q = slice(ctx, qkv, &[0, 0, 0], &[b, s, d])?;
+    let k = slice(ctx, qkv, &[0, 0, d], &[b, s, 2 * d])?;
+    let v = slice(ctx, qkv, &[0, 0, 2 * d], &[b, s, 3 * d])?;
+    let hd = d / h;
+    let q4 = split_heads(ctx, q, b, s, h, hd)?;
+    let k4 = split_heads(ctx, k, b, s, h, hd)?;
+    let v4 = split_heads(ctx, v, b, s, h, hd)?;
+    let scale = attr_scale(n, hd);
+    let attn = sdpa_dispatch(ctx, q4, k4, v4, scale, false, None, ctx.dtype_of(q4))?;
+    let t = ctx.transpose(attn, &[0, 2, 1, 3])?;
+    let out = ctx.reshape(t, &[b, s, d])?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
 fn multihead_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let h = attr_int(n, "num_heads", 0) as i32;
     let mut q_in = ctx.resolve(&n.inputs[0])?;
@@ -784,37 +820,86 @@ fn multihead_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<
     let ks = ctx.shape_of(k_in);
     let vs = ctx.shape_of(v_in);
     let (b, s, dq) = (qs[0], qs[1], qs[2]);
-    let (lk, dk) = (ks[1], ks[2]);
-    let (lv, dv) = (vs[1], vs[2]);
-    let (hd_q, hd_k, hd_v) = (dq / h, dk / h, dv / h);
+    let (lk, dk, hd_k) = if ks.len() == 3 {
+        (ks[1], ks[2], ks[2] / h)
+    } else {
+        (ks[2], ks[1] * ks[3], ks[3])
+    };
+    let (lv, dv, hd_v) = if vs.len() == 3 {
+        (vs[1], vs[2], vs[2] / h)
+    } else {
+        (vs[2], vs[1] * vs[3], vs[3])
+    };
+    let hd_q = dq / h;
 
     if present(n, 3) {
         let bias = ctx.resolve(&n.inputs[3])?; // 1D [Dq+Dk+Dv]
-        let qb = slice(ctx, bias, &[0], &[dq])?;
+        // `mlx_compile(..., shapeless=true)` cannot infer Slice output shapes, even for a constant
+        // 1-D bias. Take with a fixed-size index array preserves the same result and is traceable.
+        let qb = take_1d_range(ctx, bias, 0, dq)?;
         let qb = ctx.reshape(qb, &[1, 1, dq])?;
         q_in = add(ctx, q_in, qb)?;
-        let kb = slice(ctx, bias, &[dq], &[dq + dk])?;
-        let kb = ctx.reshape(kb, &[1, 1, dk])?;
-        k_in = add(ctx, k_in, kb)?;
-        let vb = slice(ctx, bias, &[dq + dk], &[dq + dk + dv])?;
-        let vb = ctx.reshape(vb, &[1, 1, dv])?;
-        v_in = add(ctx, v_in, vb)?;
+        if ks.len() == 3 {
+            let kb = take_1d_range(ctx, bias, dq, dq + dk)?;
+            let kb = ctx.reshape(kb, &[1, 1, dk])?;
+            k_in = add(ctx, k_in, kb)?;
+            let vb = take_1d_range(ctx, bias, dq + dk, dq + dk + dv)?;
+            let vb = ctx.reshape(vb, &[1, 1, dv])?;
+            v_in = add(ctx, v_in, vb)?;
+        }
     }
 
     let qh4 = split_heads(ctx, q_in, b, s, h, hd_q)?;
-    let kh4 = split_heads(ctx, k_in, b, lk, h, hd_k)?;
-    let vh4 = split_heads(ctx, v_in, b, lv, h, hd_v)?;
+    let kh4 = if ks.len() == 3 {
+        split_heads(ctx, k_in, b, lk, h, hd_k)?
+    } else {
+        k_in
+    };
+    let vh4 = if vs.len() == 3 {
+        split_heads(ctx, v_in, b, lv, h, hd_v)?
+    } else {
+        v_in
+    };
+
+    let has_past = present(n, 6) && present(n, 7);
+    let (present_k, present_v) = if has_past {
+        let pk = ctx.resolve(&n.inputs[6])?;
+        let pv = ctx.resolve(&n.inputs[7])?;
+        (concat2(ctx, pk, kh4, 2)?, concat2(ctx, pv, vh4, 2)?)
+    } else {
+        (kh4, vh4)
+    };
 
     let scale = attr_scale(n, hd_q);
     let causal = attr_int(n, "unidirectional", 0) != 0;
     let dt = ctx.dtype_of(qh4);
 
-    let attn = sdpa_dispatch(ctx, qh4, kh4, vh4, scale, causal, None, dt)?;
+    let emit_qk = n.outputs.len() > 3 && !n.outputs[3].name.is_empty();
+    let attn = if emit_qk {
+        let kt = ctx.transpose(present_k, &[0, 1, 3, 2])?;
+        let scores = ctx.matmul(qh4, kt)?;
+        let scale_v = ctx.scalar_f32(scale);
+        let scale_v = ctx.astype(scale_v, dt)?;
+        let scores = mul(ctx, scores, scale_v)?;
+        if emit_qk {
+            ctx.bind(&n.outputs[3], scores);
+        }
+        let probs = ctx.softmax_axis(scores, 3)?;
+        ctx.matmul(probs, present_v)?
+    } else {
+        sdpa_dispatch(ctx, qh4, present_k, present_v, scale, causal, None, dt)?
+    };
 
     // [B,H,S,hd_v] -> [B,S,H*hd_v].
     let t = ctx.transpose(attn, &[0, 2, 1, 3])?;
     let out = ctx.reshape(t, &[b, s, h * hd_v])?;
     ctx.bind(&n.outputs[0], out);
+    if n.outputs.len() > 1 && !n.outputs[1].name.is_empty() {
+        ctx.bind(&n.outputs[1], present_k);
+    }
+    if n.outputs.len() > 2 && !n.outputs[2].name.is_empty() {
+        ctx.bind(&n.outputs[2], present_v);
+    }
     Ok(())
 }
 
@@ -833,6 +918,11 @@ fn rope_apply(
     let xs = ctx.shape_of(x4); // [B,N,S,hd]
     let (b, nh, s, hd) = (xs[0], xs[1], xs[2], xs[3]);
     let rot = 2 * half;
+    if ctx.rope_dynamic() && !interleaved && rot == hd {
+        let cos_full = concat2(ctx, cos4, cos4, 3)?;
+        let sin_full = concat2(ctx, sin4, sin4, 3)?;
+        return gqa_rope_matmul(ctx, x4, cos_full, sin_full, hd, half);
+    }
     let rotated = if !interleaved {
         let x1 = slice(ctx, x4, &[0, 0, 0, 0], &[b, nh, s, half])?;
         let x2 = slice(ctx, x4, &[0, 0, 0, half], &[b, nh, s, rot])?;
@@ -1298,6 +1388,67 @@ fn attention_claim(node: &NodeView) -> ClaimResult {
 }
 
 /// MultiHeadAttention (com.microsoft). Separate 3D Q/K/V + optional projection bias.
+fn ms_attention_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() >= 3 && node.num_outputs() >= 1,
+        "expects at least 3 inputs and 1 output"
+    );
+    let (x, w, bias, out) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.output_info(0),
+    ) {
+        (Some(x), Some(w), Some(b), Some(o)) => (x, w, b, o),
+        _ => deny!("input, QKV weight/bias, or output lacks tensor type/shape info"),
+    };
+    require!(
+        is_mlx_float(x.dtype)
+            && x.dtype == w.dtype
+            && w.dtype == bias.dtype
+            && bias.dtype == out.dtype,
+        "input, QKV weight/bias, and output must share one MLX float dtype"
+    );
+    require!(
+        x.shape.len() == 3 && x.shape[2] > 0,
+        "input must be rank 3 with a static positive hidden dimension, got {:?}",
+        x.shape
+    );
+    let d = x.shape[2];
+    require!(
+        w.shape == [d, 3 * d] && bias.shape == [3 * d],
+        "QKV weight/bias must have shapes [{d},{}] and [{}], got {:?} and {:?}",
+        3 * d,
+        3 * d,
+        w.shape,
+        bias.shape
+    );
+    let h = node.int_attr("num_heads", 0);
+    require!(
+        h > 0 && d % h == 0,
+        "hidden dimension must divide num_heads"
+    );
+    require!(
+        node.int_attr("unidirectional", 0) == 0,
+        "unidirectional attention is unsupported"
+    );
+    require!(
+        node.int_attr("do_rotary", 0) == 0,
+        "fused rotary attention is unsupported"
+    );
+    for i in 3..node.num_inputs() {
+        require!(!node.input_present(i), "optional input {i} is unsupported");
+    }
+    for i in 1..node.num_outputs() {
+        require!(
+            !node.output_present(i),
+            "optional output {i} is unsupported"
+        );
+    }
+    Ok(())
+}
+
+/// MultiHeadAttention (com.microsoft). Separate 3D Q/K/V + optional projection bias.
 fn multihead_attention_claim(node: &NodeView) -> ClaimResult {
     let h = node.int_attr("num_heads", 0);
     require!(h > 0, "num_heads must be positive, got {}", h);
@@ -1318,43 +1469,78 @@ fn multihead_attention_claim(node: &NodeView) -> ClaimResult {
         None => deny!("V lacks tensor type/shape info"),
     };
     require!(
-        qshape.len() == 3 && kshape.len() == 3 && vshape.len() == 3,
-        "Q, K, and V must be rank 3, got ranks {}, {}, {}",
+        qshape.len() == 3
+            && matches!(kshape.len(), 3 | 4)
+            && matches!(vshape.len(), 3 | 4)
+            && kshape.len() == vshape.len(),
+        "Q must be rank 3 and K/V matching rank 3 or 4, got ranks {}, {}, {}",
         qshape.len(),
         kshape.len(),
         vshape.len()
     );
-    for (name, shape) in [("Q", &qshape), ("K", &kshape), ("V", &vshape)] {
-        require!(
-            shape.iter().all(|&d| d > 0),
-            "{} must have static positive dimensions, got shape {:?}",
-            name,
-            shape
-        );
-    }
     require!(
-        qshape[2] % h == 0 && kshape[2] % h == 0 && vshape[2] % h == 0,
+        qshape[2] > 0,
+        "Q hidden dimension must be static and positive"
+    );
+    let dk = if kshape.len() == 3 {
+        kshape[2]
+    } else {
+        require!(
+            kshape[1] == h && kshape[3] > 0,
+            "rank-4 K must be [B,num_heads,L,head_size], got {:?}",
+            kshape
+        );
+        h * kshape[3]
+    };
+    let dv = if vshape.len() == 3 {
+        vshape[2]
+    } else {
+        require!(
+            vshape[1] == h && vshape[3] > 0,
+            "rank-4 V must be [B,num_heads,L,head_size], got {:?}",
+            vshape
+        );
+        h * vshape[3]
+    };
+    require!(
+        qshape[2] % h == 0 && dk % h == 0 && dv % h == 0,
         "Q/K/V hidden dimensions ({}/{}/{}) must divide evenly by num_heads {}",
         qshape[2],
-        kshape[2],
-        vshape[2],
+        dk,
+        dv,
         h
     );
+    if node.int_attr("unidirectional", 0) != 0 && !node.input_present(6) {
+        let k_len = if kshape.len() == 3 {
+            kshape[1]
+        } else {
+            kshape[2]
+        };
+        let v_len = if vshape.len() == 3 {
+            vshape[1]
+        } else {
+            vshape[2]
+        };
+        require!(
+            qshape[1] > 0 && qshape[1] == k_len && qshape[1] == v_len,
+            "unidirectional MHA without past requires equal static Q/K/V sequence lengths"
+        );
+    }
     if node.input_present(3) {
         let (bd, bshape) = match node.input_info(3) {
             Some(i) => (i.dtype, i.shape),
             None => deny!("projection bias lacks tensor type/shape info"),
         };
         require!(
-            bd == qd && bshape.len() == 1 && bshape[0] == qshape[2] + kshape[2] + vshape[2],
+            bd == qd && bshape.len() == 1 && bshape[0] == qshape[2] + dk + dv,
             "projection bias must be a 1D {} tensor of length {}, got {} shape {:?}",
             crate::registry::ort_dtype_name(qd),
-            qshape[2] + kshape[2] + vshape[2],
+            qshape[2] + dk + dv,
             crate::registry::ort_dtype_name(bd),
             bshape
         );
     }
-    for i in 4..=9 {
+    for i in [4usize, 5, 8, 9] {
         require!(
             !node.input_present(i),
             "optional input {} is unsupported",
@@ -1362,8 +1548,33 @@ fn multihead_attention_claim(node: &NodeView) -> ClaimResult {
         );
     }
     require!(
-        !node.output_present(1) && !node.output_present(2) && !node.output_present(3),
-        "cache and qk_matmul outputs are unsupported"
+        node.input_present(6) == node.input_present(7),
+        "past key/value must be paired"
+    );
+    if node.input_present(6) {
+        let (pk, pv) = match (node.input_info(6), node.input_info(7)) {
+            (Some(pk), Some(pv)) => (pk, pv),
+            _ => deny!("past key/value lack tensor type/shape info"),
+        };
+        require!(
+            pk.dtype == qd
+                && pv.dtype == qd
+                && pk.shape.len() == 4
+                && pv.shape.len() == 4
+                && pk.shape[1] == h
+                && pv.shape[1] == h
+                && pk.shape[3] == dk / h
+                && pv.shape[3] == dv / h,
+            "past key/value must be rank-4 cache tensors matching Q/K/V dtype and heads"
+        );
+    }
+    require!(
+        node.output_present(1) == node.output_present(2),
+        "present key/value outputs must be paired"
+    );
+    require!(
+        !(node.output_present(3) && node.int_attr("unidirectional", 0) != 0),
+        "qk output with unidirectional attention is unsupported"
     );
     Ok(())
 }
@@ -1806,6 +2017,15 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         attention_op,
         attention_claim,
+    );
+    reg(
+        registry,
+        "com.microsoft",
+        "Attention",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        ms_attention_op,
+        ms_attention_claim,
     );
     reg(
         registry,

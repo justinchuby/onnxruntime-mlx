@@ -163,11 +163,24 @@ unsafe fn get_capability_impl(
             }
         }
 
+        // ORT's Q8-specialized Whisper decoder is substantially faster on CPU for token-at-a-time
+        // MHA. Decline that complete graph rather than fragmenting it around CPU islands; the
+        // encoder remains on MLX and uses the static compiled path.
+        let prefer_cpu_q8_mha_graph = nodes.len() > 32
+            && nodes.iter().any(|&node| {
+                let view = NodeView::new(ep.ort_api, node);
+                view.op_type() == "MultiHeadAttention"
+            })
+            && nodes.iter().any(|&node| {
+                let view = NodeView::new(ep.ort_api, node);
+                view.op_type() == "MatMulNBits" && view.int_attr("bits", 4) == 8
+            });
+
         // Which nodes can MLX translate exactly (registry claim predicate).
         let supported: Vec<bool> = nodes
             .iter()
             .map(|&node| {
-                if in_cf_body {
+                if in_cf_body || prefer_cpu_q8_mha_graph {
                     return false;
                 }
                 let view = NodeView::new(ep.ort_api, node);

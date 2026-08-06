@@ -1,6 +1,4 @@
-"""MatMulNBits coverage for the MLX EP: the 3-input SYMMETRIC form (implicit zero point 8) across
-the supported block sizes AND the 4-input ASYMMETRIC form with an explicit packed-int4 ``zero_points``
-input (uint8).
+"""MatMulNBits coverage for the MLX EP: int4 and int8, symmetric and asymmetric.
 
 Each case is proven to actually run on the MLX EP (ORT per-node profiling — a CPU fallback would make
 the correctness check vacuous) and then compared, tolerance-gated, against ORT's CPU EP. If this ORT
@@ -27,32 +25,37 @@ def _pack_int4_last(vals: np.ndarray) -> np.ndarray:
     return (lo | (hi << 4)).astype(np.uint8)
 
 
-def _matmulnbits_model(*, M: int, K: int, N: int, block: int, asymmetric: bool, dtype=DT.FLOAT):
+def _matmulnbits_model(
+    *, M: int, K: int, N: int, block: int, asymmetric: bool, dtype=DT.FLOAT, bits: int = 4
+):
     np_dt = np.float16 if dtype == DT.FLOAT16 else np.float32
-    rng = np.random.default_rng(hash((M, K, N, block, asymmetric, int(dtype))) & 0xFFFFFFFF)
+    rng = np.random.default_rng(hash((M, K, N, block, asymmetric, int(dtype), bits)) & 0xFFFFFFFF)
     n_blocks = (K + block - 1) // block
     a = rng.standard_normal((1, M, K)).astype(np_dt)
-    # Quantized int4 weight [N, n_blocks, block] then packed to [N, n_blocks, block/2] uint8.
-    qvals = rng.integers(0, 16, size=(N, n_blocks, block), dtype=np.uint8)
-    b = _pack_int4_last(qvals)
+    qvals = rng.integers(0, 1 << bits, size=(N, n_blocks, block), dtype=np.uint8)
+    b = _pack_int4_last(qvals) if bits == 4 else qvals
     scales = (rng.standard_normal((N * n_blocks,)) * 0.05).astype(np_dt)
 
     inputs = [
         m.tensor("a", dtype, [1, M, K]),
-        m.tensor("b", DT.UINT8, [N, n_blocks, block // 2]),
+        m.tensor("b", DT.UINT8, [N, n_blocks, block * bits // 8]),
         m.tensor("scales", dtype, [N * n_blocks]),
     ]
     feeds = {"a": a, "b": b, "scales": scales}
 
     if asymmetric:
-        cols = (n_blocks + 1) // 2
-        zp_vals = rng.integers(0, 16, size=(N, n_blocks), dtype=np.uint8)
-        # Pad each row to an even count before packing (a trailing padding nibble for odd n_blocks).
-        if n_blocks % 2 == 1:
-            zp_vals = np.concatenate([zp_vals, np.zeros((N, 1), dtype=np.uint8)], axis=1)
-        zp_packed = _pack_int4_last(zp_vals).reshape(N * cols)
-        inputs.append(m.tensor("zero_points", DT.UINT8, [N * cols]))
-        feeds["zero_points"] = zp_packed
+        zp_vals = rng.integers(0, 1 << bits, size=(N, n_blocks), dtype=np.uint8)
+        if bits == 4:
+            cols = (n_blocks + 1) // 2
+            if n_blocks % 2 == 1:
+                zp_vals = np.concatenate([zp_vals, np.zeros((N, 1), dtype=np.uint8)], axis=1)
+            zero_points = _pack_int4_last(zp_vals).reshape(N * cols)
+            zp_shape = [N * cols]
+        else:
+            zero_points = zp_vals
+            zp_shape = [N, n_blocks]
+        inputs.append(m.tensor("zero_points", DT.UINT8, zp_shape))
+        feeds["zero_points"] = zero_points
 
     outputs = [m.tensor("out", dtype, [1, M, N])]
     model = m.make_model(
@@ -60,7 +63,7 @@ def _matmulnbits_model(*, M: int, K: int, N: int, block: int, asymmetric: bool, 
         inputs,
         outputs,
         domain="com.microsoft",
-        attributes={"K": K, "N": N, "bits": 4, "block_size": block},
+        attributes={"K": K, "N": N, "bits": bits, "block_size": block},
     )
     return model, feeds
 
@@ -123,6 +126,15 @@ def test_matmulnbits_symmetric(block: int, M: int) -> None:
 @pytest.mark.parametrize("M", [1, 8], ids=["decode", "prefill"])
 def test_matmulnbits_asymmetric(block: int, M: int) -> None:
     model, feeds = _matmulnbits_model(M=M, K=block * 3, N=16, block=block, asymmetric=True)
+    _check(model, feeds)
+
+
+@pytest.mark.parametrize("M", [1, 8], ids=["decode", "prefill"])
+@pytest.mark.parametrize("asym", [False, True], ids=["sym", "asym"])
+def test_matmulnbits_int8(M: int, asym: bool) -> None:
+    model, feeds = _matmulnbits_model(
+        M=M, K=96, N=32, block=32, asymmetric=asym, bits=8
+    )
     _check(model, feeds)
 
 

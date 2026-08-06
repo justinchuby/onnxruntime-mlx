@@ -2,9 +2,9 @@
 //! ai.onnx integer/QLinear coverage. Faithful port of the C++ `ops/quant.cc`, `ops/quantize.cc` and
 //! `ops/quant2.cc`:
 //!
-//!   * MatMulNBits — int4 block-quantized weight matmul. BOTH the 3-input SYMMETRIC form
-//!     (implicit zero point 8) AND the 4-input ASYMMETRIC form with an explicit packed-int4
-//!     `zero_points` input (uint8). Dequant is w = (q - zp) * scale. For MLX-supported group sizes
+//!   * MatMulNBits — int4/int8 block-quantized weight matmul. BOTH the 3-input SYMMETRIC form
+//!     (implicit midpoint zero point) AND the 4-input ASYMMETRIC form with an explicit uint8
+//!     `zero_points` input. Dequant is w = (q - zp) * scale. For MLX-supported group sizes
 //!     (32/64/128) the weight is repacked ONCE to MLX affine uint32 words + per-block scales/biases
 //!     and run through `mlx_quantized_matmul` (weights stay compressed — the decode memory win). For
 //!     block_size 16 (which `mlx_quantized_matmul` does not support) the weight is dequantized
@@ -227,14 +227,16 @@ fn compute_float_dtype(act_dt: mlx::mlx_dtype) -> mlx::mlx_dtype {
     }
 }
 
-/// Repack our uint8 [N, nblocks, block/2] int4 weight to MLX affine uint32 words [N, K/8] (8 nibbles
-/// per word, low→high along K). Cached (constant) or kept (dynamic).
+/// Repack ONNX Runtime's block-major uint8 weight to MLX affine uint32 words. Int4 stores two
+/// values per source byte and eight values per word; int8 stores one value per byte and four per
+/// word. Values are packed low-to-high along K. Cached (constant) or kept (dynamic).
 fn matmulnbits_repack(
     ctx: &mut TranslationContext,
     n: &NodeDesc,
     big_n: i64,
     k: i64,
     block: i64,
+    bits: i64,
 ) -> Result<mlx::mlx_array, MlxError> {
     let wref = &n.inputs[1];
     let key = format!("{}#qw", wref.name);
@@ -246,8 +248,10 @@ fn matmulnbits_repack(
     let host = ctx.raw_host(wref)?;
     let src = host.data as *const u8;
     let nblocks = k / block;
-    let blob = block / 2;
-    let words = (k / 8) as usize;
+    let values_per_byte = 8 / bits;
+    let blob = block / values_per_byte;
+    let values_per_word = 32 / bits;
+    let words = (k / values_per_word) as usize;
     let mut packed = vec![0u32; (big_n as usize) * words];
     if !src.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(src, host.count) };
@@ -255,17 +259,17 @@ fn matmulnbits_repack(
             for kk in 0..k {
                 let blk = kk / block;
                 let within = kk % block;
-                let byte = within / 2;
-                let nib = within % 2;
+                let byte = within / values_per_byte;
+                let lane = within % values_per_byte;
                 let idx = ((row * nblocks + blk) * blob + byte) as usize;
                 let b = bytes[idx];
-                let q = if nib == 0 {
-                    (b & 0x0F) as u32
+                let q = if bits == 4 {
+                    ((b >> (lane * bits)) & 0x0F) as u32
                 } else {
-                    (b >> 4) as u32
+                    b as u32
                 };
-                let word = (row as usize) * words + (kk / 8) as usize;
-                packed[word] |= q << (((kk % 8) as u32) * 4);
+                let word = (row as usize) * words + (kk / values_per_word) as usize;
+                packed[word] |= q << (((kk % values_per_word) * bits) as u32);
             }
         }
     }
@@ -319,10 +323,22 @@ fn matmulnbits_zp_f32(
     ctx.astype(zp_un, mlx::mlx_dtype__MLX_FLOAT32)
 }
 
+fn matmulnbits_zp8_f32(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    big_n: i32,
+    nblocks: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let zp = ctx.resolve(&n.inputs[3])?;
+    let zp = ctx.reshape(zp, &[big_n, nblocks])?;
+    ctx.astype(zp, mlx::mlx_dtype__MLX_FLOAT32)
+}
+
 fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let k = *n.ints.get("K").ok_or("MatMulNBits: missing K")?;
     let big_n = *n.ints.get("N").ok_or("MatMulNBits: missing N")?;
     let block = n.ints.get("block_size").copied().unwrap_or(32);
+    let bits = n.ints.get("bits").copied().unwrap_or(4);
     if block <= 0 || k % block != 0 {
         return Err("MatMulNBits: bad block_size".to_string());
     }
@@ -342,24 +358,28 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
     let y = if supported {
         ctx.mark_fast("mlx_quantized_matmul");
         // Fast path: repacked uint32 weight + per-block scales/biases through mlx_quantized_matmul.
-        let w = matmulnbits_repack(ctx, n, big_n, k, block)?;
+        let w = matmulnbits_repack(ctx, n, big_n, k, block, bits)?;
         let scales = ctx.resolve(&n.inputs[2])?;
         let scales2d = ctx.reshape(scales, &[big_n as i32, nblocks])?;
         let biases = if has_zp {
             // bias = -(zp * scale)
-            let zpf = matmulnbits_zp_f32(ctx, n, big_n as i32, nblocks)?;
+            let zpf = if bits == 4 {
+                matmulnbits_zp_f32(ctx, n, big_n as i32, nblocks)?
+            } else {
+                matmulnbits_zp8_f32(ctx, n, big_n as i32, nblocks)?
+            };
             let neg_zp = ctx.unary(mlx::mlx_negative, zpf)?;
             mul(ctx, neg_zp, scales2d)?
         } else {
-            let neg8 = f32(ctx, -8.0);
-            mul(ctx, scales2d, neg8)?
+            let neg_mid = f32(ctx, -((1i64 << (bits - 1)) as f32));
+            mul(ctx, scales2d, neg_mid)?
         };
         let gs = mlx::mlx_optional_int_ {
             value: block as i32,
             has_value: true,
         };
         let bb = mlx::mlx_optional_int_ {
-            value: 4,
+            value: bits as i32,
             has_value: true,
         };
         let mode = c"affine".as_ptr();
@@ -375,19 +395,27 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             "block_size {block} unsupported by mlx_quantized_matmul → dequant + dense matmul ({})",
             crate::engine::dtype_name(comp_dt)
         ));
-        let wpacked = ctx.resolve(&n.inputs[1])?; // uint8 [N, nblocks, block/2]
-        let wflat = ctx.reshape(wpacked, &[big_n as i32, (k / 2) as i32])?;
-        let q = unpack_nibbles(ctx, wflat)?; // uint32 [N, K]
+        let wpacked = ctx.resolve(&n.inputs[1])?;
+        let q = if bits == 4 {
+            let wflat = ctx.reshape(wpacked, &[big_n as i32, (k / 2) as i32])?;
+            unpack_nibbles(ctx, wflat)?
+        } else {
+            ctx.reshape(wpacked, &[big_n as i32, k as i32])?
+        };
         let qf = ctx.astype(q, comp_dt)?;
         let centered = if has_zp {
-            let zpf = matmulnbits_zp_f32(ctx, n, big_n as i32, nblocks)?;
+            let zpf = if bits == 4 {
+                matmulnbits_zp_f32(ctx, n, big_n as i32, nblocks)?
+            } else {
+                matmulnbits_zp8_f32(ctx, n, big_n as i32, nblocks)?
+            };
             let zpf = ctx.astype(zpf, comp_dt)?;
             let zp_full = broadcast_blocks(ctx, zpf, big_n as i32, nblocks, block as i32)?;
             sub(ctx, qf, zp_full)?
         } else {
-            let eight_f = f32(ctx, 8.0);
-            let eight = ctx.astype(eight_f, comp_dt)?;
-            sub(ctx, qf, eight)?
+            let mid_f = f32(ctx, (1i64 << (bits - 1)) as f32);
+            let mid = ctx.astype(mid_f, comp_dt)?;
+            sub(ctx, qf, mid)?
         };
         let scales = ctx.resolve(&n.inputs[2])?;
         let scales2d = ctx.reshape(scales, &[big_n as i32, nblocks])?;
@@ -981,7 +1009,10 @@ fn matmulnbits_claim(node: &NodeView) -> ClaimResult {
     }
     let bits = node.int_attr("bits", 4);
     let block = node.int_attr("block_size", 32);
-    require!(bits == 4, "only 4-bit weights are supported");
+    require!(
+        bits == 4 || bits == 8,
+        "only 4-bit and 8-bit weights are supported"
+    );
     require!(
         matches!(block, 16 | 32 | 64 | 128),
         "block_size must be 16, 32, 64, or 128 (got {block})"

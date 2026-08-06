@@ -120,6 +120,33 @@ def assert_mlx_claims(model: bytes, feeds: dict[str, np.ndarray]) -> None:
     )
 
 
+def assert_mlx_declines(model: bytes, feeds: dict[str, np.ndarray]) -> None:
+    """Assert an intentionally unsupported attention contract remains on CPU."""
+    import json
+    import os
+
+    import onnxruntime as ort
+
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    options.enable_profiling = True
+    options.profile_file_prefix = "mlx_decline_probe"
+    sess = ort.InferenceSession(model, options, providers=m.EP_PROVIDERS)
+    sess.run(None, feeds)
+    profile_path = sess.end_profiling()
+    try:
+        events = json.load(open(profile_path))
+    finally:
+        os.remove(profile_path)
+    providers = {
+        e.get("args", {}).get("provider")
+        for e in events
+        if e.get("cat") == "Node" and e.get("args", {}).get("provider")
+    }
+    assert "MLXExecutionProvider" not in providers
+    assert "CPUExecutionProvider" in providers
+
+
 def check(model: bytes, feeds: dict[str, np.ndarray]) -> None:
     """Verify MLX claims the node, then that its output matches ORT CPU (tolerance-gated)."""
     assert_mlx_claims(model, feeds)
@@ -265,6 +292,103 @@ def test_multihead_attention(case: tuple) -> None:
     )
     if not _cpu_supports(model, feeds):
         pytest.skip("ORT CPU EP has no MultiHeadAttention kernel for this build/form")
+    check(model, feeds)
+
+
+def test_multihead_attention_rank4_cross_cache_bias() -> None:
+    """Rank-4 K/V are already projected caches, so only the query slice of QKV bias is applied."""
+    B, H, S, L, hd = 1, 4, 2, 7, 16
+    D = H * hd
+    rng = np.random.default_rng(20260805)
+    feeds = {
+        "Q": rng.standard_normal((B, S, D)).astype(FLOAT),
+        "K": rng.standard_normal((B, H, L, hd)).astype(FLOAT),
+        "V": rng.standard_normal((B, H, L, hd)).astype(FLOAT),
+        "B": rng.standard_normal((3 * D,)).astype(FLOAT),
+    }
+    model = build_model(
+        "MultiHeadAttention",
+        [
+            _t("Q", [B, S, D]),
+            _t("K", [B, H, L, hd]),
+            _t("V", [B, H, L, hd]),
+            _t("B", [3 * D]),
+        ],
+        [_t("Y", [B, S, D])],
+        domain="com.microsoft",
+        attributes={"num_heads": H},
+    )
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU EP has no rank-4 cross MultiHeadAttention kernel")
+    check(model, feeds)
+
+
+def test_multihead_attention_declines_causal_cross_attention() -> None:
+    B, H, S, L, hd = 1, 4, 2, 7, 16
+    D = H * hd
+    rng = np.random.default_rng(20260808)
+    feeds = {
+        "Q": rng.standard_normal((B, S, D)).astype(FLOAT),
+        "K": rng.standard_normal((B, H, L, hd)).astype(FLOAT),
+        "V": rng.standard_normal((B, H, L, hd)).astype(FLOAT),
+    }
+    model = build_model(
+        "MultiHeadAttention",
+        [_t("Q", [B, S, D]), _t("K", [B, H, L, hd]), _t("V", [B, H, L, hd])],
+        [_t("Y", [B, S, D])],
+        domain="com.microsoft",
+        attributes={"num_heads": H, "unidirectional": 1},
+    )
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU EP has no causal cross MultiHeadAttention kernel")
+    assert_mlx_declines(model, feeds)
+
+
+def test_multihead_attention_present_without_past() -> None:
+    """Requested present outputs contain the current K/V when no past cache is supplied."""
+    B, H, S, hd = 1, 4, 3, 16
+    D = H * hd
+    rng = np.random.default_rng(20260806)
+    feeds = {
+        "Q": rng.standard_normal((B, S, D)).astype(FLOAT),
+        "K": rng.standard_normal((B, S, D)).astype(FLOAT),
+        "V": rng.standard_normal((B, S, D)).astype(FLOAT),
+    }
+    model = build_model(
+        "MultiHeadAttention",
+        [_t("Q", [B, S, D]), _t("K", [B, S, D]), _t("V", [B, S, D])],
+        [
+            _t("Y", [B, S, D]),
+            _t("PK", [B, H, S, hd]),
+            _t("PV", [B, H, S, hd]),
+        ],
+        domain="com.microsoft",
+        attributes={"num_heads": H},
+    )
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU EP has no present-without-past MultiHeadAttention kernel")
+    check(model, feeds)
+
+
+def test_ms_attention_encoder() -> None:
+    """Foundry Whisper encoder's fused QKV projection Attention node."""
+    B, S, H, hd = 1, 5, 4, 16
+    D = H * hd
+    rng = np.random.default_rng(20260807)
+    feeds = {
+        "X": rng.standard_normal((B, S, D)).astype(FLOAT),
+        "W": rng.standard_normal((D, 3 * D)).astype(FLOAT),
+        "B": rng.standard_normal((3 * D,)).astype(FLOAT),
+    }
+    model = build_model(
+        "Attention",
+        [_t("X", [B, S, D]), _t("W", [D, 3 * D]), _t("B", [3 * D])],
+        [_t("Y", [B, S, D])],
+        domain="com.microsoft",
+        attributes={"num_heads": H},
+    )
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU EP has no com.microsoft.Attention kernel")
     check(model, feeds)
 
 

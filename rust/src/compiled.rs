@@ -58,18 +58,17 @@ pub fn compile_enabled(has_control_flow: bool) -> bool {
 ///     (`contiguous_eval`) and/or emit a data-dependent output shape — both illegal inside an
 ///     `mlx_compile` trace (the placeholder has no data), so a subgraph containing one is never
 ///     general-compiled.
-fn is_general_compile_unsafe(op_type: &str) -> bool {
+fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
     matches!(
-        op_type,
+        n.op_type.as_str(),
         "GroupQueryAttention"
             | "PagedAttention"
-            | "Attention"
             | "MultiHeadAttention"
             | "SparseAttention"
             | "Det"
             | "NonZero"
             | "Unique"
-    )
+    ) || (n.op_type == "Attention" && n.domain != "com.microsoft")
 }
 
 /// Decide whether the general compiled fast path is allowed for this plan. Shares the compile
@@ -107,7 +106,7 @@ pub fn general_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     }
     !nodes
         .iter()
-        .any(|n| is_general_compile_unsafe(&n.op_type) || reads_data_dependent_shape(n))
+        .any(|n| is_general_compile_unsafe(n) || reads_data_dependent_shape(n))
 }
 
 /// Decide whether the compiled-PREFILL fast path (Phase 2) is allowed for this plan. Prefill is the
@@ -153,6 +152,23 @@ pub fn detect_seq_len(
             }
         }
     }
+    if plan.nodes.iter().any(|n| n.op_type == "MultiHeadAttention") {
+        // Whisper's dynamic Range/Tile position-id island can split `input_ids` away from the main
+        // decoder partition. The partition still receives a rank-3 token-state boundary tensor
+        // [B,S,H], whose middle dimension is the query length.
+        let mut seen = HashSet::new();
+        for inp in plan.nodes.iter().flat_map(|n| n.inputs.iter()) {
+            if inp.source == Src::CtxInput
+                && !inp.constant
+                && seen.insert(inp.ctx_index)
+                && let Ok((_d, shape, _t)) = read_ctx_input_raw(api, kctx, inp.ctx_index)
+                && shape.len() == 3
+                && shape[1] > 0
+            {
+                return Some(shape[1] as i32);
+            }
+        }
+    }
     None
 }
 
@@ -161,14 +177,13 @@ pub fn detect_seq_len(
 /// at compiled-closure build time: `cap` = a GQA past-KV cache's seq-axis (2) length, and `total` =
 /// valid keys after this step (= `total_sequence_length[0]`, or the `attention_mask` width when that
 /// scalar is computed in-subgraph). Shared iff `cap > total - S` (the buffer holds more than the
-/// valid past). Returns `(shared, mask_ctx_index)` — `mask_ctx_index` is the `attention_mask` ctx
-/// input used to recover the valid-past RoPE start at apply time (`-1` if unknown). `None` when the
-/// shape is not a recognizable decoder GQA.
+/// valid past). Returns `(shared, mask_ctx_index, total_seq_ctx_index)`. `None` when the shape is not
+/// a recognizable decoder GQA.
 fn detect_shared_kv(
     plan: &Plan,
     api: *const ort::OrtApi,
     kctx: *mut ort::OrtKernelContext,
-) -> Option<(bool, i32)> {
+) -> Option<(bool, i32, i32)> {
     let s = detect_seq_len(api, kctx, plan).unwrap_or(1);
     let mask_ctx_index = plan
         .nodes
@@ -194,7 +209,9 @@ fn detect_shared_kv(
         // ctx input; otherwise recover it from the attention_mask width (the in-subgraph scalar is
         // Cast(Gather(Shape(attention_mask),1))).
         let ts = &node.inputs[6];
+        let mut total_seq_ctx_index = -1;
         let total = if ts.source == Src::CtxInput && !ts.constant {
+            total_seq_ctx_index = ts.ctx_index as i32;
             match read_ctx_input_raw(api, kctx, ts.ctx_index) {
                 Ok((data, _shape, _t)) if !data.is_null() => unsafe { *(data as *const i32) },
                 _ => continue,
@@ -207,7 +224,7 @@ fn detect_shared_kv(
         } else {
             continue;
         };
-        return Some((cap > total - s, mask_ctx_index));
+        return Some((cap > total - s, mask_ctx_index, total_seq_ctx_index));
     }
     None
 }
@@ -283,7 +300,35 @@ pub fn try_compiled(
     kctx: *mut ort::OrtKernelContext,
     stream: mlxsys::mlx_stream,
 ) -> Result<bool, MlxError> {
-    let cfg = slot.get(unsafe { &*plan_ptr }).config;
+    let mut cfg = slot.get(unsafe { &*plan_ptr }).config;
+    if matches!(cfg.shape_mode, ShapeMode::Shapeless) {
+        let plan = unsafe { &*plan_ptr };
+        let has_gqa = plan
+            .nodes
+            .iter()
+            .any(|n| n.op_type == "GroupQueryAttention");
+        let has_mha = plan.nodes.iter().any(|n| n.op_type == "MultiHeadAttention");
+        let has_fused_gqa_rope = plan.nodes.iter().any(|n| {
+            n.op_type == "GroupQueryAttention" && n.ints.get("do_rotary").copied().unwrap_or(1) != 0
+        });
+        if has_gqa && !has_fused_gqa_rope {
+            // Qwen exports standalone RotaryEmbedding nodes and sets GQA do_rotary=0. Keep the
+            // compiled KV-cache machinery, but do not require or synthesize GQA cos/sin inputs.
+            cfg.rope_as_data = false;
+            slot.get_mut(unsafe { &mut *plan_ptr }).config = cfg;
+        }
+        if has_mha && !has_gqa {
+            // Whisper-style MHA decode has no RoPE inputs and uses growing (non-aliased) KV outputs.
+            // Its current-token Q/K/V shapes stay fixed at S=1 while concat carries the dynamic past
+            // extent inside MLX, so shapeless compile can replay it without GQA's synthetic RoPE or
+            // shared-buffer machinery.
+            cfg.rope_as_data = false;
+            cfg.kv_alias = false;
+            cfg.delta_copyout = false;
+            cfg.contiguous_outputs = true;
+            slot.get_mut(unsafe { &mut *plan_ptr }).config = cfg;
+        }
+    }
     if !slot.get(unsafe { &*plan_ptr }).enabled {
         return Ok(false);
     }
@@ -344,12 +389,12 @@ pub fn try_compiled(
         }
     }
 
-    // ---- rope_as_data prologue (decode / prefill): position + valid_past fed as DATA -------------
+    // ---- decode/prefill prologue: position + valid_past fed as DATA ------------------------------
     // `past` = RoPE start = position of the new query rows, and `s` = number of new rows (1 for
     // decode, S for prefill). Both the synth cos/sin rows and the KV delta below use them.
     let mut past: i32 = 0;
     let mut s_new: i32 = 0;
-    if cfg.rope_as_data {
+    if cfg.rope_as_data || cfg.kv_alias {
         let s = detect_seq_len(api, kctx, unsafe { &*plan_ptr }).unwrap_or(1);
         s_new = s;
         // Current RoPE start. In the growing contract this is the past-KV sequence length (past_k's
@@ -358,10 +403,20 @@ pub fn try_compiled(
         past = {
             let plan = unsafe { &*plan_ptr };
             let c = slot.get(plan);
-            if c.shared_kv && c.mask_ctx_index >= 0 {
+            if c.shared_kv && c.total_seq_ctx_index >= 0 {
+                let (data, _shape, _t) =
+                    read_ctx_input_raw(api, kctx, c.total_seq_ctx_index as usize)?;
+                if data.is_null() {
+                    return Ok(false);
+                }
+                (unsafe { *(data as *const i32) }) - s
+            } else if c.shared_kv && c.mask_ctx_index >= 0 {
                 let (_d, shape, _t) = read_ctx_input_raw(api, kctx, c.mask_ctx_index as usize)?;
                 (*shape.get(1).unwrap_or(&0) as i32) - s
             } else {
+                if c.rope_past_ctx_index < 0 {
+                    return Ok(false);
+                }
                 let idx = c.rope_past_ctx_index as usize;
                 let axis = c.rope_past_axis as usize;
                 let (_d, shape, _t) = read_ctx_input_raw(api, kctx, idx)?;
@@ -373,24 +428,24 @@ pub fn try_compiled(
             }
         };
 
-        // Pre-slice each RoPE cos/sin cache at [past, past+S) and feed the FULL-width rows (the
-        // half-width slice duplicated across both halves) in — keeping the compiled graph static and
-        // free of any Slice primitive. Done OUTSIDE the compiled graph so the position stays data.
-        let synth = slot.get(unsafe { &*plan_ptr }).synth_ropes.clone();
-        for sr in &synth {
-            let cache_raw = match unsafe { &*plan_ptr }.cache.get(&sr.cache_name) {
-                Some(a) => a.as_raw(),
-                None => return Ok(false), // cache not resident yet -> eager
-            };
-            let half = shape_of(cache_raw).get(1).copied().unwrap_or(0);
-            if half == 0 {
-                return Ok(false);
+        if cfg.rope_as_data {
+            // Pre-slice each fused-GQA RoPE cos/sin cache outside the compiled graph.
+            let synth = slot.get(unsafe { &*plan_ptr }).synth_ropes.clone();
+            for sr in &synth {
+                let cache_raw = match unsafe { &*plan_ptr }.cache.get(&sr.cache_name) {
+                    Some(a) => a.as_raw(),
+                    None => return Ok(false),
+                };
+                let half = shape_of(cache_raw).get(1).copied().unwrap_or(0);
+                if half == 0 {
+                    return Ok(false);
+                }
+                let row = mk_slice(cache_raw, &[past, 0], &[past + s, half], stream)?;
+                let full = mk_concat(row.as_raw(), row.as_raw(), 1, stream)?;
+                input.append(full.as_raw());
+                arena.push(row);
+                arena.push(full);
             }
-            let row = mk_slice(cache_raw, &[past, 0], &[past + s, half], stream)?; // [S,half]
-            let full = mk_concat(row.as_raw(), row.as_raw(), 1, stream)?; // [S,2*half]
-            input.append(full.as_raw());
-            arena.push(row);
-            arena.push(full);
         }
 
         // Shared-buffer contract: append the live `valid_past` (= `past`) as a [1] int32 closure
@@ -427,7 +482,10 @@ pub fn try_compiled(
 
     let outs = match apply_res {
         Ok(v) => v,
-        Err(_) => {
+        Err(e) => {
+            if crate::trace::tracer().active() {
+                log::debug!("compiled closure apply failed ({e}); falling back to eager");
+            }
             slot.get_mut(unsafe { &mut *plan_ptr }).valid = false; // disable, fall back to eager
             return Ok(false);
         }
@@ -522,10 +580,23 @@ fn build_closure(
                         ctx_index: inp.ctx_index,
                     });
                     // Read the RoPE start (past length) from a past-KV key input's sequence axis.
-                    if cfg.rope_as_data && rope_past < 0 && inp.name.contains(".key") {
+                    if (cfg.rope_as_data || cfg.kv_alias)
+                        && rope_past < 0
+                        && inp.name.contains(".key")
+                    {
                         rope_past = inp.ctx_index as i32;
                     }
                 }
+            }
+            if rope_past < 0 {
+                rope_past = plan
+                    .nodes
+                    .iter()
+                    .find(|n| n.op_type == "GroupQueryAttention" && n.inputs.len() > 3)
+                    .map(|n| &n.inputs[3])
+                    .filter(|inp| inp.source == Src::CtxInput && !inp.constant)
+                    .map(|inp| inp.ctx_index as i32)
+                    .unwrap_or(-1);
             }
         }
         // External boundary outputs, in stable node/output order.
@@ -565,6 +636,13 @@ fn build_closure(
     // Need at least one dynamic input (else the graph is fully constant — cheap to leave eager) and
     // at least one boundary output. `rope_as_data` slots additionally need the decoder RoPE shape.
     if dyn_inputs.is_empty() || ext_outputs.is_empty() {
+        if crate::trace::tracer().active() {
+            log::debug!(
+                "compiled closure declined: {} dynamic inputs, {} external outputs",
+                dyn_inputs.len(),
+                ext_outputs.len()
+            );
+        }
         return true;
     }
     if cfg.rope_as_data && (rope_past < 0 || synth_ropes.is_empty()) {
@@ -573,6 +651,7 @@ fn build_closure(
 
     let mut shared_kv = false;
     let mut mask_ctx_index = -1;
+    let mut total_seq_ctx_index = -1;
     if cfg.rope_as_data {
         // The compiled RoPE uses a [hd,hd] rotate-half matmul, which requires rotary_dim == head_dim
         // (rot == hd). Validate from the live ctx (head dim = last axis of the past-KV cache) vs the
@@ -596,9 +675,17 @@ fn build_closure(
             }
         };
         if !cache_resident {
+            if crate::trace::tracer().active() {
+                log::debug!("compiled closure deferred: RoPE cache is not resident");
+            }
             return false; // transient — constants not warmed yet
         }
         if hd == 0 || half == 0 || 2 * half != hd {
+            if crate::trace::tracer().active() {
+                log::debug!(
+                    "compiled closure declined: unsupported RoPE width (head={hd}, half={half})"
+                );
+            }
             return true; // partial-rotary head not supported by the compiled path
         }
     }
@@ -607,16 +694,20 @@ fn build_closure(
         // the new K/V in place at the (data-dependent) valid-past offset and emits present at the
         // buffer's full capacity — the trace handles both via a data start index + a static-shape
         // additive mask, so the compiled fast path still applies.
-        let detected = detect_shared_kv(unsafe { &*plan_ptr }, api, kctx).unwrap_or((false, -1));
+        let detected =
+            detect_shared_kv(unsafe { &*plan_ptr }, api, kctx).unwrap_or((false, -1, -1));
         shared_kv = detected.0;
         mask_ctx_index = detected.1;
+        total_seq_ctx_index = detected.2;
     }
 
     // Publish the discovered schema + a stable trace payload onto the slot.
     unsafe {
         let c = slot.get_mut(&mut *plan_ptr);
+        c.config = cfg;
         c.shared_kv = shared_kv;
         c.mask_ctx_index = mask_ctx_index;
+        c.total_seq_ctx_index = total_seq_ctx_index;
         c.dyn_inputs = dyn_inputs;
         c.ext_outputs = ext_outputs;
         c.synth_ropes = synth_ropes;
@@ -649,7 +740,11 @@ fn build_closure(
             c.closure = Some(compiled);
             c.valid = true;
         }
-        Err(_) => { /* stay eager */ }
+        Err(e) => {
+            if crate::trace::tracer().active() {
+                log::debug!("compiled closure creation failed ({e}); falling back to eager");
+            }
+        }
     }
     true
 }
@@ -737,7 +832,7 @@ fn trace_body(
     let (res_raw, arena, kv_present) = {
         let plan = unsafe { &mut *plan_ptr };
         let mut tc = TranslationContext::new(plan, api, kctx, stream);
-        if cfg.rope_as_data {
+        if cfg.rope_as_data || cfg.kv_alias {
             // RoPE uses the pre-sliced cos/sin ROW placeholders + a matmul rotate-half, so the graph
             // carries no dynamic Slice (which shapeless `mlx_compile` cannot shape-infer).
             tc.set_compiled_trace(shared_kv, narrow, static_valid_past);
@@ -763,13 +858,13 @@ fn trace_body(
                 let raw = tc.keep(Array::from_raw(a));
                 tc.seed(sr.key.clone(), raw);
             }
-            // Shared-buffer: seed the live `valid_past` scalar (closure input [ndyn+nsynth]).
-            if shared_kv {
-                let mut a = unsafe { mlxsys::mlx_array_new() };
-                unsafe { mlxsys::mlx_vector_array_get(&mut a, input, ndyn + synth_ropes.len()) };
-                let raw = tc.keep(Array::from_raw(a));
-                tc.seed(crate::engine::GQA_VALID_PAST_KEY.to_string(), raw);
-            }
+        }
+        // Shared-buffer: seed the live `valid_past` scalar after any synthetic RoPE rows.
+        if shared_kv {
+            let mut a = unsafe { mlxsys::mlx_array_new() };
+            unsafe { mlxsys::mlx_vector_array_get(&mut a, input, ndyn + synth_ropes.len()) };
+            let raw = tc.keep(Array::from_raw(a));
+            tc.seed(crate::engine::GQA_VALID_PAST_KEY.to_string(), raw);
         }
 
         let res = tc.run_trace(&ext_outputs, cfg.contiguous_outputs)?;
