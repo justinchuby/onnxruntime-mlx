@@ -529,9 +529,54 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     let interleaved = attr_int(n, "rotary_interleaved", 0) != 0;
     let do_rotary = !n.ints.contains_key("do_rotary") || attr_int(n, "do_rotary", 1) != 0;
 
-    let q = ctx.resolve(&n.inputs[0])?; // [B,S,num*hd]
-    let k = ctx.resolve(&n.inputs[1])?; // [B,S,kv*hd]
-    let v = ctx.resolve(&n.inputs[2])?; // [B,S,kv*hd]
+    let packed_qkv = n.inputs[1].source == Src::Absent && n.inputs[2].source == Src::Absent;
+    let (q, k, v) = if packed_qkv {
+        let packed = ctx.resolve(&n.inputs[0])?; // [B,S,(num+2*kv)*hd]
+        let shape = ctx.shape_of(packed);
+        let (b, s, hidden) = (shape[0], shape[1], shape[2]);
+        let total_heads = num_heads + 2 * kv_heads;
+        if total_heads <= 0 || hidden % total_heads != 0 {
+            return Err(
+                "GroupQueryAttention: packed QKV hidden size is not divisible by total heads"
+                    .to_string(),
+            );
+        }
+        let head = hidden / total_heads;
+        let grouped = ctx.reshape(packed, &[b, s, total_heads, head])?;
+        let q_indices = ctx.arange(0.0, num_heads as f64, 1.0, mlx::mlx_dtype__MLX_INT32)?;
+        let k_indices = ctx.arange(
+            num_heads as f64,
+            (num_heads + kv_heads) as f64,
+            1.0,
+            mlx::mlx_dtype__MLX_INT32,
+        )?;
+        let v_indices = ctx.arange(
+            (num_heads + kv_heads) as f64,
+            total_heads as f64,
+            1.0,
+            mlx::mlx_dtype__MLX_INT32,
+        )?;
+        let q = ctx.emit(|res, stream| unsafe {
+            mlx::mlx_take_axis(res, grouped, q_indices, 2, stream)
+        })?;
+        let k = ctx.emit(|res, stream| unsafe {
+            mlx::mlx_take_axis(res, grouped, k_indices, 2, stream)
+        })?;
+        let v = ctx.emit(|res, stream| unsafe {
+            mlx::mlx_take_axis(res, grouped, v_indices, 2, stream)
+        })?;
+        (
+            ctx.reshape(q, &[b, s, num_heads * head])?,
+            ctx.reshape(k, &[b, s, kv_heads * head])?,
+            ctx.reshape(v, &[b, s, kv_heads * head])?,
+        )
+    } else {
+        (
+            ctx.resolve(&n.inputs[0])?, // [B,S,num*hd]
+            ctx.resolve(&n.inputs[1])?, // [B,S,kv*hd]
+            ctx.resolve(&n.inputs[2])?, // [B,S,kv*hd]
+        )
+    };
     let past_k = ctx.resolve(&n.inputs[3])?; // [B,kv,past,hd]
     let past_v = ctx.resolve(&n.inputs[4])?;
 
@@ -1123,6 +1168,11 @@ fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
     // 7,8 are absent, so we must not require their dtype and must not resolve them in the handler.
     let has_bias = ninputs == 11;
     let do_rotary = node.int_attr("do_rotary", 1) != 0;
+    let packed_qkv = node.input_present(0) && !node.input_present(1) && !node.input_present(2);
+    require!(
+        packed_qkv || (node.input_present(0) && node.input_present(1) && node.input_present(2)),
+        "Q/K/V must be either all separate or packed in input 0 with inputs 1 and 2 absent"
+    );
     if has_bias {
         require!(
             !do_rotary,
@@ -1133,7 +1183,11 @@ fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
     // Float inputs that must match the output dtype. cos/sin (7,8) exist only in the 9-input form
     // WITH in-op rotary (do_rotary=1); with external rotary (do_rotary=0) they are absent, as is the
     // whole 11-input Gemma3n variant.
-    let float_idx: &[usize] = if has_bias || !do_rotary {
+    let float_idx: &[usize] = if packed_qkv && (has_bias || !do_rotary) {
+        &[0usize, 3, 4]
+    } else if packed_qkv {
+        &[0usize, 3, 4, 7, 8]
+    } else if has_bias || !do_rotary {
         &[0usize, 1, 2, 3, 4]
     } else {
         &[0usize, 1, 2, 3, 4, 7, 8]
@@ -1208,6 +1262,25 @@ fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
         nh,
         kvh
     );
+    if packed_qkv {
+        let packed = match node.input_info(0) {
+            Some(info) => info,
+            None => deny!("packed QKV input lacks tensor type/shape info"),
+        };
+        require!(
+            packed.shape.len() == 3,
+            "packed QKV input must have rank 3, got rank {}",
+            packed.shape.len()
+        );
+        let hidden = packed.shape[2];
+        let total_heads = nh + 2 * kvh;
+        require!(
+            hidden > 0 && hidden % total_heads == 0,
+            "packed QKV hidden size ({}) must be divisible by total heads ({})",
+            hidden,
+            total_heads
+        );
+    }
     require!(
         node.int_attr("smooth_softmax", 0) != 1,
         "smooth_softmax=1 is unsupported"
