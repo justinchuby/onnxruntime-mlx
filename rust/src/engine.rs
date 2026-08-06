@@ -391,6 +391,7 @@ impl CompiledSubgraph {
 pub struct Plan {
     pub nodes: Vec<NodeDesc>,
     pub cache: HashMap<String, Array>,
+    pub native_mha_decode: bool,
     /// Compiled-decode fast-path state (shapeless + decode features; see [`CompiledConfig::decode`]).
     pub compiled: CompiledSubgraph,
     /// Compiled-prefill fast-path state (shape-keyed + decode features; see [`CompiledConfig::prefill`]).
@@ -401,9 +402,65 @@ pub struct Plan {
 
 impl Plan {
     pub fn new(nodes: Vec<NodeDesc>) -> Self {
+        let dynamic_ranges: Vec<&NodeDesc> = nodes
+            .iter()
+            .filter(|node| {
+                node.op_type == "Range" && node.inputs.iter().any(|input| !input.constant)
+            })
+            .collect();
+        let dynamic_tiles: Vec<&NodeDesc> = nodes
+            .iter()
+            .filter(|node| {
+                node.op_type == "Tile" && node.inputs.get(1).is_some_and(|input| !input.constant)
+            })
+            .collect();
+        let position_graph = match (dynamic_ranges.as_slice(), dynamic_tiles.as_slice()) {
+            ([range], [tile]) => {
+                let producer = |name: &str| {
+                    nodes
+                        .iter()
+                        .find(|node| node.outputs.iter().any(|output| output.name == name))
+                };
+                let limit_is_start_plus_len = producer(&range.inputs[1].name).is_some_and(|add| {
+                    add.op_type == "Add"
+                        && add
+                            .inputs
+                            .iter()
+                            .any(|input| input.name == range.inputs[0].name)
+                });
+                let tile_uses_range = producer(&tile.inputs[0].name).is_some_and(|expand| {
+                    expand.op_type == "Expand"
+                        && expand.inputs.first().is_some_and(|input| {
+                            producer(&input.name).is_some_and(|unsqueeze| {
+                                unsqueeze.op_type == "Unsqueeze"
+                                    && unsqueeze
+                                        .inputs
+                                        .first()
+                                        .is_some_and(|input| input.name == range.outputs[0].name)
+                            })
+                        })
+                });
+                let repeats_are_built =
+                    producer(&tile.inputs[1].name).is_some_and(|concat| concat.op_type == "Concat");
+                range.inputs[2].constant
+                    && limit_is_start_plus_len
+                    && tile_uses_range
+                    && repeats_are_built
+            }
+            _ => false,
+        };
+        let native_mha_decode = position_graph
+            && nodes.len() > 32
+            && nodes
+                .iter()
+                .any(|node| node.op_type == "MultiHeadAttention")
+            && nodes.iter().any(|node| {
+                node.op_type == "MatMulNBits" && node.ints.get("bits").copied().unwrap_or(4) == 8
+            });
         Plan {
             nodes,
             cache: HashMap::new(),
+            native_mha_decode,
             compiled: CompiledSubgraph::new(CompiledConfig::decode()),
             prefill: CompiledSubgraph::new(CompiledConfig::prefill()),
             general: CompiledSubgraph::new(CompiledConfig::general()),
@@ -1485,6 +1542,10 @@ impl<'a> TranslationContext<'a> {
     /// Mark this context as a GENERAL compiled-subgraph trace (see [`Self::in_general_trace`]).
     pub(crate) fn set_general_trace(&mut self) {
         self.in_general_trace = true;
+    }
+
+    pub(crate) fn native_mha_decode(&self) -> bool {
+        self.plan.native_mha_decode
     }
 
     /// Take the shared-buffer KV `present` outputs discovered during the compiled trace, handing them

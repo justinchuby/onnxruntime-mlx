@@ -163,10 +163,10 @@ unsafe fn get_capability_impl(
             }
         }
 
-        // ORT's Q8-specialized Whisper decoder is substantially faster on CPU for token-at-a-time
-        // MHA. Decline that complete graph rather than fragmenting it around CPU islands; the
-        // encoder remains on MLX and uses the static compiled path.
-        let prefer_cpu_q8_mha_graph = nodes.len() > 32
+        // Foundry's Q8 Whisper decoder has runtime Range/Tile nodes for position IDs. Keep the
+        // complete decoder on MLX; the translator handles those two dynamic shape nodes inside the
+        // EP so they do not create ORT CPU islands.
+        let native_q8_mha_graph = nodes.len() > 32
             && nodes.iter().any(|&node| {
                 let view = NodeView::new(ep.ort_api, node);
                 view.op_type() == "MultiHeadAttention"
@@ -174,16 +174,37 @@ unsafe fn get_capability_impl(
             && nodes.iter().any(|&node| {
                 let view = NodeView::new(ep.ort_api, node);
                 view.op_type() == "MatMulNBits" && view.int_attr("bits", 4) == 8
-            });
+            })
+            && nodes
+                .iter()
+                .filter(|&&node| {
+                    let view = NodeView::new(ep.ort_api, node);
+                    view.op_type() == "Range"
+                        && view.read_const_scalar_f64(2) == Some(1.0)
+                        && (0..3).any(|index| view.read_const_scalar_f64(index).is_none())
+                })
+                .count()
+                == 1
+            && nodes
+                .iter()
+                .filter(|&&node| {
+                    let view = NodeView::new(ep.ort_api, node);
+                    view.op_type() == "Tile" && !view.is_const_int64(1)
+                })
+                .count()
+                == 1;
 
         // Which nodes can MLX translate exactly (registry claim predicate).
         let supported: Vec<bool> = nodes
             .iter()
             .map(|&node| {
-                if in_cf_body || prefer_cpu_q8_mha_graph {
+                if in_cf_body {
                     return false;
                 }
                 let view = NodeView::new(ep.ort_api, node);
+                if native_q8_mha_graph && matches!(view.op_type().as_str(), "Range" | "Tile") {
+                    return true;
+                }
                 claimable(&view)
             })
             .collect();
@@ -1582,7 +1603,9 @@ unsafe fn compute_impl(
         // shapeless closure; prefill (S>1) is handled by the shape-keyed prefill path below, and
         // ineligible plans fall through to the eager translator.
         let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &*plan_ptr);
-        if (*plan_ptr).compiled.enabled && seq_len == Some(1) {
+        let native_batch_supported = !(*plan_ptr).native_mha_decode
+            || crate::compiled::detect_batch_size(info.ort_api, kctx, &*plan_ptr) == Some(1);
+        if (*plan_ptr).compiled.enabled && seq_len == Some(1) && native_batch_supported {
             // Cache state: replay (HIT) if the shapeless closure is already compiled, else first
             // trace+compile (MISS). Decode is shapeless, so it never retraces (empty shape key).
             let pre_valid = (*plan_ptr).compiled.valid;

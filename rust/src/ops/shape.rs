@@ -512,6 +512,12 @@ fn split_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
 
 fn tile_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let data = ctx.resolve(&n.inputs[0])?;
+    if ctx.native_mha_decode() && ctx.rope_dynamic() && !n.inputs[1].constant {
+        // The token-at-a-time decoder repeats are [1, 1]. Keep this as graph data instead of
+        // forcing a host read during the shapeless compiled trace.
+        ctx.bind(&n.outputs[0], data);
+        return Ok(());
+    }
     let repeats = read_ints(ctx, n, 1)?;
     let reps: Vec<i32> = repeats.iter().map(|&x| x as i32).collect();
     let r = ctx.emit(|res, s| unsafe { mlx::mlx_tile(res, data, reps.as_ptr(), reps.len(), s) })?;
@@ -580,6 +586,14 @@ fn identity_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErro
 }
 
 fn range_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    if ctx.native_mha_decode() && ctx.rope_dynamic() && n.inputs.iter().any(|input| !input.constant)
+    {
+        // Decode forms Range(start, start + 1, 1). Its one value is the dynamic start itself.
+        let start = ctx.resolve(&n.inputs[0])?;
+        let start = ctx.reshape(start, &[1])?;
+        ctx.bind(&n.outputs[0], start);
+        return Ok(());
+    }
     let start = read_range_scalar(ctx, n, 0)?;
     let limit = read_range_scalar(ctx, n, 1)?;
     let delta = read_range_scalar(ctx, n, 2)?;
@@ -589,7 +603,18 @@ fn range_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
     Ok(())
 }
 
-fn read_range_scalar(ctx: &TranslationContext, n: &NodeDesc, i: usize) -> Result<f64, MlxError> {
+fn read_range_scalar(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    i: usize,
+) -> Result<f64, MlxError> {
+    if n.inputs[i].source == Src::Intermediate {
+        return ctx
+            .read_ints_eval(&n.inputs[i])?
+            .first()
+            .map(|&value| value as f64)
+            .ok_or_else(|| "Range expected a scalar input".to_string());
+    }
     let h = ctx.raw_host(&n.inputs[i])?;
     if h.count != 1 || h.data.is_null() {
         return Err("Range expected a scalar initializer".to_string());
