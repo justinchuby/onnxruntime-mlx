@@ -334,6 +334,112 @@ fn matmulnbits_zp8_f32(
     ctx.astype(zp, mlx::mlx_dtype__MLX_FLOAT32)
 }
 
+fn matmulnbits_scales(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    big_n: i32,
+    nblocks: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let scales_ref = &n.inputs[2];
+    let key = format!("{}#qs#{big_n}x{nblocks}", scales_ref.name);
+    if (scales_ref.constant || scales_ref.source == Src::Initializer)
+        && let Some(scales) = ctx.cache_get(&key)
+    {
+        return Ok(scales);
+    }
+    if scales_ref.constant || scales_ref.source == Src::Initializer {
+        let host = ctx.raw_host(scales_ref)?;
+        let count = (big_n as usize) * (nblocks as usize);
+        if host.count != count {
+            return Err("MatMulNBits: scale count does not match N * nblocks".to_string());
+        }
+        let shape = [big_n, nblocks];
+        let scales = Array::from_data(
+            host.data,
+            &shape,
+            crate::engine::mlx_dtype_from_onnx(host.dtype),
+        );
+        Ok(ctx.cache_put(key, scales))
+    } else {
+        let scales = ctx.resolve(scales_ref)?;
+        ctx.reshape(scales, &[big_n, nblocks])
+    }
+}
+
+fn matmulnbits_symmetric_biases(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    big_n: i32,
+    nblocks: i32,
+    bits: i64,
+    scales2d: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
+    let scales_ref = &n.inputs[2];
+    let key = format!("{}#qb#{big_n}x{nblocks}b{bits}", scales_ref.name);
+    if (scales_ref.constant || scales_ref.source == Src::Initializer)
+        && let Some(biases) = ctx.cache_get(&key)
+    {
+        return Ok(biases);
+    }
+    if scales_ref.constant || scales_ref.source == Src::Initializer {
+        let host = ctx.raw_host(scales_ref)?;
+        let count = (big_n as usize) * (nblocks as usize);
+        if host.count != count {
+            return Err("MatMulNBits: scale count does not match N * nblocks".to_string());
+        }
+        let multiplier = -((1i64 << (bits - 1)) as f32);
+        let shape = [big_n, nblocks];
+        let biases = match host.dtype {
+            ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => {
+                let values = unsafe { std::slice::from_raw_parts(host.data as *const u16, count) };
+                let biases: Vec<u16> = values
+                    .iter()
+                    .map(|&value| {
+                        half::f16::from_f32(half::f16::from_bits(value).to_f32() * multiplier)
+                            .to_bits()
+                    })
+                    .collect();
+                Array::from_data(
+                    biases.as_ptr() as *const c_void,
+                    &shape,
+                    mlx::mlx_dtype__MLX_FLOAT16,
+                )
+            }
+            ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16 => {
+                let values = unsafe { std::slice::from_raw_parts(host.data as *const u16, count) };
+                let biases: Vec<u16> = values
+                    .iter()
+                    .map(|&value| {
+                        half::bf16::from_f32(half::bf16::from_bits(value).to_f32() * multiplier)
+                            .to_bits()
+                    })
+                    .collect();
+                Array::from_data(
+                    biases.as_ptr() as *const c_void,
+                    &shape,
+                    mlx::mlx_dtype__MLX_BFLOAT16,
+                )
+            }
+            ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => {
+                let values = unsafe { std::slice::from_raw_parts(host.data as *const f32, count) };
+                let biases: Vec<f32> = values.iter().map(|&value| value * multiplier).collect();
+                Array::from_data(
+                    biases.as_ptr() as *const c_void,
+                    &shape,
+                    mlx::mlx_dtype__MLX_FLOAT32,
+                )
+            }
+            _ => {
+                return Err("MatMulNBits: scales must be fp16, bf16, or fp32".to_string());
+            }
+        };
+        Ok(ctx.cache_put(key, biases))
+    } else {
+        let neg_mid = f32(ctx, -((1i64 << (bits - 1)) as f32));
+        mul(ctx, scales2d, neg_mid)
+    }
+}
+
 fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let k = *n.ints.get("K").ok_or("MatMulNBits: missing K")?;
     let big_n = *n.ints.get("N").ok_or("MatMulNBits: missing N")?;
@@ -359,8 +465,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
         ctx.mark_fast("mlx_quantized_matmul");
         // Fast path: repacked uint32 weight + per-block scales/biases through mlx_quantized_matmul.
         let w = matmulnbits_repack(ctx, n, big_n, k, block, bits)?;
-        let scales = ctx.resolve(&n.inputs[2])?;
-        let scales2d = ctx.reshape(scales, &[big_n as i32, nblocks])?;
+        let scales2d = matmulnbits_scales(ctx, n, big_n as i32, nblocks)?;
         let biases = if has_zp {
             // bias = -(zp * scale)
             let zpf = if bits == 4 {
@@ -371,8 +476,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             let neg_zp = ctx.unary(mlx::mlx_negative, zpf)?;
             mul(ctx, neg_zp, scales2d)?
         } else {
-            let neg_mid = f32(ctx, -((1i64 << (bits - 1)) as f32));
-            mul(ctx, scales2d, neg_mid)?
+            matmulnbits_symmetric_biases(ctx, n, big_n as i32, nblocks, bits, scales2d)?
         };
         let gs = mlx::mlx_optional_int_ {
             value: block as i32,
@@ -417,8 +521,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             let mid = ctx.astype(mid_f, comp_dt)?;
             sub(ctx, qf, mid)?
         };
-        let scales = ctx.resolve(&n.inputs[2])?;
-        let scales2d = ctx.reshape(scales, &[big_n as i32, nblocks])?;
+        let scales2d = matmulnbits_scales(ctx, n, big_n as i32, nblocks)?;
         let scales2d = ctx.astype(scales2d, comp_dt)?;
         let sc_full = broadcast_blocks(ctx, scales2d, big_n as i32, nblocks, block as i32)?;
         let wdeq = mul(ctx, centered, sc_full)?; // [N, K] comp_dt
