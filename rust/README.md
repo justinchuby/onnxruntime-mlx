@@ -111,12 +111,13 @@ its per-kernel Metal command buffers). Two opt-in modes break that open:
   ```
 
 - **Xcode/Instruments GPU capture** — `ONNXRUNTIME_EP_MLX_GPU_CAPTURE=<path.gputrace>`
-  (or `=1` for a default path) wraps the **first** eval only in
+  (or `=1` for a default path) wraps one selected eager or compiled eval in
   `mlx_metal_start_capture` … `stop_capture`, producing a `.gputrace` bundle with
   full per-kernel GPU timing / occupancy / memory-bandwidth. Requires
   `MTL_CAPTURE_ENABLED=1` exported before the process starts (the capture layer is
-  inserted at device creation); without it the mode logs a clear message and skips
-  rather than aborting.
+  inserted at device creation); choose the zero-based eval with
+  `ONNXRUNTIME_EP_MLX_GPU_CAPTURE_EVAL` (default `0`). Without the capture layer the
+  mode logs a clear message and skips rather than aborting.
 
   ```sh
   MTL_CAPTURE_ENABLED=1 ONNXRUNTIME_EP_MLX_GPU_CAPTURE=/tmp/cap.gputrace ... python ...
