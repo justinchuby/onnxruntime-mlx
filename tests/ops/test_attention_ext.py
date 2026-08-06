@@ -247,6 +247,34 @@ def test_attention(case: tuple) -> None:
     check(model, feeds)
 
 
+def test_attention_reuses_mutated_input_buffers_safely() -> None:
+    """A standalone cross-attention Run has no generation-reset signal, so K/V must stay live."""
+    rng = np.random.default_rng(20260806)
+    q = rng.standard_normal((1, 2, 1, 8)).astype(FLOAT)
+    k = rng.standard_normal((1, 2, 7, 8)).astype(FLOAT)
+    v = rng.standard_normal((1, 2, 7, 8)).astype(FLOAT)
+    model = build_model(
+        "Attention",
+        [_t("Q", [1, 2, 1, 8]), _t("K", [1, 2, 7, 8]), _t("V", [1, 2, 7, 8])],
+        [_t("Y", [1, 2, 1, 8])],
+        opset=24,
+    )
+    feeds = {"Q": q, "K": k, "V": v}
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU EP has no native Attention kernel")
+
+    mlx_session = m._session(model, m.EP_PROVIDERS)
+    cpu_session = m._session(model, ["CPUExecutionProvider"])
+    mlx_session.run(None, feeds)
+
+    k[...] = rng.standard_normal(k.shape)
+    v[...] = rng.standard_normal(v.shape)
+    expected = cpu_session.run(None, feeds)
+    actual = mlx_session.run(None, feeds)
+    for got, want in zip(actual, expected, strict=True):
+        np.testing.assert_allclose(got, want, rtol=2e-3, atol=2e-3)
+
+
 # --- MultiHeadAttention (com.microsoft) ----------------------------------------------------------
 # Separate Q/K/V (+ optional bias), num_heads, scale, unidirectional. The masked (attention_bias /
 # key_padding_mask) and past/present-KV forms are left on CPU (they require an interior optional gap

@@ -398,7 +398,7 @@ impl CompiledSubgraph {
 pub struct Plan {
     pub nodes: Vec<NodeDesc>,
     pub cache: HashMap<String, Array>,
-    pub native_mha_decode: bool,
+    pub native_attention_decode: bool,
     pub dedicated_decode_stream: bool,
     pub stable_cross_cache_enabled: bool,
     /// Boundary K/V inputs used directly by cross-attention MHA nodes.
@@ -409,6 +409,35 @@ pub struct Plan {
     pub prefill: CompiledSubgraph,
     /// General static-shape compiled fast-path state (see [`CompiledConfig::general`]).
     pub general: CompiledSubgraph,
+}
+
+pub(crate) fn is_separate_qkv_attention_op(domain: &str, op_type: &str) -> bool {
+    op_type == "MultiHeadAttention" || (domain.is_empty() && op_type == "Attention")
+}
+
+pub(crate) fn is_separate_qkv_attention(node: &NodeDesc) -> bool {
+    is_separate_qkv_attention_op(&node.domain, &node.op_type)
+}
+
+pub(crate) fn attention_past_key(node: &NodeDesc) -> Option<&TensorRef> {
+    let index = if node.op_type == "MultiHeadAttention" {
+        6
+    } else if node.domain.is_empty() && node.op_type == "Attention" {
+        4
+    } else {
+        return None;
+    };
+    node.inputs.get(index)
+}
+
+pub(crate) fn attention_cross_kv(node: &NodeDesc) -> Option<(&TensorRef, &TensorRef)> {
+    if !is_separate_qkv_attention(node) {
+        return None;
+    }
+    let [key, value] = node.inputs.get(1..3)? else {
+        return None;
+    };
+    (key.source == Src::CtxInput && value.source == Src::CtxInput).then_some((key, value))
 }
 
 impl Plan {
@@ -487,37 +516,32 @@ impl Plan {
             }
             _ => false,
         };
-        let native_mha_decode = position_graph
+        let has_separate_qkv_attention = nodes.iter().any(is_separate_qkv_attention);
+        let native_attention_decode = position_graph
             && nodes.len() > 32
-            && nodes
-                .iter()
-                .any(|node| node.op_type == "MultiHeadAttention")
+            && has_separate_qkv_attention
             && nodes.iter().any(|node| {
                 node.op_type == "MatMulNBits" && node.ints.get("bits").copied().unwrap_or(4) == 8
             });
-        let dedicated_decode_stream = (native_mha_decode || optimized_position_graph)
+        let dedicated_decode_stream = (native_attention_decode || optimized_position_graph)
             && nodes.len() > 32
-            && nodes
-                .iter()
-                .any(|node| node.op_type == "MultiHeadAttention")
+            && has_separate_qkv_attention
             && nodes.iter().any(|node| {
                 node.op_type == "MatMulNBits" && node.ints.get("bits").copied().unwrap_or(4) == 8
             });
         let mut stable_cross_ctx_indices = Vec::new();
-        for node in nodes
-            .iter()
-            .filter(|node| node.op_type == "MultiHeadAttention")
-        {
-            let Some([key, value]) = node.inputs.get(1..3) else {
-                continue;
-            };
-            if key.source == Src::CtxInput && value.source == Src::CtxInput {
-                for input in [key, value] {
-                    if !stable_cross_ctx_indices.contains(&input.ctx_index) {
-                        stable_cross_ctx_indices.push(input.ctx_index);
-                    }
+        for (key, value) in nodes.iter().filter_map(attention_cross_kv) {
+            for input in [key, value] {
+                if !stable_cross_ctx_indices.contains(&input.ctx_index) {
+                    stable_cross_ctx_indices.push(input.ctx_index);
                 }
             }
+        }
+        let has_self_past_reset = nodes.iter().any(|node| {
+            attention_past_key(node).is_some_and(|input| input.source == Src::CtxInput)
+        });
+        if !has_self_past_reset {
+            stable_cross_ctx_indices.clear();
         }
         let stable_cross_cache_enabled =
             !std::env::var_os("ONNXRUNTIME_EP_MLX_NO_STABLE_CROSS_CACHE")
@@ -526,7 +550,7 @@ impl Plan {
         Plan {
             nodes,
             cache: HashMap::new(),
-            native_mha_decode,
+            native_attention_decode,
             dedicated_decode_stream,
             stable_cross_cache_enabled,
             stable_cross_ctx_indices,
@@ -1613,8 +1637,8 @@ impl<'a> TranslationContext<'a> {
         self.in_general_trace = true;
     }
 
-    pub(crate) fn native_mha_decode(&self) -> bool {
-        self.plan.native_mha_decode
+    pub(crate) fn native_attention_decode(&self) -> bool {
+        self.plan.native_attention_decode
     }
 
     /// Take the shared-buffer KV `present` outputs discovered during the compiled trace, handing them
@@ -2005,11 +2029,11 @@ mod tests {
     #[test]
     fn optimized_decoder_position_graph_gets_dedicated_stream() {
         let tiny = Plan::new(optimized_whisper_nodes(384));
-        assert!(!tiny.native_mha_decode);
+        assert!(!tiny.native_attention_decode);
         assert!(tiny.dedicated_decode_stream);
 
         let base = Plan::new(optimized_whisper_nodes(512));
-        assert!(!base.native_mha_decode);
+        assert!(!base.native_attention_decode);
         assert!(base.dedicated_decode_stream);
 
         let mut ambiguous = optimized_whisper_nodes(384);
@@ -2021,6 +2045,14 @@ mod tests {
             .filter(|node| node.op_type != "MultiHeadAttention")
             .collect();
         assert!(!Plan::new(no_attention).dedicated_decode_stream);
+
+        let mut native_attention = optimized_whisper_nodes(384);
+        native_attention
+            .iter_mut()
+            .find(|node| node.op_type == "MultiHeadAttention")
+            .unwrap()
+            .op_type = "Attention".to_string();
+        assert!(Plan::new(native_attention).dedicated_decode_stream);
     }
 
     #[test]
@@ -2028,10 +2060,41 @@ mod tests {
         let mut cross = node("MultiHeadAttention", &["q", "k", "v"], "attention");
         cross.inputs[1] = ctx_input("k", 4);
         cross.inputs[2] = ctx_input("v", 5);
-        assert_eq!(Plan::new(vec![cross]).stable_cross_ctx_indices, vec![4, 5]);
+        let mut self_attention = node(
+            "MultiHeadAttention",
+            &["q", "k", "v", "bias", "mask", "rel", "past_k", "past_v"],
+            "self_attention",
+        );
+        self_attention.inputs[6] = ctx_input("past_k", 6);
+        self_attention.inputs[7] = ctx_input("past_v", 7);
+        assert_eq!(
+            Plan::new(vec![self_attention, cross]).stable_cross_ctx_indices,
+            vec![4, 5]
+        );
 
         let mut partial = node("MultiHeadAttention", &["q", "k", "v"], "attention");
         partial.inputs[1] = ctx_input("k", 4);
         assert!(Plan::new(vec![partial]).stable_cross_ctx_indices.is_empty());
+
+        let mut native = node("Attention", &["q", "k", "v"], "attention");
+        native.inputs[1] = ctx_input("k", 8);
+        native.inputs[2] = ctx_input("v", 9);
+        let mut native_self = node(
+            "Attention",
+            &["q", "k", "v", "mask", "past_k", "past_v"],
+            "self_attention",
+        );
+        native_self.inputs[4] = ctx_input("past_k", 10);
+        native_self.inputs[5] = ctx_input("past_v", 11);
+        assert_eq!(
+            Plan::new(vec![native_self, native]).stable_cross_ctx_indices,
+            vec![8, 9]
+        );
+
+        let mut contrib = node("Attention", &["q", "w", "bias"], "attention");
+        contrib.domain = "com.microsoft".to_string();
+        contrib.inputs[1] = ctx_input("w", 8);
+        contrib.inputs[2] = ctx_input("bias", 9);
+        assert!(Plan::new(vec![contrib]).stable_cross_ctx_indices.is_empty());
     }
 }
