@@ -20,6 +20,15 @@ impl Stream {
         }
     }
 
+    pub fn new_gpu() -> Self {
+        unsafe {
+            let device = mlx::mlx_device_new_type(mlx::mlx_device_type__MLX_GPU, 0);
+            let raw = mlx::mlx_stream_new_device(device);
+            mlx::mlx_device_free(device);
+            Stream { raw }
+        }
+    }
+
     #[inline]
     pub fn as_raw(&self) -> mlx::mlx_stream {
         self.raw

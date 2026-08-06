@@ -1498,6 +1498,7 @@ struct SubgraphComputeInfo {
     base: ort::OrtNodeComputeInfo,
     ort_api: *const ort::OrtApi,
     stream: mlx::mlx_stream,
+    decode_stream: std::sync::Mutex<Option<Stream>>,
     // ORT permits concurrent Run() on one InferenceSession, and CreateState hands every Run the
     // SAME SubgraphComputeInfo. `plan` is mutated by Compute (the compiled-closure cache is filled
     // on cache-MISS; the eager translator writes intermediates), so it must be serialized to avoid
@@ -1525,6 +1526,7 @@ impl SubgraphComputeInfo {
             base,
             ort_api,
             stream,
+            decode_stream: std::sync::Mutex::new(None),
             plan: std::sync::Mutex::new(plan),
             owner_thread: std::sync::Mutex::new(None),
         })
@@ -1592,6 +1594,14 @@ unsafe fn compute_impl(
         // must not alias it. `plan_ptr` stays valid for the whole call while the guard is held.
         let mut plan_guard = info.plan.lock().unwrap_or_else(|e| e.into_inner());
         let plan_ptr: *mut Plan = &mut *plan_guard;
+        let mut decode_stream_guard = info.decode_stream.lock().unwrap_or_else(|e| e.into_inner());
+        let stream = if (*plan_ptr).native_mha_decode {
+            decode_stream_guard
+                .get_or_insert_with(Stream::new_gpu)
+                .as_raw()
+        } else {
+            info.stream
+        };
 
         let node_count = (*plan_ptr).nodes.len();
         let tr = crate::trace::tracer();
@@ -1609,13 +1619,8 @@ unsafe fn compute_impl(
             // Cache state: replay (HIT) if the shapeless closure is already compiled, else first
             // trace+compile (MISS). Decode is shapeless, so it never retraces (empty shape key).
             let pre_valid = (*plan_ptr).compiled.valid;
-            match crate::compiled::try_compiled(
-                plan_ptr,
-                Slot::Decode,
-                info.ort_api,
-                kctx,
-                info.stream,
-            ) {
+            match crate::compiled::try_compiled(plan_ptr, Slot::Decode, info.ort_api, kctx, stream)
+            {
                 Ok(true) => {
                     let cache = if pre_valid {
                         crate::trace::CacheState::Hit
@@ -1645,13 +1650,8 @@ unsafe fn compute_impl(
         // fused closure for repeats. Declines (=> eager) for any non-decoder / partial-rotary shape.
         if (*plan_ptr).prefill.enabled && matches!(seq_len, Some(s) if s > 1) {
             let pre_valid = (*plan_ptr).prefill.valid;
-            match crate::compiled::try_compiled(
-                plan_ptr,
-                Slot::Prefill,
-                info.ort_api,
-                kctx,
-                info.stream,
-            ) {
+            match crate::compiled::try_compiled(plan_ptr, Slot::Prefill, info.ort_api, kctx, stream)
+            {
                 Ok(true) => {
                     // Shape-keyed on the query length S: a changed key means MLX retraced under us.
                     let cache = if pre_valid {
@@ -1682,13 +1682,8 @@ unsafe fn compute_impl(
         // control-flow subgraphs and on any trace/apply doubt.
         if (*plan_ptr).general.enabled {
             let pre_valid = (*plan_ptr).general.valid;
-            match crate::compiled::try_compiled(
-                plan_ptr,
-                Slot::General,
-                info.ort_api,
-                kctx,
-                info.stream,
-            ) {
+            match crate::compiled::try_compiled(plan_ptr, Slot::General, info.ort_api, kctx, stream)
+            {
                 Ok(true) => {
                     let cache = if pre_valid {
                         crate::trace::CacheState::Hit
@@ -1719,7 +1714,7 @@ unsafe fn compute_impl(
             }
         }
 
-        let mut tctx = TranslationContext::new(&mut *plan_ptr, info.ort_api, kctx, info.stream);
+        let mut tctx = TranslationContext::new(&mut *plan_ptr, info.ort_api, kctx, stream);
         match tctx.execute() {
             Ok(()) => {
                 tr.record_compute_path(
