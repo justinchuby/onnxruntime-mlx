@@ -61,14 +61,14 @@ pub fn compile_enabled(has_control_flow: bool) -> bool {
 fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
     is_separate_qkv_attention(n)
         || matches!(
-        n.op_type.as_str(),
-        "GroupQueryAttention"
-            | "PagedAttention"
-            | "SparseAttention"
-            | "Det"
-            | "NonZero"
-            | "Unique"
-    )
+            n.op_type.as_str(),
+            "GroupQueryAttention"
+                | "PagedAttention"
+                | "SparseAttention"
+                | "Det"
+                | "NonZero"
+                | "Unique"
+        )
 }
 
 /// Decide whether the general compiled fast path is allowed for this plan. Shares the compile
@@ -369,7 +369,7 @@ pub fn try_compiled(
     stream: mlxsys::mlx_stream,
 ) -> Result<bool, MlxError> {
     let mut cfg = slot.get(unsafe { &*plan_ptr }).config;
-    if matches!(cfg.shape_mode, ShapeMode::Shapeless) {
+    {
         let plan = unsafe { &*plan_ptr };
         let has_gqa = plan
             .nodes
@@ -385,7 +385,7 @@ pub fn try_compiled(
             cfg.rope_as_data = false;
             slot.get_mut(unsafe { &mut *plan_ptr }).config = cfg;
         }
-        if has_separate_attention && !has_gqa {
+        if matches!(cfg.shape_mode, ShapeMode::Shapeless) && has_separate_attention && !has_gqa {
             // Separate-QKV Attention decode has no RoPE inputs and uses growing (non-aliased) KV
             // outputs. Its current-token Q/K/V shapes stay fixed at S=1 while concat carries the
             // dynamic past extent inside MLX, so shapeless compile can replay it without GQA's

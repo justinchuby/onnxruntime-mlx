@@ -126,6 +126,33 @@ def assert_matches_cpu(
         np.testing.assert_allclose(got, want, rtol=rtol, atol=atol, err_msg=f"output {index}")
 
 
+def assert_mlx_claims(model: bytes, feeds: dict[str, np.ndarray]) -> None:
+    """Assert that at least one node executes on MLX rather than CPU fallback."""
+    import json
+    import os
+
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    options.enable_profiling = True
+    options.profile_file_prefix = "mlx_claim_probe"
+    session = ort.InferenceSession(model, options, providers=EP_PROVIDERS)
+    session.run(None, feeds)
+    profile_path = session.end_profiling()
+    try:
+        with open(profile_path) as profile:
+            events = json.load(profile)
+    finally:
+        os.remove(profile_path)
+    providers = {
+        event.get("args", {}).get("provider")
+        for event in events
+        if event.get("cat") == "Node" and event.get("args", {}).get("provider")
+    }
+    assert "MLXExecutionProvider" in providers, (
+        f"MLX EP did not claim the node (ran on {providers or 'no EP'})"
+    )
+
+
 def assert_matches_ref(
     model: bytes,
     feeds: dict[str, np.ndarray],
@@ -254,9 +281,14 @@ def gqa_model(
     do_rotary: int,
     interleaved: int = 0,
     rope_cache: bool = True,
+    packed_qkv: bool = False,
 ) -> tuple[bytes, dict[str, np.ndarray]]:
-    """GroupQueryAttention. With `rope_cache=False` the cos/sin cache inputs (7,8) are ABSENT
-    (empty slots) — the external-rotary form (do_rotary=0) that genai exports emit."""
+    """GroupQueryAttention.
+
+    With ``rope_cache=False`` the cos/sin cache inputs (7,8) are absent — the
+    external-rotary form that GPU exports emit. With ``packed_qkv=True``, input
+    0 contains ``[Q|K|V]`` and inputs 1/2 are absent — the CPU-export form.
+    """
     present = past + seq
     max_seq = present + 4
     scale = 1.0 / np.sqrt(head)
@@ -280,10 +312,29 @@ def gqa_model(
         if rope_cache
         else ir.Value(name="")
     )
+    q_input = tensor(
+        "query",
+        DataType.FLOAT,
+        [
+            batch,
+            seq,
+            (num_heads + 2 * kv_heads) * head if packed_qkv else num_heads * head,
+        ],
+    )
+    key_input = (
+        ir.Value(name="")
+        if packed_qkv
+        else tensor("key", DataType.FLOAT, [batch, seq, kv_heads * head])
+    )
+    value_input = (
+        ir.Value(name="")
+        if packed_qkv
+        else tensor("value", DataType.FLOAT, [batch, seq, kv_heads * head])
+    )
     inputs = [
-        tensor("query", DataType.FLOAT, [batch, seq, num_heads * head]),
-        tensor("key", DataType.FLOAT, [batch, seq, kv_heads * head]),
-        tensor("value", DataType.FLOAT, [batch, seq, kv_heads * head]),
+        q_input,
+        key_input,
+        value_input,
         tensor("past_key", DataType.FLOAT, [batch, kv_heads, past, head]),
         tensor("past_value", DataType.FLOAT, [batch, kv_heads, past, head]),
         tensor("seqlens_k", DataType.INT32, [batch]),
@@ -310,14 +361,15 @@ def gqa_model(
         },
     )
     feeds = {
-        "query": q,
-        "key": k,
-        "value": v,
+        "query": np.concatenate([q, k, v], axis=-1) if packed_qkv else q,
         "past_key": past_k,
         "past_value": past_v,
         "seqlens_k": seqlens_k,
         "total_sequence_length": total,
     }
+    if not packed_qkv:
+        feeds["key"] = k
+        feeds["value"] = v
     if rope_cache:
         feeds["cos_cache"] = cos
         feeds["sin_cache"] = sin
