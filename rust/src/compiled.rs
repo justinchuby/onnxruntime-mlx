@@ -517,12 +517,15 @@ pub fn try_compiled(
     } else {
         None
     };
-    let _eval_region = tr.eval_region();
-    if mlx::eval(&outs).is_err() {
+    let eval_result = {
+        let _capture = tr.begin_gpu_capture();
+        let _eval_region = tr.eval_region();
+        mlx::eval(&outs)
+    };
+    if eval_result.is_err() {
         slot.get_mut(unsafe { &mut *plan_ptr }).valid = false;
         return Ok(false);
     }
-    drop(_eval_region);
     if let Some(t0) = eval_t0 {
         tr.record_phase("eval", t0.elapsed());
     }

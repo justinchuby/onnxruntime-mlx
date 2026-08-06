@@ -20,7 +20,7 @@
 //!     cat `op`), and a rich per-op detail span (shapes / dtype / elements / bytes).
 //!   * **Seeing INSIDE the fused eval — Xcode GPU capture**
 //!     (`ONNXRUNTIME_EP_MLX_GPU_CAPTURE=<path.gputrace>`, `ONNXRUNTIME_EP_MLX_GPU_CAPTURE_EVAL=<n>`):
-//!     capture the Nth boundary eval (default 0) with `mlx_metal_start_capture`/
+//!     capture the Nth eager or compiled boundary eval attempt (default 0) with `mlx_metal_start_capture`/
 //!     `stop_capture` → a `.gputrace` bundle with full per-kernel timing / occupancy /
 //!     bandwidth. This is the faithful detailed view: it captures the REAL fused
 //!     execution without perturbing it. For decode set EVAL to a steady-state token
