@@ -22,6 +22,10 @@ use crate::mlx::Stream;
 use crate::registry::{NodeView, claimable};
 use crate::sys::{mlx, ort};
 
+fn use_dedicated_decode_stream(enabled: bool, seq_len: Option<i32>) -> bool {
+    enabled && seq_len == Some(1)
+}
+
 #[repr(C)]
 pub struct MlxEp {
     base: ort::OrtEp,
@@ -1594,8 +1598,9 @@ unsafe fn compute_impl(
         // must not alias it. `plan_ptr` stays valid for the whole call while the guard is held.
         let mut plan_guard = info.plan.lock().unwrap_or_else(|e| e.into_inner());
         let plan_ptr: *mut Plan = &mut *plan_guard;
+        let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &*plan_ptr);
         let mut decode_stream_guard = info.decode_stream.lock().unwrap_or_else(|e| e.into_inner());
-        let stream = if (*plan_ptr).native_mha_decode {
+        let stream = if use_dedicated_decode_stream((*plan_ptr).dedicated_decode_stream, seq_len) {
             decode_stream_guard
                 .get_or_insert_with(Stream::new_gpu)
                 .as_raw()
@@ -1612,7 +1617,6 @@ unsafe fn compute_impl(
         // Compiled-decode fast path: handle single-token (S==1) decode via the once-compiled
         // shapeless closure; prefill (S>1) is handled by the shape-keyed prefill path below, and
         // ineligible plans fall through to the eager translator.
-        let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &*plan_ptr);
         let native_batch_supported = !(*plan_ptr).native_mha_decode
             || crate::compiled::detect_batch_size(info.ort_api, kctx, &*plan_ptr) == Some(1);
         if (*plan_ptr).compiled.enabled && seq_len == Some(1) && native_batch_supported {
@@ -1759,5 +1763,18 @@ unsafe extern "C" fn release_node_compute_infos(
                 drop(Box::from_raw(ptr as *mut SubgraphComputeInfo));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::use_dedicated_decode_stream;
+
+    #[test]
+    fn dedicated_stream_is_decode_only() {
+        assert!(use_dedicated_decode_stream(true, Some(1)));
+        assert!(!use_dedicated_decode_stream(true, Some(2)));
+        assert!(!use_dedicated_decode_stream(true, None));
+        assert!(!use_dedicated_decode_stream(false, Some(1)));
     }
 }

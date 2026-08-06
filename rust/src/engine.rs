@@ -392,6 +392,7 @@ pub struct Plan {
     pub nodes: Vec<NodeDesc>,
     pub cache: HashMap<String, Array>,
     pub native_mha_decode: bool,
+    pub dedicated_decode_stream: bool,
     /// Compiled-decode fast-path state (shapeless + decode features; see [`CompiledConfig::decode`]).
     pub compiled: CompiledSubgraph,
     /// Compiled-prefill fast-path state (shape-keyed + decode features; see [`CompiledConfig::prefill`]).
@@ -449,7 +450,42 @@ impl Plan {
             }
             _ => false,
         };
+        let optimized_position_graph = match (dynamic_ranges.as_slice(), dynamic_tiles.as_slice()) {
+            ([range], [tile]) => {
+                let producer = |name: &str| {
+                    nodes
+                        .iter()
+                        .find(|node| node.outputs.iter().any(|output| output.name == name))
+                };
+                let limit_is_start_plus_len = producer(&range.inputs[1].name).is_some_and(|add| {
+                    add.op_type == "Add"
+                        && add
+                            .inputs
+                            .iter()
+                            .any(|input| input.name == range.inputs[0].name)
+                });
+                let tile_uses_range = producer(&tile.inputs[0].name).is_some_and(|unsqueeze| {
+                    unsqueeze.op_type == "Unsqueeze"
+                        && unsqueeze
+                            .inputs
+                            .first()
+                            .is_some_and(|input| input.name == range.outputs[0].name)
+                });
+                let repeats_are_built =
+                    producer(&tile.inputs[1].name).is_some_and(|concat| concat.op_type == "Concat");
+                limit_is_start_plus_len && tile_uses_range && repeats_are_built
+            }
+            _ => false,
+        };
         let native_mha_decode = position_graph
+            && nodes.len() > 32
+            && nodes
+                .iter()
+                .any(|node| node.op_type == "MultiHeadAttention")
+            && nodes.iter().any(|node| {
+                node.op_type == "MatMulNBits" && node.ints.get("bits").copied().unwrap_or(4) == 8
+            });
+        let dedicated_decode_stream = (native_mha_decode || optimized_position_graph)
             && nodes.len() > 32
             && nodes
                 .iter()
@@ -461,6 +497,7 @@ impl Plan {
             nodes,
             cache: HashMap::new(),
             native_mha_decode,
+            dedicated_decode_stream,
             compiled: CompiledSubgraph::new(CompiledConfig::decode()),
             prefill: CompiledSubgraph::new(CompiledConfig::prefill()),
             general: CompiledSubgraph::new(CompiledConfig::general()),
@@ -1868,4 +1905,78 @@ pub(crate) fn copy_out_raw_delta(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(name: &str) -> TensorRef {
+        TensorRef {
+            name: name.to_string(),
+            source: Src::Intermediate,
+            ctx_index: 0,
+            constant: false,
+            shape_const: false,
+            init: None,
+        }
+    }
+
+    fn output(name: &str) -> OutRef {
+        OutRef {
+            name: name.to_string(),
+            external: false,
+            ctx_index: 0,
+            otype: ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+        }
+    }
+
+    fn node(op_type: &str, inputs: &[&str], output_name: &str) -> NodeDesc {
+        let mut node = NodeDesc::new(op_type.to_string(), String::new(), 17);
+        node.inputs = inputs.iter().map(|name| input(name)).collect();
+        node.outputs = vec![output(output_name)];
+        node
+    }
+
+    fn optimized_whisper_nodes(hidden_size: i64) -> Vec<NodeDesc> {
+        let mut nodes = vec![
+            node("Add", &["start", "length"], "limit"),
+            node("Range", &["start", "limit", "step"], "range"),
+            node("Unsqueeze", &["range", "axes"], "positions"),
+            node("Concat", &["one", "batch"], "repeats"),
+            node("Tile", &["positions", "repeats"], "tiled"),
+            node("MultiHeadAttention", &["q", "k", "v"], "attention"),
+        ];
+        let mut vocab = node("MatMulNBits", &["hidden", "w", "s", "z"], "logits");
+        vocab.ints.insert("bits".to_string(), 8);
+        vocab.ints.insert("K".to_string(), hidden_size);
+        vocab.ints.insert("N".to_string(), 51_865);
+        nodes.push(vocab);
+        while nodes.len() <= 32 {
+            let index = nodes.len();
+            nodes.push(node("Add", &["a", "b"], &format!("filler_{index}")));
+        }
+        nodes
+    }
+
+    #[test]
+    fn optimized_decoder_position_graph_gets_dedicated_stream() {
+        let tiny = Plan::new(optimized_whisper_nodes(384));
+        assert!(!tiny.native_mha_decode);
+        assert!(tiny.dedicated_decode_stream);
+
+        let base = Plan::new(optimized_whisper_nodes(512));
+        assert!(!base.native_mha_decode);
+        assert!(base.dedicated_decode_stream);
+
+        let mut ambiguous = optimized_whisper_nodes(384);
+        ambiguous.push(node("Range", &["x", "y", "z"], "another_range"));
+        assert!(!Plan::new(ambiguous).dedicated_decode_stream);
+
+        let no_attention = optimized_whisper_nodes(384)
+            .into_iter()
+            .filter(|node| node.op_type != "MultiHeadAttention")
+            .collect();
+        assert!(!Plan::new(no_attention).dedicated_decode_stream);
+    }
 }
