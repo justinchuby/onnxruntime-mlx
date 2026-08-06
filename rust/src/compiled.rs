@@ -172,6 +172,26 @@ pub fn detect_seq_len(
     None
 }
 
+pub fn detect_batch_size(
+    api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+    plan: &Plan,
+) -> Option<i32> {
+    let mut seen = HashSet::new();
+    for inp in plan.nodes.iter().flat_map(|node| node.inputs.iter()) {
+        if inp.source == Src::CtxInput
+            && !inp.constant
+            && seen.insert(inp.ctx_index)
+            && let Ok((_data, shape, _dtype)) = read_ctx_input_raw(api, kctx, inp.ctx_index)
+        {
+            if inp.name == "input_ids" {
+                return shape.first().map(|&dim| dim as i32);
+            }
+        }
+    }
+    None
+}
+
 /// Detect whether this session drives a fixed-capacity SHARED KV buffer (present aliased onto past at
 /// a runtime-owned max length) as opposed to the growing past/present contract. Reads live ctx once
 /// at compiled-closure build time: `cap` = a GQA past-KV cache's seq-axis (2) length, and `total` =
@@ -831,8 +851,12 @@ fn trace_body(
 
     let (res_raw, arena, kv_present) = {
         let plan = unsafe { &mut *plan_ptr };
+        let native_mha_decode = plan.native_mha_decode;
         let mut tc = TranslationContext::new(plan, api, kctx, stream);
-        if cfg.rope_as_data || cfg.kv_alias {
+        if (matches!(cfg.shape_mode, ShapeMode::Shapeless) && native_mha_decode)
+            || cfg.rope_as_data
+            || cfg.kv_alias
+        {
             // RoPE uses the pre-sliced cos/sin ROW placeholders + a matmul rotate-half, so the graph
             // carries no dynamic Slice (which shapeless `mlx_compile` cannot shape-infer).
             tc.set_compiled_trace(shared_kv, narrow, static_valid_past);
