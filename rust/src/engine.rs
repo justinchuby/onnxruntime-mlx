@@ -356,6 +356,8 @@ pub struct CompiledSubgraph {
     /// Ctx index of `attention_mask` — its width gives the valid-keys count used to derive the RoPE
     /// start (valid_past) at apply time in shared-buffer mode. `-1` when not shared / not found.
     pub mask_ctx_index: i32,
+    /// Ctx index of GQA `total_sequence_length`; preferred over the mask width when available.
+    pub total_seq_ctx_index: i32,
     /// GQA `present` KV outputs (shared-buffer mode) as `(present_output_name, past_input_ctx_index)`;
     /// their copy-out is a delta write of only the `S` new rows (`delta_copyout`).
     pub kv_present_names: Vec<(String, usize)>,
@@ -378,6 +380,7 @@ impl CompiledSubgraph {
             rope_past_axis: 2,
             shared_kv: false,
             mask_ctx_index: -1,
+            total_seq_ctx_index: -1,
             kv_present_names: Vec::new(),
         }
     }

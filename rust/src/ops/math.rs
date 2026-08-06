@@ -246,15 +246,13 @@ fn softsign_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErro
 /// Gelu (`approximate` = `none` | `tanh`).
 ///   none: `0.5 * x * (1 + erf(x / sqrt(2)))`.
 ///   tanh: `0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))`.
-fn gelu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
-    let x = ctx.resolve(&n.inputs[0])?;
+fn gelu_array(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    approximate: &str,
+) -> Result<mlx::mlx_array, MlxError> {
     let half = scalar_like(ctx, x, 0.5)?;
     let one = scalar_like(ctx, x, 1.0)?;
-    let approximate = n
-        .strings
-        .get("approximate")
-        .map(String::as_str)
-        .unwrap_or("none");
     let gate = if approximate == "tanh" {
         let c0 = scalar_like(ctx, x, 0.797_884_6)?; // sqrt(2/pi)
         let c1 = scalar_like(ctx, x, 0.044_715)?;
@@ -272,7 +270,25 @@ fn gelu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         ctx.binary(mlx::mlx_add, one, e)?
     };
     let hx = ctx.binary(mlx::mlx_multiply, half, x)?;
-    let r = ctx.binary(mlx::mlx_multiply, hx, gate)?;
+    ctx.binary(mlx::mlx_multiply, hx, gate)
+}
+
+fn gelu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let approximate = n
+        .strings
+        .get("approximate")
+        .map(String::as_str)
+        .unwrap_or("none");
+    let r = gelu_array(ctx, x, approximate)?;
+    bind_as_out(ctx, n, r)
+}
+
+fn bias_gelu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let bias = ctx.resolve(&n.inputs[1])?;
+    let biased = ctx.binary(mlx::mlx_add, x, bias)?;
+    let r = gelu_array(ctx, biased, "none")?;
     bind_as_out(ctx, n, r)
 }
 
@@ -348,6 +364,30 @@ fn unary_same_type_claim(node: &NodeView, allow_signed_int: bool) -> ClaimResult
 
 fn float_unary_claim(node: &NodeView) -> ClaimResult {
     unary_same_type_claim(node, false)
+}
+
+fn bias_gelu_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "expects 2 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (x, bias, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(x), Some(b), Some(o)) => (x, b, o),
+        _ => deny!("missing tensor type/shape info on an input or the output"),
+    };
+    require!(
+        x.dtype == bias.dtype && bias.dtype == out.dtype && is_mlx_float(x.dtype),
+        "inputs/output must share one MLX float dtype"
+    );
+    require!(
+        scalar_or_suffix_broadcast(&x.shape, &bias.shape),
+        "bias shape {:?} must be a trailing suffix of input shape {:?}",
+        bias.shape,
+        x.shape
+    );
+    Ok(())
 }
 
 fn signed_numeric_unary_claim(node: &NodeView) -> ClaimResult {
@@ -548,6 +588,13 @@ pub fn register(registry: &mut OpRegistry) {
         "Gelu",
         gelu_op,
         float_unary_claim,
+    );
+    reg_dom(
+        registry,
+        "com.microsoft",
+        "BiasGelu",
+        bias_gelu_op,
+        bias_gelu_claim,
     );
 
     // Clip (min/max as optional inputs or opset<11 attrs).
