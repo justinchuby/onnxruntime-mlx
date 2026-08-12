@@ -252,11 +252,11 @@ fn matmulnbits_repack(
     if wref.constant && cfg!(target_endian = "little") && host.count == expected_bytes {
         // ORT's block-major layout is byte-for-byte the MLX row-major layout when K is divisible
         // by the group size: blocks are consecutive along K, and each byte packs low then high
-        // nibbles. Reinterpret four adjacent bytes as one little-endian uint32 word and borrow the
-        // session-owned initializer instead of duplicating the model's multi-gigabyte weights.
+        // nibbles. Reinterpret four adjacent bytes as one little-endian uint32 word, avoiding the
+        // much more expensive elementwise repack. The cached MLX array owns its storage because a
+        // fused-node input buffer is valid only for the current ORT Compute call.
         let shape = [big_n as i32, words as i32];
-        ctx.record_borrowed_constant(wref, host.data)?;
-        let arr = Array::from_data_managed(host.data, &shape, mlx::mlx_dtype__MLX_UINT32);
+        let arr = Array::from_data(host.data, &shape, mlx::mlx_dtype__MLX_UINT32);
         return Ok(ctx.cache_put(key, arr));
     }
     let src = host.data as *const u8;
@@ -365,8 +365,7 @@ fn matmulnbits_scales(
             return Err("MatMulNBits: scale count does not match N * nblocks".to_string());
         }
         let shape = [big_n, nblocks];
-        ctx.record_borrowed_constant(scales_ref, host.data)?;
-        let scales = Array::from_data_managed(
+        let scales = Array::from_data(
             host.data,
             &shape,
             crate::engine::mlx_dtype_from_onnx(host.dtype),

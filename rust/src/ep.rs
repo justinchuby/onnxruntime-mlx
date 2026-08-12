@@ -15,8 +15,8 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
 
 use crate::engine::{
-    CompiledSubgraph, InitData, NodeDesc, OutRef, Plan, Slot, Src, SubgraphDesc, TensorRef,
-    TranslationContext, is_separate_qkv_attention_op, read_ctx_input_raw,
+    InitData, NodeDesc, OutRef, Plan, Slot, Src, SubgraphDesc, TensorRef, TranslationContext,
+    is_separate_qkv_attention_op,
 };
 use crate::factory::ORT_API_VERSION;
 use crate::mlx::Stream;
@@ -33,36 +33,6 @@ fn reset_stable_cross_caches(plan: &mut Plan, generation_key: Option<usize>) {
         compiled.stable_cross_inputs.clear();
         compiled.stable_generation_key = generation_key;
     }
-}
-
-fn reset_compiled_slot(slot: &mut CompiledSubgraph) {
-    let config = slot.config;
-    let enabled = slot.enabled;
-    *slot = CompiledSubgraph::new(config);
-    slot.enabled = enabled;
-}
-
-fn refresh_borrowed_constants(
-    plan: &mut Plan,
-    ort_api: *const ort::OrtApi,
-    kctx: *mut ort::OrtKernelContext,
-) {
-    let changed = plan
-        .borrowed_constant_ptrs
-        .iter()
-        .any(|(&index, &expected)| {
-            read_ctx_input_raw(ort_api, kctx, index)
-                .map(|(data, _, _)| data as usize != expected)
-                .unwrap_or(true)
-        });
-    if !changed {
-        return;
-    }
-    plan.cache.clear();
-    plan.borrowed_constant_ptrs.clear();
-    reset_compiled_slot(&mut plan.compiled);
-    reset_compiled_slot(&mut plan.prefill);
-    reset_compiled_slot(&mut plan.general);
 }
 
 #[repr(C)]
@@ -1666,7 +1636,6 @@ unsafe fn compute_impl(
         // must not alias it. `plan_ptr` stays valid for the whole call while the guard is held.
         let mut plan_guard = info.plan.lock().unwrap_or_else(|e| e.into_inner());
         let plan_ptr: *mut Plan = &mut *plan_guard;
-        refresh_borrowed_constants(&mut *plan_ptr, info.ort_api, kctx);
         let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &*plan_ptr);
         let generation_key =
             crate::compiled::detect_attention_generation_key(info.ort_api, kctx, &*plan_ptr);
