@@ -228,12 +228,16 @@ const TILE_M: i32 = 64;
 /// dimension (`grid` is Metal's TOTAL thread count, not threadgroup count — see the module doc).
 const THREADGROUP_X: i32 = 128;
 
-/// `ONNXRUNTIME_EP_MLX_BF16_QMM_FP16=1` opt-in gate (same truthy convention as the existing
-/// `ONNXRUNTIME_EP_MLX_NO_COMPILE`-style kill switches: unset/`"0"`/empty = off).
+/// Enabled by default for eligible prefill shapes. Set
+/// `ONNXRUNTIME_EP_MLX_BF16_QMM_FP16=0` to disable it. When MLX's native mixed QMM is explicitly
+/// enabled, prefer that faster private-kernel path instead of wrapping it in this standalone kernel.
 fn env_enabled() -> bool {
+    if std::env::var_os("MLX_BF16_QMM_FP16").is_some_and(|v| v != "0" && !v.is_empty()) {
+        return false;
+    }
     std::env::var_os("ONNXRUNTIME_EP_MLX_BF16_QMM_FP16")
         .map(|v| v != "0" && !v.is_empty())
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 /// Build (once) and cache the single, non-templated kernel object — every eligible shape reuses it
@@ -753,9 +757,9 @@ mod tests {
     }
 
     #[test]
-    fn eligibility_gate_requires_env_and_shape_keyed_compile() {
-        // env var off (whatever the ambient state is when this test runs) + no shape-keyed compile
-        // context => never eligible, regardless of otherwise-perfect shapes/dtypes.
+    fn eligibility_gate_requires_shape_keyed_compile() {
+        // No shape-keyed compile context => never eligible, regardless of otherwise-perfect
+        // shapes/dtypes or the default-on environment gate.
         // SAFETY: test-only; no other test in this process depends on this var being set.
         unsafe { std::env::remove_var("ONNXRUNTIME_EP_MLX_BF16_QMM_FP16") };
         let mut plan = crate::engine::Plan::new(Vec::new());

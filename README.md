@@ -7,77 +7,22 @@ An **MLX-native execution provider** for ONNX Runtime on Apple Silicon, built as
 `libonnxruntime_mlx_ep.dylib` loaded by a stock prebuilt `libonnxruntime.dylib` via
 `RegisterExecutionProviderLibrary` — **no ONNX Runtime fork required**.
 
-Instead of hand-tuned Metal shaders, the EP **translates a fused ONNX decoder subgraph into an
-[MLX](https://github.com/ml-explore/mlx) graph** and lets MLX compile/schedule the Metal work. One
-efficient implementation (MLX) covers the whole decoder for **both prefill and decode** — there are
-no `.metal` kernels to maintain.
+The EP translates fused ONNX subgraphs into [MLX](https://github.com/ml-explore/mlx) graphs for
+encoders, LLM prefill, and token-at-a-time decode.
 
-> **Why MLX-only?** A Phase-0 head-to-head (see [`docs/MLX_EVALUATION.md`](docs/MLX_EVALUATION.md))
-> found the MLX path Pareto-dominant vs. the previous hand-written kernels: **decode 1.02–1.09×
-> (never slower)**, **prefill ~2.5–3.5× faster**, coherent output, and memory-stable. The hand
-> kernels were deleted and MLX promoted to the sole compute path.
+## How it works
 
-## Compute path
+`ONNX fused subgraph → MLX graph → mlx_compile → mlx_eval → ORT outputs`
 
-`ONNX fused subgraph → MLX graph → single mlx_eval at the subgraph boundary → ORT outputs`
+The EP translates supported ONNX regions into MLX, compiles reusable closures, and leaves unsupported
+ops on ORT CPU. It covers common encoder and decoder operators, including quantized matmul, GQA/MHA,
+PagedAttention, RoPE, normalization, convolution, pooling, reductions, and shape operations. See
+[`docs/OP_ARCHITECTURE.md`](docs/OP_ARCHITECTURE.md) for the coverage table.
 
-- **MatMulNBits** → `mlx_quantized_matmul` (int4 weights repacked once, cached on the plan)
-- **QMoE** (quantized Mixture-of-Experts, `quant_type='int'`) → dense per-expert matmuls + top-k
-  softmax routing + SwiGLU/silu/gelu/relu activation (int4/int8 experts dequantized in-graph)
-- **GroupQueryAttention** (RoPE in-op) → `mlx_fast_scaled_dot_product_attention` + `mlx_fast_rope`
-- **PagedAttention** (block-paged KV cache, packed var-length batches) → per-sequence paged gather +
-  GQA causal SDPA + RoPE. ORT ships this CUDA-only, so the MLX EP is the only way it runs on Apple
-  Silicon (there is no CPU fallback).
-- **RMSNormalization / SkipSimplifiedLayerNormalization** → `mlx_fast_rms_norm`
-- **GatherBlockQuantized** (symmetric int4 embedding) → gather + dequant
-- **Softmax / Add / Mul / Sub / Sigmoid / Cast** → the matching MLX elementwise ops
-
-Ops the EP does not translate are left unclaimed and run on ORT's CPU EP.
-
-The translator covers the **full set of ops Mobius emits** (~85 op types) via a modular, opset-aware
-registry (`rust/src/ops/*.rs`) — math/logical, reductions, shape/data-movement, normalizations,
-attention (GQA, PagedAttention, Attention 23/24, MHA, RoPE), dense MatMul/Gemm, Conv/pooling,
-quantized matmul & embedding, quantized Mixture-of-Experts (`QMoE`), and more, in fp32/fp16/bf16. A
-handful of ops that
-need engine-level control-flow or recurrence (`Scan`, `LSTM`, `LinearAttention`, float `MoE`,
-`PackedMultiHeadAttention`) run on ORT CPU by design. See
-[`docs/OP_ARCHITECTURE.md`](docs/OP_ARCHITECTURE.md) for the full coverage table.
-
-## When is a graph fast? (claim + compile rules of thumb)
-
-Peak performance comes from the EP fusing a large region into **one MLX closure** that is traced +
-`mlx_compile`d **once** and replayed — one dispatch instead of hundreds. Whether that happens depends
-on how the graph is shaped. Rules of thumb, fastest → slowest:
-
-1. **Static-shape, fully-claimable feed-forward** (audio / CNN / vision encoders) — *ideal*. The whole
-   graph is one convex cluster, compiled once, replayed. (Perch: 725/725 nodes, 1 subgraph.)
-2. **Dynamic dims that resolve at trace time** are fine. A symbolic batch/sequence/spatial dim, or a
-   `shape`/`starts` derived from `Shape(x)` (a *shape-const* value), is resolved to a concrete extent
-   per **shape key** — so dynamic-spatial Conv/Resize, `[B,S,-1]` reshapes, etc. still compile. But a
-   **shape *change*** at run time **retraces** the closure (the `general` = shape-keyed path), so
-   many distinct shapes = many compiles. Bucket/pad your shapes for best reuse.
-3. **Attention decoders** (`GroupQueryAttention`) get a dedicated **shapeless decode/prefill** path:
-   the growing KV length is a shapeless dim, so per-token decode **never retraces** (KV aliased
-   in-place, delta copy-out). This is the one case where a growing dimension stays fast.
-4. **What forces a slow fallback (per-node eager, or CPU):**
-   - **Control flow** — `If` / `Loop` / `Scan` bodies are never compiled (the whole plan runs eager).
-   - **Data-dependent output shapes** — `NonZero` / `Unique` / a `Reshape` whose target is computed
-     from tensor *values* (not shapes) — these need a mid-graph host read that a single trace can't
-     express, so their subgraph runs eager.
-   - **`Range` with non-constant bounds** stays on CPU: its output extent is value-dependent, and its
-     result often feeds a shape/axes consumer (e.g. the reduce axes of expanded `RMSNormalization`),
-     which would force a mid-compile eval that aborts the closure. `Range` with constant `start`/
-     `limit`/`delta` is claimed and folds to a static extent.
-   - **fp64** anywhere (MLX has no float64), or any op the registry doesn't claim.
-5. **Fragmentation is the real cost.** One unclaimed op *in the middle* of a graph splits it into two
-   islands with a CPU round-trip between them. Sub-5 ms graphs are dispatch/eval-overhead-bound, so a
-   few islands can make MLX *slower* than CPU — the win scales with fused-region compute size, not
-   claim rate alone. Aim to keep declined ops at the graph's edges.
-
-**Diagnosing it yourself:** run with `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG=1` (or the tracer) to print exactly which
-ops were declined, how many, and an actionable reason for each — the fastest way to see why a graph
-fragmented and what to change (e.g. re-export at a higher opset, give a static shape, drop an fp64
-cast).
+Large, fully claimed regions are fastest. Dynamic shapes are compiled per shape key; autoregressive
+decode uses a shapeless path so growing KV length does not retrace. Use
+`ONNXRUNTIME_EP_MLX_VERBOSE=1` or `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG=1` to diagnose fallback and
+fragmentation.
 
 ## Requirements
 
@@ -87,18 +32,14 @@ cast).
 
 ## Versioning (ORT compatibility)
 
-A plugin EP is bound to a single ORT plugin-EP C-ABI version, so **the version number encodes which
-ONNX Runtime it targets**: `0.<ORT_API_VERSION>.<patch>`. The minor is the supported
-`ORT_API_VERSION`, so a build always states exactly one ORT it works with:
+A plugin EP targets one ORT C-ABI version. Package versions use
+`0.<ORT_API_VERSION>.<patch>`:
 
 | onnxruntime-ep-mlx | ONNX Runtime | `ORT_API_VERSION` |
 |---|---|---|
 | `0.27.x` | 1.27.x | 27 |
 
-When ORT ships a new API version (1.28 → `ORT_API_VERSION 28`), the EP moves to `0.28.0`. The leading
-`0.` marks the EP's own surface as pre-1.0; `<patch>` carries feature/fix releases within one ORT
-version. The EP reports this same string to ORT via `GetVersion` (single-sourced from
-`[package].version`).
+For example, ORT 1.28 moves the EP to `0.28.x`.
 
 ## Build
 
@@ -164,6 +105,28 @@ SessionOptionsAppendExecutionProvider_V2(options, env, &ep, /*count*/ 1, ...);
 From Rust via **onnx-genai**: `ONNX_GENAI_EP=metal` +
 `ONNX_GENAI_METAL_EP_LIB=/abs/path/libonnxruntime_mlx_ep.dylib`.
 
+## Large-decoder partition metadata
+
+The EP automatically infers residual layer boundaries from graph topology for decoders of about 24
+layers or larger. Exporters can make the boundaries explicit with the
+ONNX custom metadata key `onnxruntime_ep_mlx.layer_boundary_outputs`. Its value is a JSON array of
+residual output tensor names, one per transformer layer:
+
+```python
+import json
+import onnx
+
+model = onnx.load("decoder/model.onnx", load_external_data=False)
+entry = model.metadata_props.add()
+entry.key = "onnxruntime_ep_mlx.layer_boundary_outputs"
+entry.value = json.dumps(["layer.0.output", "layer.1.output", "layer.2.output"])
+onnx.save(model, "decoder/model.onnx")
+```
+
+Metadata takes precedence over inference and does not rely on node names. The EP chooses a dynamic
+group size of 4-8 layers, targeting about seven partitions. Override it with
+`ONNXRUNTIME_EP_MLX_LAYER_PARTITIONS=<layers>`; use `0` or `off` to disable partitioning.
+
 ## Performance (M1 Max, warm)
 
 Real end-to-end models, median of 10 runs, MLX EP vs the ORT **CPU** EP on the same machine — top-1
@@ -180,7 +143,9 @@ Feed-forward encoders (audio / CNN / vision) are the EP's sweet spot: the whole 
 single MLX closure that is traced + `mlx_compile`d once and replayed, so a static-shape model runs
 end-to-end on the GPU with one dispatch (e.g. Perch: 725/725 nodes claimed, 1 fused subgraph).
 
-For **LLMs**, the EP accelerates both prefill / TTFT and — on larger quantized decoders — decode.
+Eligible BF16 INT4 prefill matmuls use the FP16-tile kernel by default; set
+`ONNXRUNTIME_EP_MLX_BF16_QMM_FP16=0` to disable it.
+
 The **Foundry Local** q4f16 decoders below run on the same M1 Max, warm, MLX EP vs the ORT CPU EP
 (decode = 1 token with 128 past; prefill = 128-token step):
 
@@ -192,22 +157,12 @@ The **Foundry Local** q4f16 decoders below run on the same M1 Max, warm, MLX EP 
 | Mistral-7B-Instruct | GQA, growing KV | **11.89×** | **3.30×** |
 | gemma-4-E2B | Gemma3n, 15-layer | 3.3× | **3.3×** |
 
-The prefill lead grows with prompt length and with model size (Mistral-7B: **11.9×**). Decode is
-weight-bandwidth-bound: on a small 0.5B model the CPU `accuracy_level=4` int8 MatMulNBits path wins
-per-token, but on larger **q4f16** decoders the MLX path pulls ahead — the **gemma-4-E2B** decoder
-(Gemma3n, int4 weights + fp16 activations) runs a decode step in **33 ms vs 111 ms on CPU (3.3×)**,
-and **Mistral-7B** reaches **3.30×** decode — once their fp16 MatMulNBits, `num_heads`-inferred
-RotaryEmbedding, and GroupQueryAttention (9-/11-input, external rotary + attention_bias) all run on
-MLX.
+Muse-Glimmer-30B INT4, with the optimized bundled MLX runtime and automatic 8-layer groups, reaches
+**138.67 prefill tok/s** at 512 tokens and **14.79 decode tok/s** over 200 generated tokens. The
+same-quantization llama.cpp baseline reaches **137.84 / 13.50 tok/s**.
 
-Phi-4-mini additionally exercises a data-dependent `If` (long-context RoPE-cache selection): the EP
-leaves that control-flow node on the CPU (its condition is a runtime value) while still offloading the
-rest of the decoder, so it lands at **5.78×** prefill instead of falling entirely back to CPU.
-
-
-Any op the EP doesn't claim falls back to the ORT CPU EP, so **every** graph still runs correctly —
-the EP is a safe drop-in. The audio numbers above are the public Hugging Face Perch v2 / BirdNET ONNX
-exports, timed as the median of 10 warm runs against the CPU EP on the same machine.
+Decode is weight-bandwidth-bound: small models can favor CPU, while larger q4 decoders benefit from
+MLX. Unclaimed ops fall back to ORT CPU.
 
 ## Profiling & tracing (Perfetto)
 
@@ -253,30 +208,13 @@ capture (0-based, default 0); for decode, eval 0 is prefill/warmup, so pick a st
 
 ## Concurrency
 
-MLX evaluation is **thread-affine** — a given `InferenceSession`'s MLX work must run on the thread
-that first drove it. The rule is simple:
-
-> **Use one `InferenceSession` per thread.** Do not call `Run()` on a single shared session from
-> multiple threads.
-
-Session-per-thread scales cleanly (each thread creates and runs its own session). If you *do* call a
-shared session from another thread, the EP detects it and returns a clean `EP_FAIL` — ORT then
-transparently falls back to the CPU EP for that call, so you get a correct result instead of a crash.
-Internally, each session's compiled-graph cache is mutex-guarded, so there is no data race even under
-misuse.
+MLX evaluation is thread-affine. Use one `InferenceSession` per thread; do not call `Run()` on one
+shared session from multiple threads.
 
 ## Numerical accuracy
 
-Op outputs match the ORT CPU EP to ~1e-5 (float32), and are validated MLX-vs-CPU across the 900+
-`tests/ops` cases plus ONNX's own backend node tests. MLX and CPU use different math libraries, so
-results are *close* but not bit-identical: they can differ in the last ULP or two of float32.
-
-For autoregressive decoding this is worth understanding. A per-step argmax is stable for many tokens
-(early tokens are typically bit-identical to a CPU run), but any float32 reduction-order difference is
-amplified across a long greedy loop — once two candidate logits are within rounding of each other, MLX
-and CPU can pick different tokens and the sequences then diverge. This is expected floating-point
-behavior, not a bug; it does not indicate lower quality, only a different-but-equally-valid rounding.
-If you require bit-exact parity with a CPU reference over a long generation, run decode on the CPU EP.
+Outputs are tolerance-matched against ORT CPU but are not bit-identical. Long greedy generations can
+diverge after near-tied logits because MLX and CPU use different floating-point reduction orders.
 
 ## Layout
 
