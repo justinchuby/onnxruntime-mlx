@@ -634,7 +634,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
 
     let supported = block == 32 || block == 64 || block == 128;
     let y = if supported {
-        // Repacked uint32 weight + per-block scales/biases, shared by both the opt-in fast Metal
+        // Repacked uint32 weight + per-block scales/biases, shared by both the fast Metal
         // kernel below and the always-on `mlx_quantized_matmul` fallback.
         let w = matmulnbits_repack(ctx, n, big_n, k, block, bits)?;
         let scales2d = matmulnbits_scales(ctx, n, big_n as i32, nblocks)?;
@@ -644,11 +644,10 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             matmulnbits_symmetric_biases(ctx, n, big_n as i32, nblocks, bits, scales2d)?
         };
 
-        // Opt-in ONNXRUNTIME_EP_MLX_BF16_QMM_FP16=1 fast custom Metal kernel: BF16 I/O, FP16
-        // threadgroup tiles + simdgroup MMA, float accumulation — narrowly scoped (see
-        // `quant_fastkernel::eligible`) to shape-keyed compiled matrix-matrix prefill (M>1), never
-        // decode. Falls back to the existing `mlx_quantized_matmul` call below on any ineligibility
-        // or runtime failure, so this can never change behavior, only speed it up when it applies.
+        // Default-on fast custom Metal kernel: BF16 I/O, FP16 threadgroup tiles + simdgroup MMA,
+        // float accumulation. It is narrowly scoped (see `quant_fastkernel::eligible`) to
+        // shape-keyed matrix-matrix prefill (M>1), never decode, and falls back below on any
+        // ineligibility or runtime failure.
         let fast = if crate::ops::quant_fastkernel::eligible(
             ctx,
             ashape.len(),

@@ -293,12 +293,43 @@ unsafe fn get_capability_impl(
         } else {
             build_convex_clusters(api, &nodes, &supported)
         };
-        let layer_partition_span = std::env::var("ONNXRUNTIME_EP_MLX_LAYER_PARTITIONS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|&value| value > 0);
+        let layer_boundary_outputs = if in_cf_body {
+            HashSet::new()
+        } else {
+            match graph_metadata_value(api, graph, c"onnxruntime_ep_mlx.layer_boundary_outputs") {
+                Ok(Some(value)) => match serde_json::from_str::<Vec<String>>(&value) {
+                    Ok(outputs) => outputs
+                        .into_iter()
+                        .filter(|name| !name.is_empty())
+                        .collect(),
+                    Err(error) => {
+                        log::warn!(
+                            "ignoring invalid onnxruntime_ep_mlx.layer_boundary_outputs metadata: \
+                             {error}"
+                        );
+                        HashSet::new()
+                    }
+                },
+                Ok(None) => infer_layer_boundary_outputs(api, &nodes),
+                Err(st) => return st,
+            }
+        };
+        let layer_count = nodes
+            .iter()
+            .flat_map(|&node| node_output_names(api, node))
+            .filter(|name| layer_boundary_outputs.contains(name))
+            .collect::<HashSet<_>>()
+            .len();
+        let layer_partition_span = select_layer_partition_span(
+            std::env::var("ONNXRUNTIME_EP_MLX_LAYER_PARTITIONS")
+                .ok()
+                .as_deref(),
+            layer_count,
+        );
         let clusters = match layer_partition_span {
-            Some(span) => split_decoder_layer_clusters(ep.ort_api, &nodes, clusters, span),
+            Some(span) => {
+                split_annotated_layer_clusters(api, &nodes, clusters, &layer_boundary_outputs, span)
+            }
             None => clusters,
         };
 
@@ -325,15 +356,139 @@ unsafe fn get_capability_impl(
     }
 }
 
-/// Split a large decoder cluster at exported transformer-layer boundaries. A whole-model lazy MLX
-/// graph can retain enough prefill intermediates to exceed unified memory on 32 GB systems; one
-/// fused node per layer lets ORT evaluate and release each layer before starting the next. The
-/// split is opt-in and only recognizes the stable `.../layers.N/input_layernorm/...` naming emitted
-/// by the exporter, so unrelated graphs and unnamed nodes preserve the existing clustering.
-fn split_decoder_layer_clusters(
-    api: *const ort::OrtApi,
+/// Select a layer span from an explicit override or the graph size. Auto mode keeps roughly seven
+/// partitions while capping each at eight layers; smaller decoders remain whole to avoid needless
+/// token-at-a-time boundary overhead.
+fn select_layer_partition_span(value: Option<&str>, layer_count: usize) -> Option<usize> {
+    match value.map(str::trim) {
+        Some("0" | "off" | "false") => None,
+        Some("" | "auto") | None => {
+            (layer_count >= 23).then(|| layer_count.div_ceil(7).clamp(4, 8))
+        }
+        Some(value) => value.parse::<usize>().ok().filter(|&span| span > 0),
+    }
+}
+
+fn is_decoder_attention_anchor(view: &NodeView) -> bool {
+    let op_type = view.op_type();
+    let domain = view.domain();
+    if domain == "com.microsoft" && op_type == "PagedAttention" {
+        return true;
+    }
+    let has_present_cache = view.output_present(1) && view.output_present(2);
+    has_present_cache
+        && ((domain == "com.microsoft"
+            && matches!(
+                op_type.as_str(),
+                "GroupQueryAttention" | "MultiHeadAttention"
+            ))
+            || ((domain.is_empty() || domain == "ai.onnx") && op_type == "Attention"))
+}
+
+fn infer_boundary_indices(
+    op_types: &[String],
+    successors: &[Vec<usize>],
+    predecessors: &[Vec<usize>],
+    attention_anchors: &[usize],
+) -> Option<Vec<usize>> {
+    if attention_anchors.len() < 2 {
+        return None;
+    }
+
+    let mut boundaries = Vec::with_capacity(attention_anchors.len() - 1);
+    for pair in attention_anchors.windows(2) {
+        let (current, next) = (pair[0], pair[1]);
+
+        let mut downstream = vec![false; op_types.len()];
+        let mut stack = vec![current];
+        while let Some(index) = stack.pop() {
+            for &successor in &successors[index] {
+                if successor <= next && !downstream[successor] {
+                    downstream[successor] = true;
+                    stack.push(successor);
+                }
+            }
+        }
+
+        let mut upstream = vec![false; op_types.len()];
+        let mut stack = vec![next];
+        while let Some(index) = stack.pop() {
+            for &predecessor in &predecessors[index] {
+                if predecessor >= current && !upstream[predecessor] {
+                    upstream[predecessor] = true;
+                    stack.push(predecessor);
+                }
+            }
+        }
+
+        boundaries.push(
+            (current + 1..next)
+                .rev()
+                .find(|&index| op_types[index] == "Add" && downstream[index] && upstream[index])?,
+        );
+    }
+    Some(boundaries)
+}
+
+fn infer_layer_boundary_outputs(
+    api: &ort::OrtApi,
+    nodes: &[*const ort::OrtNode],
+) -> HashSet<String> {
+    let mut producer = HashMap::new();
+    let mut op_types = Vec::with_capacity(nodes.len());
+    let mut attention_anchors = Vec::new();
+    for (index, &node) in nodes.iter().enumerate() {
+        let view = NodeView::new(api, node);
+        if is_decoder_attention_anchor(&view) {
+            attention_anchors.push(index);
+        }
+        op_types.push(view.op_type());
+        for output in unsafe { node_output_names(api, node) } {
+            if !output.is_empty() {
+                producer.entry(output).or_insert(index);
+            }
+        }
+    }
+
+    let mut successors = vec![Vec::new(); nodes.len()];
+    let mut predecessors = vec![Vec::new(); nodes.len()];
+    for (index, &node) in nodes.iter().enumerate() {
+        let mut seen = HashSet::new();
+        for input in unsafe { node_input_names(api, node) } {
+            if let Some(&predecessor) = producer.get(&input)
+                && predecessor != index
+                && seen.insert(predecessor)
+            {
+                successors[predecessor].push(index);
+                predecessors[index].push(predecessor);
+            }
+        }
+    }
+
+    let Some(boundary_indices) =
+        infer_boundary_indices(&op_types, &successors, &predecessors, &attention_anchors)
+    else {
+        return HashSet::new();
+    };
+
+    boundary_indices
+        .into_iter()
+        .filter_map(|index| {
+            unsafe { node_output_names(api, nodes[index]) }
+                .into_iter()
+                .next()
+        })
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// Split after transformer-layer residual outputs. Metadata takes precedence; otherwise the
+/// boundaries are inferred from data flow between consecutive decoder-attention operators.
+fn split_annotated_layer_clusters(
+    api: &ort::OrtApi,
     nodes: &[*const ort::OrtNode],
     clusters: Vec<Vec<usize>>,
+    layer_boundary_outputs: &HashSet<String>,
     layers_per_partition: usize,
 ) -> Vec<Vec<usize>> {
     let mut split = Vec::with_capacity(clusters.len());
@@ -341,22 +496,79 @@ fn split_decoder_layer_clusters(
         let mut part = Vec::new();
         let mut layers_in_part = 0usize;
         for index in cluster {
-            let name = NodeView::new(api, nodes[index]).name();
-            let layer_start = name.contains("/layers.") && name.contains("/input_layernorm/");
-            if layer_start {
-                if layers_in_part == layers_per_partition && !part.is_empty() {
+            part.push(index);
+            let layer_end = unsafe { node_output_names(api, nodes[index]) }
+                .iter()
+                .any(|name| layer_boundary_outputs.contains(name));
+            if layer_end {
+                layers_in_part += 1;
+                if layers_in_part == layers_per_partition {
                     split.push(std::mem::take(&mut part));
                     layers_in_part = 0;
                 }
-                layers_in_part += 1;
             }
-            part.push(index);
         }
         if !part.is_empty() {
             split.push(part);
         }
     }
     split
+}
+
+#[cfg(test)]
+mod layer_partition_tests {
+    use super::{infer_boundary_indices, select_layer_partition_span};
+
+    #[test]
+    fn auto_layer_partition_span_scales_with_decoder_size() {
+        assert_eq!(select_layer_partition_span(None, 16), None);
+        assert_eq!(select_layer_partition_span(None, 23), Some(4));
+        assert_eq!(select_layer_partition_span(None, 24), Some(4));
+        assert_eq!(select_layer_partition_span(None, 52), Some(8));
+        assert_eq!(select_layer_partition_span(Some("auto"), 80), Some(8));
+    }
+
+    #[test]
+    fn layer_partition_span_accepts_overrides() {
+        assert_eq!(select_layer_partition_span(Some("0"), 52), None);
+        assert_eq!(select_layer_partition_span(Some("off"), 52), None);
+        assert_eq!(select_layer_partition_span(Some("5"), 52), Some(5));
+        assert_eq!(select_layer_partition_span(Some("invalid"), 52), None);
+    }
+
+    #[test]
+    fn structural_boundaries_use_the_last_residual_add() {
+        let layers = 24;
+        let mut op_types = Vec::new();
+        let mut successors = Vec::new();
+        let mut predecessors = Vec::new();
+        let mut anchors = Vec::new();
+        for _ in 0..layers {
+            let anchor = op_types.len();
+            anchors.push(anchor);
+            op_types.extend(["GroupQueryAttention", "Add", "MatMul", "Add"].map(String::from));
+            successors.extend([vec![], vec![], vec![], vec![]]);
+            predecessors.extend([vec![], vec![], vec![], vec![]]);
+        }
+        for &anchor in anchors.iter().take(layers - 1) {
+            let next = anchor + 4;
+            for (from, to) in [
+                (anchor, anchor + 1),
+                (anchor + 1, anchor + 2),
+                (anchor + 2, anchor + 3),
+                (anchor + 3, next),
+            ] {
+                successors[from].push(to);
+                predecessors[to].push(from);
+            }
+        }
+
+        let boundaries =
+            infer_boundary_indices(&op_types, &successors, &predecessors, &anchors).unwrap();
+        assert_eq!(boundaries.len(), layers - 1);
+        assert_eq!(boundaries[0], 3);
+        assert_eq!(boundaries[layers - 2], (layers - 2) * 4 + 3);
+    }
 }
 
 fn build_contiguous_clusters(supported: &[bool]) -> Vec<Vec<usize>> {
@@ -430,6 +642,49 @@ unsafe fn node_output_names(api: &ort::OrtApi, node: *const ort::OrtNode) -> Vec
             (api.Node_GetOutputs.unwrap())(node, v.as_mut_ptr(), n);
         }
         v.iter().map(|&vi| value_info_name(api, vi)).collect()
+    }
+}
+
+unsafe fn graph_metadata_value(
+    api: &ort::OrtApi,
+    graph: *const ort::OrtGraph,
+    key: &CStr,
+) -> Result<Option<String>, *mut ort::OrtStatus> {
+    unsafe {
+        let mut metadata: *mut ort::OrtModelMetadata = ptr::null_mut();
+        let st = (api.Graph_GetModelMetadata.unwrap())(graph, &mut metadata);
+        if !st.is_null() {
+            return Err(st);
+        }
+
+        let mut allocator: *mut ort::OrtAllocator = ptr::null_mut();
+        let st = (api.GetAllocatorWithDefaultOptions.unwrap())(&mut allocator);
+        if !st.is_null() {
+            (api.ReleaseModelMetadata.unwrap())(metadata);
+            return Err(st);
+        }
+
+        let mut value: *mut c_char = ptr::null_mut();
+        let st = (api.ModelMetadataLookupCustomMetadataMap.unwrap())(
+            metadata,
+            allocator,
+            key.as_ptr(),
+            &mut value,
+        );
+        if !st.is_null() {
+            (api.ReleaseModelMetadata.unwrap())(metadata);
+            return Err(st);
+        }
+
+        let result = if value.is_null() {
+            None
+        } else {
+            let owned = CStr::from_ptr(value).to_string_lossy().into_owned();
+            ((*allocator).Free.unwrap())(allocator, value.cast());
+            Some(owned)
+        };
+        (api.ReleaseModelMetadata.unwrap())(metadata);
+        Ok(result)
     }
 }
 
