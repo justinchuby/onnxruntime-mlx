@@ -37,6 +37,25 @@ def _brew_prefix(pkg: str) -> Path:
     return Path(out.stdout.strip())
 
 
+def _dependency_prefix(env_name: str, brew_pkg: str) -> Path:
+    value = os.environ.get(env_name)
+    return Path(value) if value else _brew_prefix(brew_pkg)
+
+
+def _linked_dependency(binary: Path, basename: str) -> str | None:
+    out = subprocess.run(
+        ["otool", "-L", str(binary)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    for line in out.splitlines()[1:]:
+        dependency = line.strip().split(" ", 1)[0]
+        if Path(dependency).name == basename:
+            return dependency
+    return None
+
+
 def _run(cmd: list[str], **kw) -> None:
     print("[onnxruntime-ep-mlx build] $", " ".join(cmd), flush=True)
     subprocess.run(cmd, check=True, **kw)
@@ -111,8 +130,8 @@ class CustomBuildHook(BuildHookInterface):
 
     # -- mlx bundling ---------------------------------------------------------
     def _bundle_mlx(self, pkg_dir: Path, plugin: Path) -> None:
-        mlxc_pfx = _brew_prefix("mlx-c")
-        mlx_pfx = _brew_prefix("mlx")
+        mlxc_pfx = _dependency_prefix("MLXC_PREFIX", "mlx-c")
+        mlx_pfx = _dependency_prefix("MLX_PREFIX", "mlx")
         mlxc_src = mlxc_pfx / "lib" / "libmlxc.dylib"
         mlx_src = mlx_pfx / "lib" / "libmlx.dylib"
         metallib_src = mlx_pfx / "lib" / "mlx.metallib"
@@ -128,6 +147,12 @@ class CustomBuildHook(BuildHookInterface):
         os.chmod(mlxc_dst, 0o755)
         os.chmod(mlx_dst, 0o755)
 
+        jaccl_src = mlx_pfx / "lib" / "libjaccl.dylib"
+        jaccl_dst = pkg_dir / "libjaccl.dylib"
+        if jaccl_src.is_file():
+            shutil.copy2(jaccl_src, jaccl_dst)
+            os.chmod(jaccl_dst, 0o755)
+
         def name_tool(*args: str) -> None:
             _run(["install_name_tool", *args])
 
@@ -137,12 +162,25 @@ class CustomBuildHook(BuildHookInterface):
         # Bundled mlx install ids -> @loader_path.
         name_tool("-id", "@loader_path/libmlxc.dylib", str(mlxc_dst))
         name_tool("-id", "@loader_path/libmlx.dylib", str(mlx_dst))
-        # libmlxc depends on libmlx by its absolute install name -> sibling.
-        name_tool("-change", str(mlx_src), "@loader_path/libmlx.dylib", str(mlxc_dst))
+        # Relink MLX dependencies by basename so both Homebrew absolute paths and
+        # custom-build @rpath install names work.
+        mlxc_mlx = _linked_dependency(mlxc_dst, "libmlx.dylib")
+        if mlxc_mlx:
+            name_tool("-change", mlxc_mlx, "@loader_path/libmlx.dylib", str(mlxc_dst))
 
         # Plugin's mlx deps -> colocated copies.
-        name_tool("-change", str(mlxc_src), "@loader_path/libmlxc.dylib", str(plugin))
-        name_tool("-change", str(mlx_src), "@loader_path/libmlx.dylib", str(plugin))
+        plugin_mlxc = _linked_dependency(plugin, "libmlxc.dylib")
+        plugin_mlx = _linked_dependency(plugin, "libmlx.dylib")
+        if plugin_mlxc:
+            name_tool("-change", plugin_mlxc, "@loader_path/libmlxc.dylib", str(plugin))
+        if plugin_mlx:
+            name_tool("-change", plugin_mlx, "@loader_path/libmlx.dylib", str(plugin))
+
+        if jaccl_src.is_file():
+            name_tool("-id", "@loader_path/libjaccl.dylib", str(jaccl_dst))
+            mlx_jaccl = _linked_dependency(mlx_dst, "libjaccl.dylib")
+            if mlx_jaccl:
+                name_tool("-change", mlx_jaccl, "@loader_path/libjaccl.dylib", str(mlx_dst))
 
         # The Rust EP does NOT link libonnxruntime — it reaches ORT purely through
         # the OrtApi function-pointer table handed to CreateEpFactories (see
@@ -151,5 +189,8 @@ class CustomBuildHook(BuildHookInterface):
 
         # Re-sign everything we mutated (install_name_tool voids the ad-hoc sig;
         # dyld SIGKILLs unsigned/invalid arm64 images).
-        for f in (mlxc_dst, mlx_dst, plugin):
+        bundled = [mlxc_dst, mlx_dst, plugin]
+        if jaccl_src.is_file():
+            bundled.append(jaccl_dst)
+        for f in bundled:
             resign(f)
