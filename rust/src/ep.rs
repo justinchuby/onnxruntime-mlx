@@ -15,8 +15,8 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
 
 use crate::engine::{
-    InitData, NodeDesc, OutRef, Plan, Slot, Src, SubgraphDesc, TensorRef, TranslationContext,
-    is_separate_qkv_attention_op,
+    CompiledSubgraph, InitData, NodeDesc, OutRef, Plan, Slot, Src, SubgraphDesc, TensorRef,
+    TranslationContext, is_separate_qkv_attention_op, read_ctx_input_raw,
 };
 use crate::factory::ORT_API_VERSION;
 use crate::mlx::Stream;
@@ -33,6 +33,36 @@ fn reset_stable_cross_caches(plan: &mut Plan, generation_key: Option<usize>) {
         compiled.stable_cross_inputs.clear();
         compiled.stable_generation_key = generation_key;
     }
+}
+
+fn reset_compiled_slot(slot: &mut CompiledSubgraph) {
+    let config = slot.config;
+    let enabled = slot.enabled;
+    *slot = CompiledSubgraph::new(config);
+    slot.enabled = enabled;
+}
+
+fn refresh_borrowed_constants(
+    plan: &mut Plan,
+    ort_api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+) {
+    let changed = plan
+        .borrowed_constant_ptrs
+        .iter()
+        .any(|(&index, &expected)| {
+            read_ctx_input_raw(ort_api, kctx, index)
+                .map(|(data, _, _)| data as usize != expected)
+                .unwrap_or(true)
+        });
+    if !changed {
+        return;
+    }
+    plan.cache.clear();
+    plan.borrowed_constant_ptrs.clear();
+    reset_compiled_slot(&mut plan.compiled);
+    reset_compiled_slot(&mut plan.prefill);
+    reset_compiled_slot(&mut plan.general);
 }
 
 #[repr(C)]
@@ -207,6 +237,20 @@ unsafe fn get_capability_impl(
                 .count()
                 == 1;
 
+        // CUDA-oriented VLM vision exports commonly contain PackedMultiHeadAttention plus
+        // MatMulNBits and CPU-only dynamic Range/Compress/Scan paths. Keep every claimable node on
+        // MLX, but partition them as singletons: combining supported nodes across those dynamic
+        // paths can violate ORT's stricter fusion-convexity check even when the quotient graph is
+        // acyclic. Text-only generation only initializes this graph; image inference can still run
+        // correctly while a future graph-aware vision clusterer recovers larger partitions.
+        let mixed_vision_quant_graph = nodes.iter().any(|&node| {
+            let view = NodeView::new(ep.ort_api, node);
+            view.domain() == "com.microsoft" && view.op_type() == "PackedMultiHeadAttention"
+        }) && nodes.iter().any(|&node| {
+            let view = NodeView::new(ep.ort_api, node);
+            view.domain() == "com.microsoft" && view.op_type() == "MatMulNBits"
+        });
+
         // Which nodes can MLX translate exactly (registry claim predicate).
         let supported: Vec<bool> = nodes
             .iter()
@@ -218,6 +262,9 @@ unsafe fn get_capability_impl(
                 if native_q8_attention_graph && matches!(view.op_type().as_str(), "Range" | "Tile")
                 {
                     return true;
+                }
+                if mixed_vision_quant_graph {
+                    return claimable(&view);
                 }
                 claimable(&view)
             })
@@ -274,7 +321,15 @@ unsafe fn get_capability_impl(
             }
         }
 
-        let clusters = build_convex_clusters(api, &nodes, &supported);
+        let clusters = if mixed_vision_quant_graph {
+            supported
+                .iter()
+                .enumerate()
+                .filter_map(|(index, &is_supported)| is_supported.then_some(vec![index]))
+                .collect()
+        } else {
+            build_convex_clusters(api, &nodes, &supported)
+        };
 
         let add_fuse = ep_api.EpGraphSupportInfo_AddNodesToFuse.unwrap();
         let mut claimed = 0usize;
@@ -825,12 +880,15 @@ unsafe fn build_plan(
             }
         }
 
-        // Compiled-decode fast path (mlx_compile) is allowed unless a control-flow node is present
-        // (its graph structure depends on runtime data) or the kill-switch env is set. Detected
-        // recursively over the captured body subgraphs.
+        // Compiled-decode fast path (mlx_compile) is allowed unless a real control-flow node is
+        // present (its graph structure depends on runtime data) or the kill-switch env is set.
+        // Function-backed contrib ops may also expose a static body through Node_GetSubgraphs; that
+        // body is metadata for a fixed op contract, not runtime control flow, and must not disable
+        // whole-decoder compilation.
         fn any_control_flow(nodes: &[NodeDesc]) -> bool {
             nodes.iter().any(|n| {
-                !n.subgraphs.is_empty() || n.subgraphs.iter().any(|sg| any_control_flow(&sg.nodes))
+                matches!(n.op_type.as_str(), "If" | "Loop" | "Scan" | "SequenceMap")
+                    || n.subgraphs.iter().any(|sg| any_control_flow(&sg.nodes))
             })
         }
         let has_control_flow = any_control_flow(&nodes);
@@ -1608,6 +1666,7 @@ unsafe fn compute_impl(
         // must not alias it. `plan_ptr` stays valid for the whole call while the guard is held.
         let mut plan_guard = info.plan.lock().unwrap_or_else(|e| e.into_inner());
         let plan_ptr: *mut Plan = &mut *plan_guard;
+        refresh_borrowed_constants(&mut *plan_ptr, info.ort_api, kctx);
         let seq_len = crate::compiled::detect_seq_len(info.ort_api, kctx, &*plan_ptr);
         let generation_key =
             crate::compiled::detect_attention_generation_key(info.ort_api, kctx, &*plan_ptr);

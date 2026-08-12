@@ -398,6 +398,9 @@ impl CompiledSubgraph {
 pub struct Plan {
     pub nodes: Vec<NodeDesc>,
     pub cache: HashMap<String, Array>,
+    /// Constant fused-node inputs borrowed by cached MLX arrays, keyed by ORT input index.
+    /// Their addresses are revalidated at the start of every Compute before a cached graph runs.
+    pub borrowed_constant_ptrs: HashMap<usize, usize>,
     pub native_attention_decode: bool,
     pub dedicated_decode_stream: bool,
     pub stable_cross_cache_enabled: bool,
@@ -550,6 +553,7 @@ impl Plan {
         Plan {
             nodes,
             cache: HashMap::new(),
+            borrowed_constant_ptrs: HashMap::new(),
             native_attention_decode,
             dedicated_decode_stream,
             stable_cross_cache_enabled,
@@ -940,6 +944,7 @@ impl<'a> TranslationContext<'a> {
                     dtype: init.dtype,
                 })
             }
+
             Src::CtxInput => {
                 let (data, shape, dtype) = self.read_ctx_input(r.ctx_index)?;
                 let count = shape.iter().map(|&d| d as usize).product::<usize>();
@@ -952,6 +957,24 @@ impl<'a> TranslationContext<'a> {
             }
             _ => Err(format!("MLX: RawHost on non-constant input {}", r.name)),
         }
+    }
+
+    /// Record a constant fused-node input whose live ORT storage is borrowed by a cached MLX array.
+    pub fn record_borrowed_constant(
+        &mut self,
+        r: &TensorRef,
+        data: *const c_void,
+    ) -> Result<(), MlxError> {
+        if r.source != Src::CtxInput || !r.constant {
+            return Err(format!(
+                "MLX: only constant context inputs may back persistent borrowed arrays ({})",
+                r.name
+            ));
+        }
+        self.plan
+            .borrowed_constant_ptrs
+            .insert(r.ctx_index, data as usize);
+        Ok(())
     }
 
     /// Read a constant int64 parameter input (shape/axes/starts/ends/steps/pads/repeats/split) as a

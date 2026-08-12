@@ -190,6 +190,24 @@ def test_clip_min_only() -> None:
     check(model, {"x": ACT_X, "min": np.array(0.0, dtype=np.float32)})
 
 
+def test_clip_int64() -> None:
+    model = m.make_model(
+        "Clip",
+        [
+            m.tensor("x", DT.INT64, [6]),
+            m.tensor("min", DT.INT64, []),
+            m.tensor("max", DT.INT64, []),
+        ],
+        [m.tensor("out", DT.INT64, [6])],
+    )
+    feeds = {
+        "x": np.array([-9, -2, 0, 4, 7, 12], dtype=np.int64),
+        "min": np.array(-2, dtype=np.int64),
+        "max": np.array(7, dtype=np.int64),
+    }
+    check(model, feeds, rtol=0, atol=0)
+
+
 def test_clip_attr_opset10() -> None:
     # Opset<11: min/max are float attributes rather than inputs.
     model = m.make_model(
@@ -383,6 +401,11 @@ _INT_FLOAT_CAST_CASES = [
     # int <-> int
     (DT.INT32, DT.INT64, np.array([[-5, -1, 0], [1, 7, 2147483647]], dtype=np.int32)),
     (DT.INT64, DT.INT32, np.array([[-5, -1, 0], [1, 7, 2147483647]], dtype=np.int64)),
+    # bool -> int
+    (DT.BOOL, DT.INT32, np.array([[False, True, False], [True, True, False]], dtype=np.bool_)),
+    (DT.BOOL, DT.INT64, np.array([[False, True, False], [True, True, False]], dtype=np.bool_)),
+    (DT.INT32, DT.BOOL, np.array([[0, 1, -1], [7, 0, -9]], dtype=np.int32)),
+    (DT.INT64, DT.BOOL, np.array([[0, 1, -1], [7, 0, -9]], dtype=np.int64)),
 ]
 
 

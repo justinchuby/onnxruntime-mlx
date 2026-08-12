@@ -282,6 +282,7 @@ def gqa_model(
     interleaved: int = 0,
     rope_cache: bool = True,
     packed_qkv: bool = False,
+    compact_external_rope: bool = False,
 ) -> tuple[bytes, dict[str, np.ndarray]]:
     """GroupQueryAttention.
 
@@ -342,6 +343,9 @@ def gqa_model(
         cos_v,
         sin_v,
     ]
+    if compact_external_rope:
+        assert not rope_cache and do_rotary == 0
+        inputs = inputs[:7]
     outputs = [
         tensor("attn_output", DataType.FLOAT, [batch, seq, num_heads * head]),
         tensor("present_key", DataType.FLOAT, [batch, kv_heads, present, head]),

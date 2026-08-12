@@ -1142,6 +1142,7 @@ fn is_int32(t: ort::ONNXTensorElementDataType) -> bool {
 }
 
 /// GroupQueryAttention (com.microsoft): separate-QKV decode/prefill layout. Two accepted layouts:
+///   * 7-input (q, k, v, past_k, past_v, seqlens_k, total_seq) — external/no RoPE decoder.
 ///   * 9-input (q, k, v, past_k, past_v, seqlens_k, total_seq, cos, sin) — in-op RoPE decoder.
 ///   * 11-input (…, seqlens_k, total_seq, cos, sin, position_ids, attention_bias) — the Gemma3n
 ///     variant with `do_rotary=0` (cos/sin absent, rotary applied by external RotaryEmbedding nodes)
@@ -1159,15 +1160,19 @@ fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
     };
     let ninputs = node.num_inputs();
     require!(
-        ninputs == 9 || ninputs == 11,
-        "expects 9 inputs (q, k, v, past_k, past_v, seqlens_k, total_seq, cos, sin) or 11 inputs \
-         (…, position_ids, attention_bias), got {}",
+        ninputs == 7 || ninputs == 9 || ninputs == 11,
+        "expects 7 inputs (q, k, v, past_k, past_v, seqlens_k, total_seq), 9 inputs \
+         (…, cos, sin), or 11 inputs (…, position_ids, attention_bias), got {}",
         ninputs
     );
     // The 11-input Gemma3n variant only maps to MLX when rotary is external (do_rotary=0): cos/sin at
     // 7,8 are absent, so we must not require their dtype and must not resolve them in the handler.
     let has_bias = ninputs == 11;
     let do_rotary = node.int_attr("do_rotary", 1) != 0;
+    require!(
+        ninputs != 7 || !do_rotary,
+        "7-input GroupQueryAttention requires do_rotary=0 because cos/sin caches are absent"
+    );
     let packed_qkv = node.input_present(0) && !node.input_present(1) && !node.input_present(2);
     require!(
         packed_qkv || (node.input_present(0) && node.input_present(1) && node.input_present(2)),

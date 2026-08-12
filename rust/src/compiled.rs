@@ -152,10 +152,14 @@ pub fn detect_seq_len(
             }
         }
     }
-    if plan.nodes.iter().any(is_separate_qkv_attention) {
-        // Whisper's dynamic Range/Tile position-id island can split `input_ids` away from the main
-        // decoder partition. The partition still receives a rank-3 token-state boundary tensor
-        // [B,S,H], whose middle dimension is the query length.
+    if plan
+        .nodes
+        .iter()
+        .any(|node| is_separate_qkv_attention(node) || node.op_type == "GroupQueryAttention")
+    {
+        // Decoder partitions may consume embeddings directly, or a dynamic position-id island may
+        // split `input_ids` away from the main partition. The attention partition still receives a
+        // rank-3 token-state boundary tensor [B,S,H], whose middle dimension is the query length.
         let mut seen = HashSet::new();
         for inp in plan.nodes.iter().flat_map(|n| n.inputs.iter()) {
             if inp.source == Src::CtxInput
