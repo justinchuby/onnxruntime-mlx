@@ -321,8 +321,9 @@ fn softmax_claim(node: &NodeView) -> ClaimResult {
 ///   * int32<->int64 (exact within range);
 ///   * int32/int64 -> fp32/fp16 (round-to-nearest, matching CPU static_cast/convert);
 ///   * fp32/fp16 -> int32/int64 (truncation toward zero, matching ONNX Cast + CPU static_cast).
-///     float64/bool/uint are intentionally excluded (not part of the audited detector subgraphs and not
-///     all verified against CPU).
+///   * bool -> int32/int64 (false=0, true=1).
+///   * int32/int64 -> bool (zero=false, nonzero=true).
+///     float64/uint and float casts to bool are intentionally excluded.
 fn cast_pair_claimable(
     src: ort::ONNXTensorElementDataType,
     dst: ort::ONNXTensorElementDataType,
@@ -340,6 +341,12 @@ fn cast_pair_claimable(
     }
     // fp32/fp16 -> int32/int64 (truncation toward zero).
     if is_cast_float(src) && is_int_index(dst) {
+        return true;
+    }
+    if is_bool(src) && is_int_index(dst) {
+        return true;
+    }
+    if is_int_index(src) && is_bool(dst) {
         return true;
     }
     false
@@ -367,8 +374,8 @@ fn cast_claim(node: &NodeView) -> ClaimResult {
     };
     require!(
         cast_pair_claimable(i.dtype, o.dtype),
-        "Cast {}->{} is not claimed: only float<->float (fp32/fp16/bf16), int32<->int64, and \
-         int32/int64<->fp32/fp16 are verified bit-identical to CPU (bool/uint/fp64 stay on CPU)",
+        "Cast {}->{} is not claimed: only float<->float (fp32/fp16/bf16), int32<->int64, \
+         int32/int64<->fp32/fp16, and bool<->int32/int64 are verified bit-identical to CPU",
         crate::registry::ort_dtype_name(i.dtype),
         crate::registry::ort_dtype_name(o.dtype)
     );

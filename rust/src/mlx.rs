@@ -93,11 +93,11 @@ impl Array {
     /// falls back to allocate+copy, so correctness is preserved unconditionally; only the perf win is
     /// conditional on alignment.
     ///
-    /// SAFETY / LIFETIME: `data` is owned by the caller (here: ORT owns the Compute input tensors for
-    /// the whole `Compute` call). The registered deallocator is a NO-OP, so MLX never frees `data`.
-    /// The buffer MUST stay valid and unmodified until every `mlx_eval` that reads this array has
-    /// completed — guaranteed because the EP evaluates the whole boundary graph synchronously and
-    /// drops the wrapping `Array` (and thus any MLX reference to `data`) before `Compute` returns.
+    /// SAFETY / LIFETIME: `data` is owned by the caller. The registered deallocator is a NO-OP, so
+    /// MLX never frees `data`. Runtime input wrappers must be dropped after the synchronous eval;
+    /// cached initializer wrappers may live longer because ORT keeps initializer storage alive for
+    /// the owning session. In either case the caller must keep the buffer valid and immutable until
+    /// the last MLX array referencing it is dropped.
     pub fn from_data_managed(
         data: *const std::os::raw::c_void,
         shape: &[i32],

@@ -588,6 +588,10 @@ fn topk_claim(node: &NodeView) -> ClaimResult {
         "K must be a scalar or shape [1], read at translation time and constrained to 1..=axis dimension (got shape {:?})",
         k.shape
     );
+    require!(
+        node.is_const_int64(1),
+        "K must be a constant int64 initializer; runtime K stays on CPU"
+    );
     let mut axis = node.int_attr("axis", -1);
     let raw_axis = axis;
     if axis < 0 {

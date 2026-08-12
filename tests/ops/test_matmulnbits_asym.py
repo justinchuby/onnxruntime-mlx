@@ -148,3 +148,10 @@ def test_matmulnbits_fp16(block: int, M: int, asym: bool) -> None:
     )
     # fp16 dequant + matmul accumulates in half — looser tolerance than the fp32 form.
     _check(model, feeds, rtol=6e-2, atol=6e-2)
+
+
+def test_matmulnbits_fp16_partial_final_block() -> None:
+    model, feeds = _matmulnbits_model(
+        M=4, K=1176, N=16, block=32, asymmetric=True, dtype=DT.FLOAT16
+    )
+    _check(model, feeds, rtol=6e-2, atol=6e-2)

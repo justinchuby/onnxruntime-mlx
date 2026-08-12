@@ -207,6 +207,14 @@ unsafe fn get_capability_impl(
                 .count()
                 == 1;
 
+        let mixed_vision_quant_graph = nodes.iter().any(|&node| {
+            let view = NodeView::new(ep.ort_api, node);
+            view.domain() == "com.microsoft" && view.op_type() == "PackedMultiHeadAttention"
+        }) && nodes.iter().any(|&node| {
+            let view = NodeView::new(ep.ort_api, node);
+            view.domain() == "com.microsoft" && view.op_type() == "MatMulNBits"
+        });
+
         // Which nodes can MLX translate exactly (registry claim predicate).
         let supported: Vec<bool> = nodes
             .iter()
@@ -274,7 +282,17 @@ unsafe fn get_capability_impl(
             }
         }
 
-        let clusters = build_convex_clusters(api, &nodes, &supported);
+        // This vision export contains many dynamic control-flow/shape branches. ORT's fusion API
+        // accounts for implicit control dependencies that are not exposed by the tensor-name graph
+        // used by `build_convex_clusters`, so its maximal clusters can be rejected as non-convex.
+        // Maximal supported intervals in ORT's topological node order are conservatively convex:
+        // every node that could lie between two members is included, while still avoiding the
+        // thousands of singleton partitions previously used for this graph.
+        let clusters = if mixed_vision_quant_graph {
+            build_contiguous_clusters(&supported)
+        } else {
+            build_convex_clusters(api, &nodes, &supported)
+        };
 
         let add_fuse = ep_api.EpGraphSupportInfo_AddNodesToFuse.unwrap();
         let mut claimed = 0usize;
@@ -296,6 +314,26 @@ unsafe fn get_capability_impl(
         tr.record_claim(claimed, num, clusters.len(), &rejected);
         ptr::null_mut()
     }
+}
+
+fn build_contiguous_clusters(supported: &[bool]) -> Vec<Vec<usize>> {
+    let mut clusters = Vec::new();
+    let mut start = 0usize;
+    while start < supported.len() {
+        while start < supported.len() && !supported[start] {
+            start += 1;
+        }
+        if start == supported.len() {
+            break;
+        }
+        let mut end = start + 1;
+        while end < supported.len() && supported[end] {
+            end += 1;
+        }
+        clusters.push((start..end).collect());
+        start = end;
+    }
+    clusters
 }
 
 /// Release a non-null `OrtStatus` returned on an error / not-found path (the OrtApi allocates a
@@ -825,15 +863,28 @@ unsafe fn build_plan(
             }
         }
 
-        // Compiled-decode fast path (mlx_compile) is allowed unless a control-flow node is present
-        // (its graph structure depends on runtime data) or the kill-switch env is set. Detected
-        // recursively over the captured body subgraphs.
+        // Compiled-decode fast path (mlx_compile) is allowed unless a real control-flow node is
+        // present (its graph structure depends on runtime data) or the kill-switch env is set.
+        // Function-backed contrib ops may also expose a static body through Node_GetSubgraphs; that
+        // body is metadata for a fixed op contract, not runtime control flow, and must not disable
+        // whole-decoder compilation.
         fn any_control_flow(nodes: &[NodeDesc]) -> bool {
             nodes.iter().any(|n| {
-                !n.subgraphs.is_empty() || n.subgraphs.iter().any(|sg| any_control_flow(&sg.nodes))
+                matches!(n.op_type.as_str(), "If" | "Loop" | "Scan" | "SequenceMap")
+                    || n.subgraphs.iter().any(|sg| any_control_flow(&sg.nodes))
             })
         }
-        let has_control_flow = any_control_flow(&nodes);
+        // The 11-input GQA form carries a runtime attention-bias tensor. Its eager translation is
+        // correct, but the compiled route does not currently preserve its bias semantics. Keep
+        // this form eager without blocking the 7-input external-RoPE decoder.
+        fn has_compile_barrier(nodes: &[NodeDesc]) -> bool {
+            nodes.iter().any(|n| {
+                n.op_type == "PackedMultiHeadAttention"
+                    || (n.op_type == "GroupQueryAttention" && n.inputs.len() == 11)
+                    || n.subgraphs.iter().any(|sg| has_compile_barrier(&sg.nodes))
+            })
+        }
+        let has_control_flow = any_control_flow(&nodes) || has_compile_barrier(&nodes);
         let mut plan = Plan::new(nodes);
         plan.compiled.enabled = crate::compiled::compile_enabled(has_control_flow);
         plan.prefill.enabled = crate::compiled::prefill_enabled(has_control_flow, &plan.nodes);

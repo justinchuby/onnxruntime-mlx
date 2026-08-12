@@ -940,6 +940,7 @@ impl<'a> TranslationContext<'a> {
                     dtype: init.dtype,
                 })
             }
+
             Src::CtxInput => {
                 let (data, shape, dtype) = self.read_ctx_input(r.ctx_index)?;
                 let count = shape.iter().map(|&d| d as usize).product::<usize>();

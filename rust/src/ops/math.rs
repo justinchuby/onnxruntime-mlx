@@ -469,7 +469,8 @@ fn pow_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-/// Clip: fp32/fp16/bf16 input/output; any present `min`/`max` inputs must share the input dtype.
+/// Clip: fp32/fp16/bf16 or signed-integer input/output; any present `min`/`max` inputs must share
+/// the input dtype.
 fn clip_claim(node: &NodeView) -> ClaimResult {
     require!(
         node.num_inputs() >= 1 && node.num_outputs() == 1,
@@ -482,8 +483,8 @@ fn clip_claim(node: &NodeView) -> ClaimResult {
         _ => deny!("missing tensor type/shape info on input or output"),
     };
     require!(
-        is_mlx_float(i.dtype) && i.dtype == o.dtype,
-        "input/output must be the same float dtype (fp32/fp16/bf16), got {} -> {}",
+        (is_mlx_float(i.dtype) || is_signed_integer(i.dtype)) && i.dtype == o.dtype,
+        "input/output must be the same float or signed-integer dtype, got {} -> {}",
         crate::registry::ort_dtype_name(i.dtype),
         crate::registry::ort_dtype_name(o.dtype)
     );

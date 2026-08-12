@@ -227,6 +227,37 @@ fn compute_float_dtype(act_dt: mlx::mlx_dtype) -> mlx::mlx_dtype {
     }
 }
 
+fn pad_last_dim(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    amount: i32,
+    dt: mlx::mlx_dtype,
+) -> Result<mlx::mlx_array, MlxError> {
+    if amount == 0 {
+        return Ok(a);
+    }
+    let zero = f32(ctx, 0.0);
+    let zero = ctx.astype(zero, dt)?;
+    let axis = [1i32];
+    let low = [0i32];
+    let high = [amount];
+    ctx.emit(|res, stream| unsafe {
+        mlx::mlx_pad(
+            res,
+            a,
+            axis.as_ptr(),
+            axis.len(),
+            low.as_ptr(),
+            low.len(),
+            high.as_ptr(),
+            high.len(),
+            zero,
+            c"constant".as_ptr(),
+            stream,
+        )
+    })
+}
+
 /// Repack ONNX Runtime's block-major uint8 weight to MLX affine uint32 words. Int4 stores two
 /// values per source byte and eight values per word; int8 stores one value per byte and four per
 /// word. Values are packed low-to-high along K. Cached (constant) or kept (dynamic).
@@ -246,17 +277,32 @@ fn matmulnbits_repack(
         return Ok(w);
     }
     let host = ctx.raw_host(wref)?;
+    let values_per_word = 32 / bits;
+    let nblocks = (k + block - 1) / block;
+    let padded_k = nblocks * block;
+    let words = (padded_k / values_per_word) as usize;
+    let expected_bytes = (big_n as usize) * words * std::mem::size_of::<u32>();
+    if (wref.constant || wref.source == Src::Initializer)
+        && cfg!(target_endian = "little")
+        && host.count == expected_bytes
+    {
+        // ORT's block-major layout is byte-for-byte the MLX row-major layout when K is divisible
+        // by the group size: blocks are consecutive along K, and each byte packs low then high
+        // nibbles. Reinterpret four adjacent bytes as one little-endian uint32 word, avoiding the
+        // much more expensive elementwise repack. The cached MLX array owns its storage because a
+        // fused-node input buffer is valid only for the current ORT Compute call.
+        let shape = [big_n as i32, words as i32];
+        let arr = Array::from_data(host.data, &shape, mlx::mlx_dtype__MLX_UINT32);
+        return Ok(ctx.cache_put(key, arr));
+    }
     let src = host.data as *const u8;
-    let nblocks = k / block;
     let values_per_byte = 8 / bits;
     let blob = block / values_per_byte;
-    let values_per_word = 32 / bits;
-    let words = (k / values_per_word) as usize;
     let mut packed = vec![0u32; (big_n as usize) * words];
     if !src.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(src, host.count) };
         for row in 0..big_n {
-            for kk in 0..k {
+            for kk in 0..padded_k {
                 let blk = kk / block;
                 let within = kk % block;
                 let byte = within / values_per_byte;
@@ -440,15 +486,128 @@ fn matmulnbits_symmetric_biases(
     }
 }
 
+fn matmulnbits_asymmetric_biases(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    big_n: i32,
+    nblocks: i32,
+    bits: i64,
+    scales2d: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
+    let scales_ref = &n.inputs[2];
+    let zp_ref = &n.inputs[3];
+    let constant = (scales_ref.constant || scales_ref.source == Src::Initializer)
+        && (zp_ref.constant || zp_ref.source == Src::Initializer);
+    let key = format!(
+        "{}#{}#qab#{big_n}x{nblocks}b{bits}",
+        scales_ref.name, zp_ref.name
+    );
+    if constant && let Some(biases) = ctx.cache_get(&key) {
+        return Ok(biases);
+    }
+    if constant {
+        let scales = ctx.raw_host(scales_ref)?;
+        let zps = ctx.raw_host(zp_ref)?;
+        let count = (big_n as usize) * (nblocks as usize);
+        let zp_cols = if bits == 4 {
+            (nblocks as usize).div_ceil(2)
+        } else {
+            nblocks as usize
+        };
+        if scales.count != count || zps.count != (big_n as usize) * zp_cols {
+            return Err("MatMulNBits: asymmetric scale/zero-point count mismatch".to_string());
+        }
+        let zp_values = unsafe { std::slice::from_raw_parts(zps.data as *const u8, zps.count) };
+        let zp_at = |index: usize| -> f32 {
+            if bits == 4 {
+                let row = index / nblocks as usize;
+                let col = index % nblocks as usize;
+                let packed = zp_values[row * zp_cols + col / 2];
+                if col.is_multiple_of(2) {
+                    (packed & 0x0f) as f32
+                } else {
+                    (packed >> 4) as f32
+                }
+            } else {
+                zp_values[index] as f32
+            }
+        };
+        let shape = [big_n, nblocks];
+        let biases = match scales.dtype {
+            ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => {
+                let values =
+                    unsafe { std::slice::from_raw_parts(scales.data as *const u16, count) };
+                let biases: Vec<u16> = values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &value)| {
+                        half::f16::from_f32(-zp_at(i) * half::f16::from_bits(value).to_f32())
+                            .to_bits()
+                    })
+                    .collect();
+                Array::from_data(
+                    biases.as_ptr() as *const c_void,
+                    &shape,
+                    mlx::mlx_dtype__MLX_FLOAT16,
+                )
+            }
+            ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16 => {
+                let values =
+                    unsafe { std::slice::from_raw_parts(scales.data as *const u16, count) };
+                let biases: Vec<u16> = values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &value)| {
+                        half::bf16::from_f32(-zp_at(i) * half::bf16::from_bits(value).to_f32())
+                            .to_bits()
+                    })
+                    .collect();
+                Array::from_data(
+                    biases.as_ptr() as *const c_void,
+                    &shape,
+                    mlx::mlx_dtype__MLX_BFLOAT16,
+                )
+            }
+            ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => {
+                let values =
+                    unsafe { std::slice::from_raw_parts(scales.data as *const f32, count) };
+                let biases: Vec<f32> = values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &value)| -zp_at(i) * value)
+                    .collect();
+                Array::from_data(
+                    biases.as_ptr() as *const c_void,
+                    &shape,
+                    mlx::mlx_dtype__MLX_FLOAT32,
+                )
+            }
+            _ => {
+                return Err("MatMulNBits: scales must be fp16, bf16, or fp32".to_string());
+            }
+        };
+        return Ok(ctx.cache_put(key, biases));
+    }
+
+    let zpf = if bits == 4 {
+        matmulnbits_zp_f32(ctx, n, big_n, nblocks)?
+    } else {
+        matmulnbits_zp8_f32(ctx, n, big_n, nblocks)?
+    };
+    let neg_zp = ctx.unary(mlx::mlx_negative, zpf)?;
+    mul(ctx, neg_zp, scales2d)
+}
+
 fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let k = *n.ints.get("K").ok_or("MatMulNBits: missing K")?;
     let big_n = *n.ints.get("N").ok_or("MatMulNBits: missing N")?;
     let block = n.ints.get("block_size").copied().unwrap_or(32);
     let bits = n.ints.get("bits").copied().unwrap_or(4);
-    if block <= 0 || k % block != 0 {
+    if block <= 0 {
         return Err("MatMulNBits: bad block_size".to_string());
     }
-    let nblocks = (k / block) as i32;
+    let nblocks = ((k + block - 1) / block) as i32;
+    let padded_k = i64::from(nblocks) * block;
     let has_zp = present(n, 3);
 
     let a = ctx.resolve(&n.inputs[0])?;
@@ -459,6 +618,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
     }
     let a2 = ctx.reshape(a, &[m, k as i32])?;
     let act_dt = ctx.dtype_of(a2);
+    let a2 = pad_last_dim(ctx, a2, (padded_k - k) as i32, act_dt)?;
 
     let supported = block == 32 || block == 64 || block == 128;
     let y = if supported {
@@ -467,14 +627,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
         let w = matmulnbits_repack(ctx, n, big_n, k, block, bits)?;
         let scales2d = matmulnbits_scales(ctx, n, big_n as i32, nblocks)?;
         let biases = if has_zp {
-            // bias = -(zp * scale)
-            let zpf = if bits == 4 {
-                matmulnbits_zp_f32(ctx, n, big_n as i32, nblocks)?
-            } else {
-                matmulnbits_zp8_f32(ctx, n, big_n as i32, nblocks)?
-            };
-            let neg_zp = ctx.unary(mlx::mlx_negative, zpf)?;
-            mul(ctx, neg_zp, scales2d)?
+            matmulnbits_asymmetric_biases(ctx, n, big_n as i32, nblocks, bits, scales2d)?
         } else {
             matmulnbits_symmetric_biases(ctx, n, big_n as i32, nblocks, bits, scales2d)?
         };
@@ -501,10 +654,10 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
         ));
         let wpacked = ctx.resolve(&n.inputs[1])?;
         let q = if bits == 4 {
-            let wflat = ctx.reshape(wpacked, &[big_n as i32, (k / 2) as i32])?;
+            let wflat = ctx.reshape(wpacked, &[big_n as i32, (padded_k / 2) as i32])?;
             unpack_nibbles(ctx, wflat)?
         } else {
-            ctx.reshape(wpacked, &[big_n as i32, k as i32])?
+            ctx.reshape(wpacked, &[big_n as i32, padded_k as i32])?
         };
         let qf = ctx.astype(q, comp_dt)?;
         let centered = if has_zp {

@@ -177,6 +177,20 @@ GQA_CASES = [
     # External rotary (genai exports): do_rotary=0 with the cos/sin cache inputs ABSENT (empty slots).
     ("decode-extrope-h64", dict(batch=1, num_heads=14, kv_heads=2, head=64, seq=1, past=40, do_rotary=0, rope_cache=False)),
     ("prefill-extrope-h64", dict(batch=1, num_heads=14, kv_heads=2, head=64, seq=8, past=0, do_rotary=0, rope_cache=False)),
+    (
+        "decode-extrope-compact-h128",
+        dict(
+            batch=1,
+            num_heads=32,
+            kv_heads=2,
+            head=128,
+            seq=1,
+            past=8,
+            do_rotary=0,
+            rope_cache=False,
+            compact_external_rope=True,
+        ),
+    ),
 ]
 
 
