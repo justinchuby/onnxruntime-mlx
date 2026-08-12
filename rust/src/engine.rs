@@ -699,6 +699,14 @@ pub struct TranslationContext<'a> {
     /// `(present_output_name, past_input_ctx_index)`. Collected here (not written straight to a plan
     /// slot) so the unified core can hand them to whichever `CompiledSubgraph` slot it is tracing.
     compiled_kv_present: Vec<(String, usize)>,
+    /// True while translating inside ANY SHAPE-KEYED compiled subgraph trace (`CompiledConfig::general`
+    /// or `CompiledConfig::prefill` — both `ShapeMode::ShapeKeyed`), as opposed to a SHAPELESS decode
+    /// trace or plain eager (non-compiled) translation. Set once, unconditionally, from `cfg.shape_mode`
+    /// right after `TranslationContext::new` — independent of `compiled_shape_keyed` (which additionally
+    /// requires the RoPE-as-data shared-buffer "narrow" detection to have succeeded). Multi-token
+    /// matrix-matrix compiled prefill work (M>1) always shows up here; decode (M==1, Shapeless) never
+    /// does. Used to gate opt-in fast kernels that must never run during decode.
+    shape_keyed_compile: bool,
 }
 
 impl<'a> TranslationContext<'a> {
@@ -724,6 +732,7 @@ impl<'a> TranslationContext<'a> {
             kv_deltas: HashMap::new(),
             in_general_trace: false,
             compiled_kv_present: Vec::new(),
+            shape_keyed_compile: false,
         }
     }
 
@@ -883,8 +892,8 @@ impl<'a> TranslationContext<'a> {
                     .map(|&d| dim_i32(d))
                     .collect::<Result<_, _>>()?;
                 if r.constant {
-                    // Constants are cached and reused across Compute calls, so they must OWN a copy
-                    // (the ORT ctx-input buffer is not guaranteed stable past this Compute).
+                    // Runtime ctx-input buffers are valid only for this Compute call. Keep the
+                    // defensive copy for compatibility with plans built by older ORT behavior.
                     let arr = Array::from_data(data, &ishape, mlx_dtype_from_onnx(dtype));
                     let raw = arr.as_raw();
                     self.plan.cache.insert(r.name.clone(), arr);
@@ -914,7 +923,10 @@ impl<'a> TranslationContext<'a> {
                     .iter()
                     .map(|&d| dim_i32(d))
                     .collect::<Result<_, _>>()?;
-                let arr = Array::from_data(init.data, &ishape, mlx_dtype_from_onnx(init.dtype));
+                // Compile copied initializer bytes into Plan-owned Arc storage. Borrow that stable
+                // allocation directly for the plan lifetime.
+                let arr =
+                    Array::from_data_managed(init.data, &ishape, mlx_dtype_from_onnx(init.dtype));
                 let raw = arr.as_raw();
                 self.plan.cache.insert(r.name.clone(), arr);
                 Ok(raw)
@@ -1636,6 +1648,23 @@ impl<'a> TranslationContext<'a> {
     /// Mark this context as a GENERAL compiled-subgraph trace (see [`Self::in_general_trace`]).
     pub(crate) fn set_general_trace(&mut self) {
         self.in_general_trace = true;
+    }
+
+    /// Record whether this translation is happening inside a `ShapeMode::ShapeKeyed` compiled
+    /// subgraph (`general` or `prefill`) as opposed to a `Shapeless` (decode) one or plain eager
+    /// translation. Call once, right after `TranslationContext::new`, from the closure's
+    /// `CompiledConfig::shape_mode` (see [`Self::shape_keyed_compile`]).
+    pub(crate) fn set_shape_keyed_compile(&mut self, shape_keyed: bool) {
+        self.shape_keyed_compile = shape_keyed;
+    }
+
+    /// True while translating inside ANY shape-keyed compiled subgraph (general or prefill) — i.e. a
+    /// multi-token, matrix-matrix compiled pass, never decode. See the field doc for the distinction
+    /// from [`Self::compiled_shape_keyed`] (which is additionally scoped to the RoPE-as-data
+    /// shared-buffer narrowing feature).
+    #[inline]
+    pub fn shape_keyed_compile(&self) -> bool {
+        self.shape_keyed_compile
     }
 
     pub(crate) fn native_attention_decode(&self) -> bool {

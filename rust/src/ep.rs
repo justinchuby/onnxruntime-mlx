@@ -293,6 +293,14 @@ unsafe fn get_capability_impl(
         } else {
             build_convex_clusters(api, &nodes, &supported)
         };
+        let layer_partition_span = std::env::var("ONNXRUNTIME_EP_MLX_LAYER_PARTITIONS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|&value| value > 0);
+        let clusters = match layer_partition_span {
+            Some(span) => split_decoder_layer_clusters(ep.ort_api, &nodes, clusters, span),
+            None => clusters,
+        };
 
         let add_fuse = ep_api.EpGraphSupportInfo_AddNodesToFuse.unwrap();
         let mut claimed = 0usize;
@@ -300,8 +308,9 @@ unsafe fn get_capability_impl(
             let group: Vec<*const ort::OrtNode> = cluster.iter().map(|&i| nodes[i]).collect();
             let mut opts: ort::OrtNodeFusionOptions = std::mem::zeroed();
             opts.ort_version_supported = ORT_API_VERSION;
-            // ORT supplies constant initializers as runtime fused-node inputs (we read them at Run).
-            opts.drop_constant_initializers = false;
+            // Initializers are copied into Plan-owned storage during Compile, so they do not need
+            // to remain runtime fused-node inputs.
+            opts.drop_constant_initializers = true;
             let st = add_fuse(support, group.as_ptr(), group.len(), &opts);
             if !st.is_null() {
                 return st;
@@ -314,6 +323,40 @@ unsafe fn get_capability_impl(
         tr.record_claim(claimed, num, clusters.len(), &rejected);
         ptr::null_mut()
     }
+}
+
+/// Split a large decoder cluster at exported transformer-layer boundaries. A whole-model lazy MLX
+/// graph can retain enough prefill intermediates to exceed unified memory on 32 GB systems; one
+/// fused node per layer lets ORT evaluate and release each layer before starting the next. The
+/// split is opt-in and only recognizes the stable `.../layers.N/input_layernorm/...` naming emitted
+/// by the exporter, so unrelated graphs and unnamed nodes preserve the existing clustering.
+fn split_decoder_layer_clusters(
+    api: *const ort::OrtApi,
+    nodes: &[*const ort::OrtNode],
+    clusters: Vec<Vec<usize>>,
+    layers_per_partition: usize,
+) -> Vec<Vec<usize>> {
+    let mut split = Vec::with_capacity(clusters.len());
+    for cluster in clusters {
+        let mut part = Vec::new();
+        let mut layers_in_part = 0usize;
+        for index in cluster {
+            let name = NodeView::new(api, nodes[index]).name();
+            let layer_start = name.contains("/layers.") && name.contains("/input_layernorm/");
+            if layer_start {
+                if layers_in_part == layers_per_partition && !part.is_empty() {
+                    split.push(std::mem::take(&mut part));
+                    layers_in_part = 0;
+                }
+                layers_in_part += 1;
+            }
+            part.push(index);
+        }
+        if !part.is_empty() {
+            split.push(part);
+        }
+    }
+    split
 }
 
 fn build_contiguous_clusters(supported: &[bool]) -> Vec<Vec<usize>> {
@@ -702,8 +745,12 @@ unsafe fn build_plan(
             .map(|(k, n)| (n, k))
             .collect();
 
-        // Constant initializers referenced by the subgraph (session-owned storage).
-        let initializers = collect_initializers(api, graph)?;
+        // Constant initializers referenced by the subgraph. Compile owns their bytes because the
+        // graph's initializer pointers do not survive into Compute.
+        let initializers = collect_initializers(api, graph)?
+            .into_iter()
+            .map(|(name, init)| (name, own_init_data(&init)))
+            .collect::<HashMap<_, _>>();
 
         // Subgraph nodes.
         let mut num_nodes: usize = 0;
@@ -761,18 +808,6 @@ unsafe fn build_plan(
                         shape_const: false,
                         init: None,
                     }
-                } else if let Some(&ci) = ctx_input_index.get(&name) {
-                    // A constant ctx input's compile-time init pointer goes stale after Compile; the
-                    // `constant` flag lets Resolve wrap/cache it once from live ctx data on first Run.
-                    let constant = initializers.contains_key(&name);
-                    TensorRef {
-                        name,
-                        source: Src::CtxInput,
-                        ctx_index: ci,
-                        constant,
-                        shape_const: false,
-                        init: None,
-                    }
                 } else if let Some(init) = initializers.get(&name) {
                     TensorRef {
                         name,
@@ -781,6 +816,15 @@ unsafe fn build_plan(
                         constant: false,
                         shape_const: false,
                         init: Some(init.clone()),
+                    }
+                } else if let Some(&ci) = ctx_input_index.get(&name) {
+                    TensorRef {
+                        name,
+                        source: Src::CtxInput,
+                        ctx_index: ci,
+                        constant: false,
+                        shape_const: false,
+                        init: None,
                     }
                 } else {
                     return Err(format!("MLX could not resolve subgraph input {name}"));

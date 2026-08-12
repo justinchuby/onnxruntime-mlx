@@ -933,6 +933,9 @@ fn trace_body(
         let plan = unsafe { &mut *plan_ptr };
         let native_attention_decode = plan.native_attention_decode;
         let mut tc = TranslationContext::new(plan, api, kctx, stream);
+        // Independent of the branch below: record ShapeKeyed-ness alone (general/prefill vs decode),
+        // for opt-in fast kernels that must never run during (Shapeless) decode.
+        tc.set_shape_keyed_compile(matches!(cfg.shape_mode, ShapeMode::ShapeKeyed));
         if (matches!(cfg.shape_mode, ShapeMode::Shapeless) && native_attention_decode)
             || cfg.rope_as_data
             || cfg.kv_alias

@@ -289,10 +289,14 @@ fn matmulnbits_repack(
         // ORT's block-major layout is byte-for-byte the MLX row-major layout when K is divisible
         // by the group size: blocks are consecutive along K, and each byte packs low then high
         // nibbles. Reinterpret four adjacent bytes as one little-endian uint32 word, avoiding the
-        // much more expensive elementwise repack. The cached MLX array owns its storage because a
-        // fused-node input buffer is valid only for the current ORT Compute call.
+        // much more expensive elementwise repack. Plan-owned initializers can be borrowed;
+        // runtime constant inputs still need an owned copy.
         let shape = [big_n as i32, words as i32];
-        let arr = Array::from_data(host.data, &shape, mlx::mlx_dtype__MLX_UINT32);
+        let arr = if wref.source == Src::Initializer {
+            Array::from_data_managed(host.data, &shape, mlx::mlx_dtype__MLX_UINT32)
+        } else {
+            Array::from_data(host.data, &shape, mlx::mlx_dtype__MLX_UINT32)
+        };
         return Ok(ctx.cache_put(key, arr));
     }
     let src = host.data as *const u8;
@@ -400,11 +404,19 @@ fn matmulnbits_scales(
             return Err("MatMulNBits: scale count does not match N * nblocks".to_string());
         }
         let shape = [big_n, nblocks];
-        let scales = Array::from_data(
-            host.data,
-            &shape,
-            crate::engine::mlx_dtype_from_onnx(host.dtype),
-        );
+        let scales = if scales_ref.source == Src::Initializer {
+            Array::from_data_managed(
+                host.data,
+                &shape,
+                crate::engine::mlx_dtype_from_onnx(host.dtype),
+            )
+        } else {
+            Array::from_data(
+                host.data,
+                &shape,
+                crate::engine::mlx_dtype_from_onnx(host.dtype),
+            )
+        };
         Ok(ctx.cache_put(key, scales))
     } else {
         let scales = ctx.resolve(scales_ref)?;
@@ -622,8 +634,8 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
 
     let supported = block == 32 || block == 64 || block == 128;
     let y = if supported {
-        ctx.mark_fast("mlx_quantized_matmul");
-        // Fast path: repacked uint32 weight + per-block scales/biases through mlx_quantized_matmul.
+        // Repacked uint32 weight + per-block scales/biases, shared by both the opt-in fast Metal
+        // kernel below and the always-on `mlx_quantized_matmul` fallback.
         let w = matmulnbits_repack(ctx, n, big_n, k, block, bits)?;
         let scales2d = matmulnbits_scales(ctx, n, big_n as i32, nblocks)?;
         let biases = if has_zp {
@@ -631,18 +643,48 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
         } else {
             matmulnbits_symmetric_biases(ctx, n, big_n as i32, nblocks, bits, scales2d)?
         };
-        let gs = mlx::mlx_optional_int_ {
-            value: block as i32,
-            has_value: true,
+
+        // Opt-in ONNXRUNTIME_EP_MLX_BF16_QMM_FP16=1 fast custom Metal kernel: BF16 I/O, FP16
+        // threadgroup tiles + simdgroup MMA, float accumulation — narrowly scoped (see
+        // `quant_fastkernel::eligible`) to shape-keyed compiled matrix-matrix prefill (M>1), never
+        // decode. Falls back to the existing `mlx_quantized_matmul` call below on any ineligibility
+        // or runtime failure, so this can never change behavior, only speed it up when it applies.
+        let fast = if crate::ops::quant_fastkernel::eligible(
+            ctx,
+            ashape.len(),
+            m,
+            padded_k as i32,
+            big_n as i32,
+            block,
+            bits,
+            act_dt,
+            ctx.dtype_of(scales2d),
+            ctx.dtype_of(biases),
+            ctx.dtype_of(w),
+        ) {
+            crate::ops::quant_fastkernel::try_apply(ctx, a2, w, scales2d, biases, m, big_n as i32)
+        } else {
+            None
         };
-        let bb = mlx::mlx_optional_int_ {
-            value: bits as i32,
-            has_value: true,
-        };
-        let mode = c"affine".as_ptr();
-        ctx.emit(|res, s| unsafe {
-            mlx::mlx_quantized_matmul(res, a2, w, scales2d, biases, true, gs, bb, mode, s)
-        })?
+
+        if let Some(y) = fast {
+            ctx.mark_fast("onnxrt_mlx_qmm_bf16_fp16");
+            y
+        } else {
+            ctx.mark_fast("mlx_quantized_matmul");
+            let gs = mlx::mlx_optional_int_ {
+                value: block as i32,
+                has_value: true,
+            };
+            let bb = mlx::mlx_optional_int_ {
+                value: bits as i32,
+                has_value: true,
+            };
+            let mode = c"affine".as_ptr();
+            ctx.emit(|res, s| unsafe {
+                mlx::mlx_quantized_matmul(res, a2, w, scales2d, biases, true, gs, bb, mode, s)
+            })?
+        }
     } else {
         // Fallback (block_size mlx_quantized_matmul cannot handle, e.g. 16): dequantize in-graph.
         // Dequant + dense matmul run in the activation's float dtype (fp16/bf16 halves the weight
