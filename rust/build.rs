@@ -11,6 +11,10 @@ fn brew_prefix(pkg: &str) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
+fn dependency_prefix(env_name: &str, brew_pkg: &str) -> String {
+    env::var(env_name).unwrap_or_else(|_| brew_prefix(brew_pkg))
+}
+
 /// Discover the ONNX Runtime C-API include directory for a standalone checkout.
 ///
 /// Resolution order:
@@ -45,14 +49,16 @@ fn resolve_ort_include() -> String {
 
 fn main() {
     let ort_inc = resolve_ort_include();
-    let mlxc = brew_prefix("mlx-c");
-    let mlx = brew_prefix("mlx");
+    let mlxc = dependency_prefix("MLXC_PREFIX", "mlx-c");
+    let mlx = dependency_prefix("MLX_PREFIX", "mlx");
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     println!("cargo:rerun-if-changed=wrapper_ort.h");
     println!("cargo:rerun-if-changed=wrapper_mlx.h");
     println!("cargo:rerun-if-env-changed=ORT_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=ORT_HOME");
+    println!("cargo:rerun-if-env-changed=MLXC_PREFIX");
+    println!("cargo:rerun-if-env-changed=MLX_PREFIX");
 
     // --- ORT plugin-EP C ABI bindings (pure C header; pulls in onnxruntime_ep_c_api.h) ---
     bindgen::Builder::default()

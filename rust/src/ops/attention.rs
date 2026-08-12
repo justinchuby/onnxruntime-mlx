@@ -713,6 +713,14 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     // [B,H,S,hd] -> [B,S,H*hd].
     let t = ctx.transpose(attn, &[0, 2, 1, 3])?;
     let out = ctx.reshape(t, &[b, s, num_heads * head])?;
+    // Prefill feeds this tensor into multiple large projections. Materialize the head-major
+    // transpose once so each downstream quantized GEMM does not independently traverse the
+    // strided SDPA view.
+    let out = if ctx.shape_keyed_compile() {
+        ctx.contiguous(out)?
+    } else {
+        out
+    };
 
     ctx.bind(&n.outputs[0], out);
     if n.outputs.len() >= 2 {

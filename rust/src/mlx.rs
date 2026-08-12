@@ -249,6 +249,200 @@ impl Drop for VectorArray {
     }
 }
 
+/// Owning wrapper over an `mlx_vector_string` — the `input_names`/`output_names` lists a
+/// [`FastMetalKernel`] is built from. Freed once on drop.
+pub struct VectorString {
+    raw: mlx::mlx_vector_string,
+}
+
+impl VectorString {
+    pub fn new() -> Self {
+        VectorString {
+            raw: unsafe { mlx::mlx_vector_string_new() },
+        }
+    }
+
+    /// Append a name (MLX copies the bytes; `s` need not outlive the call).
+    pub fn append(&mut self, s: &std::ffi::CStr) {
+        unsafe { mlx::mlx_vector_string_append_value(self.raw, s.as_ptr()) };
+    }
+
+    #[inline]
+    pub fn as_raw(&self) -> mlx::mlx_vector_string {
+        self.raw
+    }
+}
+
+impl Default for VectorString {
+    fn default() -> Self {
+        VectorString::new()
+    }
+}
+
+impl Drop for VectorString {
+    fn drop(&mut self) {
+        unsafe { mlx::mlx_vector_string_free(self.raw) };
+    }
+}
+
+/// Owning wrapper over an `mlx_fast_metal_kernel_config` — the per-call dispatch/output-shape
+/// description passed to [`FastMetalKernel::apply`]. Cheap to build (no compilation happens here);
+/// unlike the kernel object itself this is NOT meant to be cached, since grid/threadgroup/output
+/// shape vary per call (per M/N).
+pub struct FastMetalKernelConfig {
+    raw: mlx::mlx_fast_metal_kernel_config,
+}
+
+impl FastMetalKernelConfig {
+    pub fn new() -> Self {
+        FastMetalKernelConfig {
+            raw: unsafe { mlx::mlx_fast_metal_kernel_config_new() },
+        }
+    }
+
+    /// Declare one output array's shape + dtype (call once per name in the kernel's `output_names`,
+    /// in order).
+    pub fn add_output_arg(&mut self, shape: &[i32], dtype: mlx::mlx_dtype) -> Result<(), String> {
+        let rc = unsafe {
+            mlx::mlx_fast_metal_kernel_config_add_output_arg(
+                self.raw,
+                shape.as_ptr(),
+                shape.len(),
+                dtype,
+            )
+        };
+        if rc != 0 {
+            return Err("mlx_fast_metal_kernel_config_add_output_arg failed".to_string());
+        }
+        Ok(())
+    }
+
+    /// Total thread count per grid dimension (Metal's `dispatchThreads:`, NOT threadgroup count).
+    pub fn set_grid(&mut self, x: i32, y: i32, z: i32) -> Result<(), String> {
+        let rc = unsafe { mlx::mlx_fast_metal_kernel_config_set_grid(self.raw, x, y, z) };
+        if rc != 0 {
+            return Err("mlx_fast_metal_kernel_config_set_grid failed".to_string());
+        }
+        Ok(())
+    }
+
+    /// Threads per threadgroup (Metal's `threadsPerThreadgroup:`).
+    pub fn set_thread_group(&mut self, x: i32, y: i32, z: i32) -> Result<(), String> {
+        let rc = unsafe { mlx::mlx_fast_metal_kernel_config_set_thread_group(self.raw, x, y, z) };
+        if rc != 0 {
+            return Err("mlx_fast_metal_kernel_config_set_thread_group failed".to_string());
+        }
+        Ok(())
+    }
+
+    /// Print the generated Metal source (once, at first `apply`) to stderr — debug-only.
+    #[allow(dead_code)]
+    pub fn set_verbose(&mut self, verbose: bool) -> Result<(), String> {
+        let rc = unsafe { mlx::mlx_fast_metal_kernel_config_set_verbose(self.raw, verbose) };
+        if rc != 0 {
+            return Err("mlx_fast_metal_kernel_config_set_verbose failed".to_string());
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub fn as_raw(&self) -> mlx::mlx_fast_metal_kernel_config {
+        self.raw
+    }
+}
+
+impl Default for FastMetalKernelConfig {
+    fn default() -> Self {
+        FastMetalKernelConfig::new()
+    }
+}
+
+impl Drop for FastMetalKernelConfig {
+    fn drop(&mut self) {
+        unsafe { mlx::mlx_fast_metal_kernel_config_free(self.raw) };
+    }
+}
+
+/// Owning wrapper over a compiled `mlx_fast_metal_kernel` (an `mx.fast.metal_kernel`-equivalent
+/// custom kernel object). Building one is cheap (compilation is deferred to the first `apply`), but
+/// once built it should be **cached and reused** across calls with the same source — recompiling per
+/// node/call would repeatedly hit the Metal shader compiler.
+///
+/// `Send + Sync`: the handle is an MLX-internal reference-counted context (mirroring `Array`'s own
+/// safety story); MLX's C++ core reference-counts these with atomics, so sharing one behind a
+/// `OnceLock`/`Mutex` across the plugin's (effectively single-threaded-per-call) usage is sound.
+pub struct FastMetalKernel {
+    raw: mlx::mlx_fast_metal_kernel,
+}
+
+unsafe impl Send for FastMetalKernel {}
+unsafe impl Sync for FastMetalKernel {}
+
+impl FastMetalKernel {
+    /// Build (but do not yet compile) a named custom Metal kernel. `source` is ONLY the kernel body
+    /// (MLX auto-generates the `[[kernel]] void ...(...)` signature from `input_names`/
+    /// `output_names` plus whichever `<name>_shape`/`_strides`/`_ndim` identifiers and Metal
+    /// attribute names are textually referenced in `source`); `header` is prepended verbatim before
+    /// the generated signature (includes/helper functions). Any Metal compile error surfaces as an
+    /// `Err` from the FIRST [`Self::apply`] call, not here.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: &std::ffi::CStr,
+        input_names: &VectorString,
+        output_names: &VectorString,
+        source: &std::ffi::CStr,
+        header: &std::ffi::CStr,
+        ensure_row_contiguous: bool,
+        atomic_outputs: bool,
+    ) -> Self {
+        let raw = unsafe {
+            mlx::mlx_fast_metal_kernel_new(
+                name.as_ptr(),
+                input_names.as_raw(),
+                output_names.as_raw(),
+                source.as_ptr(),
+                header.as_ptr(),
+                ensure_row_contiguous,
+                atomic_outputs,
+            )
+        };
+        FastMetalKernel { raw }
+    }
+
+    /// Dispatch the kernel over `inputs` (in the same order as the `input_names` it was built
+    /// with), producing one output array per `add_output_arg` call on `config`. `Err` on any MLX
+    /// failure (a bad Metal source, an eligibility/shape mismatch caught by `ensure_row_contiguous`,
+    /// etc.) — callers must treat this as "fall back to the slow path", never as a hard error.
+    pub fn apply(
+        &self,
+        inputs: &VectorArray,
+        config: &FastMetalKernelConfig,
+        stream: mlx::mlx_stream,
+    ) -> Result<VectorArray, String> {
+        let mut res = unsafe { mlx::mlx_vector_array_new() };
+        let rc = unsafe {
+            mlx::mlx_fast_metal_kernel_apply(
+                &mut res,
+                self.raw,
+                inputs.as_raw(),
+                config.as_raw(),
+                stream,
+            )
+        };
+        if rc != 0 {
+            unsafe { mlx::mlx_vector_array_free(res) };
+            return Err("mlx_fast_metal_kernel_apply failed".to_string());
+        }
+        Ok(VectorArray::from_raw(res))
+    }
+}
+
+impl Drop for FastMetalKernel {
+    fn drop(&mut self) {
+        unsafe { mlx::mlx_fast_metal_kernel_free(self.raw) };
+    }
+}
+
 /// Evaluate the whole boundary graph in one shot (mirrors the C++ single-`mlx_eval` boundary).
 pub fn eval(outputs: &VectorArray) -> Result<(), String> {
     let rc = unsafe { mlx::mlx_eval(outputs.as_raw()) };

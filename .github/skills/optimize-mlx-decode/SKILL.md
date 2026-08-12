@@ -38,3 +38,15 @@ full decoder.
 Remember the standard EP boundary: persistent private KV, GPU sampling, and
 asynchronous token pipelining may require an explicit model-native interface.
 
+## Decode-specific lessons
+
+- Compare 1-token and long-prompt decode before changing QMV; prefill swap can
+  masquerade as a decode regression.
+- Avoid `mlx_set_cache_limit(0)`; retain enough cache for weights and compiled
+  materializations.
+- Tune layer-group partitions for both peak memory and per-token boundary
+  overhead.
+- Do not assume FP16 QMM implies faster FP16 QMV. Gate mixed kernels to prefill
+  unless end-to-end decode proves otherwise.
+- Verify cache size before replacing shared RoPE tables.
+- Benchmark at least 200 tokens, skip startup tokens, and verify token equality.

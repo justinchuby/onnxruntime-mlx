@@ -7,6 +7,7 @@ pub mod math;
 pub mod matmul;
 pub mod norm;
 pub mod quant;
+pub mod quant_fastkernel;
 pub mod reduction;
 pub mod shape;
 // signal/random/recurrent/ssm/misc/controlflow

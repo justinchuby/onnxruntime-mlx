@@ -115,6 +115,11 @@ cargo build --release
 # => rust/target/release/libonnxruntime_mlx_ep.dylib  (registers the EP as "MLXExecutionProvider")
 ```
 
+Set `MLX_PREFIX` and `MLXC_PREFIX` to link and bundle a custom MLX runtime
+instead of the Homebrew installation. Each prefix must contain `include/` and
+`lib/`; the wheel builder also bundles `mlx.metallib` and an optional
+`libjaccl.dylib` from `MLX_PREFIX/lib`.
+
 The crate binds the ORT plugin-EP C ABI and `mlx-c` directly via `bindgen`; it does **not** link
 `libonnxruntime` (ORT is reached through the `OrtApi` function-pointer table passed to
 `CreateEpFactories`).

@@ -46,3 +46,17 @@ An isolated kernel win is not sufficient. Re-run the unchanged end-to-end
 workload with tracing disabled and reject changes that lose to dispatch,
 partition, materialization, or synchronization overhead.
 
+## Large-model prefill lessons
+
+- Record `mlx_get_active_memory`, `mlx_get_cache_memory`, and
+  `mlx_get_peak_memory`; check `memory_pressure` and swap before comparisons.
+- If long-prompt decode collapses but 1-token decode is normal, reduce prefill
+  peak memory. Split large lazy graphs into layer groups; tune memory versus
+  partition overhead.
+- Do not use `mlx_set_cache_limit(0)` blindly; it can destroy decode reuse.
+- For BF16 INT4 QMM, try BF16 I/O, FP16 tiles, FP32 accumulation, vectorized
+  `bfloat4 -> half4` loads, and wider tiles. Test production and vocab shapes.
+- `mlx_fast_metal_kernel` may trail private Steel kernels; keep the stock
+  fallback and validate JIT/AOT, edge shapes, batching, and token equality.
+- Measure steady prefill separately from a 200-token decode run to avoid thermal
+  contamination.
