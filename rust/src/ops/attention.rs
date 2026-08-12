@@ -948,6 +948,80 @@ fn multihead_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<
     Ok(())
 }
 
+// ---- PackedMultiHeadAttention (com.microsoft) --------------------------------------------------
+
+fn packed_multihead_attention_op(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+) -> Result<(), MlxError> {
+    let num_heads = attr_int(n, "num_heads", 0) as i32;
+    let q = ctx.resolve(&n.inputs[0])?;
+    let k = ctx.resolve(&n.inputs[1])?;
+    let v = ctx.resolve(&n.inputs[2])?;
+    let qs = ctx.shape_of(q);
+    let vs = ctx.shape_of(v);
+    let token_count = qs[0];
+    let hidden = qs[1];
+    let v_hidden = vs[1];
+    let head = hidden / num_heads;
+    let v_head = v_hidden / num_heads;
+    let scale = attr_scale(n, head);
+    let out_dt = ctx.dtype_of(q);
+
+    // The packed rows are already in output order. token_offset describes their positions in the
+    // padded source tensor, but no restore-padding step is part of this op's output contract.
+    let cumulative = read_int_input(ctx, &n.inputs[5])?;
+    if cumulative.len() < 2 || cumulative[0] != 0 {
+        return Err(
+            "PackedMultiHeadAttention: cumulative_sequence_length must start at zero".to_string(),
+        );
+    }
+    if cumulative.last().copied() != Some(token_count as i64) {
+        return Err(
+            "PackedMultiHeadAttention: cumulative_sequence_length must end at token_count"
+                .to_string(),
+        );
+    }
+
+    let mut outputs = Vec::with_capacity(cumulative.len() - 1);
+    for pair in cumulative.windows(2) {
+        let start = pair[0] as i32;
+        let end = pair[1] as i32;
+        let seq = end - start;
+        if seq <= 0 {
+            continue;
+        }
+        let qb = slice(ctx, q, &[start, 0], &[end, hidden])?;
+        let kb = slice(ctx, k, &[start, 0], &[end, hidden])?;
+        let vb = slice(ctx, v, &[start, 0], &[end, v_hidden])?;
+        let qb = ctx.reshape(qb, &[1, seq, hidden])?;
+        let kb = ctx.reshape(kb, &[1, seq, hidden])?;
+        let vb = ctx.reshape(vb, &[1, seq, v_hidden])?;
+        let qh = split_heads(ctx, qb, 1, seq, num_heads, head)?;
+        let kh = split_heads(ctx, kb, 1, seq, num_heads, head)?;
+        let vh = split_heads(ctx, vb, 1, seq, num_heads, v_head)?;
+        let out = sdpa_dispatch(ctx, qh, kh, vh, scale, false, None, out_dt)?;
+        let out = ctx.transpose(out, &[0, 2, 1, 3])?;
+        outputs.push(ctx.reshape(out, &[seq, v_hidden])?);
+    }
+
+    let output = match outputs.len() {
+        0 => slice(ctx, v, &[0, 0], &[0, v_hidden])?,
+        1 => outputs[0],
+        _ => {
+            let mut arrays = VectorArray::new();
+            for output in &outputs {
+                arrays.append(*output);
+            }
+            ctx.emit(|res, stream| unsafe {
+                mlx::mlx_concatenate_axis(res, arrays.as_raw(), 0, stream)
+            })?
+        }
+    };
+    ctx.bind(&n.outputs[0], output);
+    Ok(())
+}
+
 // ---- RotaryEmbedding (ai.onnx opset 23 / com.microsoft) ----------------------------------------
 
 /// Apply RoPE over the first rot (= 2*half) head dims of x4 [B,N,S,hd]; cos4/sin4 are [Bc,1,S,half]
@@ -1657,6 +1731,66 @@ fn multihead_attention_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+/// PackedMultiHeadAttention (com.microsoft). Separate packed Q/K/V without projection or attention
+/// bias. Runtime cumulative sequence lengths partition the token-major rows into independent
+/// sequences; output remains in the same packed order.
+fn packed_multihead_attention_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() >= 6 && node.num_outputs() >= 1,
+        "expects at least 6 inputs and 1 output"
+    );
+    let (q, k, v, token_offset, cumulative, output) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.input_info(4),
+        node.input_info(5),
+        node.output_info(0),
+    ) {
+        (Some(q), Some(k), Some(v), Some(t), Some(c), Some(o)) => (q, k, v, t, c, o),
+        _ => deny!("Q/K/V, packing metadata, or output lacks tensor type/shape info"),
+    };
+    require!(
+        is_mlx_float(q.dtype)
+            && q.dtype == k.dtype
+            && k.dtype == v.dtype
+            && v.dtype == output.dtype,
+        "Q/K/V and output must share one MLX float dtype"
+    );
+    require!(
+        q.shape.len() == 2 && k.shape == q.shape && v.shape.len() == 2,
+        "separate Q/K/V must be token-major rank-2 tensors"
+    );
+    require!(
+        q.shape[1] > 0 && v.shape[1] > 0,
+        "Q/K/V hidden dimensions must be static and positive"
+    );
+    let num_heads = node.int_attr("num_heads", 0);
+    require!(
+        num_heads > 0 && q.shape[1] % num_heads == 0 && v.shape[1] % num_heads == 0,
+        "Q/K/V hidden dimensions must divide num_heads"
+    );
+    require!(
+        token_offset.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+            && token_offset.shape.len() == 2,
+        "token_offset must be rank-2 int32"
+    );
+    require!(
+        cumulative.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+            && cumulative.shape.len() == 1,
+        "cumulative_sequence_length must be rank-1 int32"
+    );
+    require!(
+        !node.input_present(3),
+        "QKV projection bias is not supported"
+    );
+    require!(
+        node.num_inputs() < 7 || !node.input_present(6),
+        "attention_bias is not supported"
+    );
+    Ok(())
+}
+
 /// RotaryEmbedding (ai.onnx opset 23 / com.microsoft). Float 3D (B,S,H*hd)+num_heads or 4D input;
 /// [B,S] gather, [1] offset (com.microsoft), or (ai.onnx only) absent pos with [B,S,half] cache.
 fn rotary_embedding_claim(node: &NodeView) -> ClaimResult {
@@ -2113,6 +2247,15 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         multihead_attention_op,
         multihead_attention_claim,
+    );
+    reg(
+        registry,
+        "com.microsoft",
+        "PackedMultiHeadAttention",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        packed_multihead_attention_op,
+        packed_multihead_attention_claim,
     );
     // RotaryEmbedding: ai.onnx entered at opset 23; com.microsoft is version-insensitive.
     reg(

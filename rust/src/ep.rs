@@ -207,12 +207,6 @@ unsafe fn get_capability_impl(
                 .count()
                 == 1;
 
-        // CUDA-oriented VLM vision exports commonly contain PackedMultiHeadAttention plus
-        // MatMulNBits and CPU-only dynamic Range/Compress/Scan paths. Keep every claimable node on
-        // MLX, but partition them as singletons: combining supported nodes across those dynamic
-        // paths can violate ORT's stricter fusion-convexity check even when the quotient graph is
-        // acyclic. Text-only generation only initializes this graph; image inference can still run
-        // correctly while a future graph-aware vision clusterer recovers larger partitions.
         let mixed_vision_quant_graph = nodes.iter().any(|&node| {
             let view = NodeView::new(ep.ort_api, node);
             view.domain() == "com.microsoft" && view.op_type() == "PackedMultiHeadAttention"
@@ -232,9 +226,6 @@ unsafe fn get_capability_impl(
                 if native_q8_attention_graph && matches!(view.op_type().as_str(), "Range" | "Tile")
                 {
                     return true;
-                }
-                if mixed_vision_quant_graph {
-                    return claimable(&view);
                 }
                 claimable(&view)
             })
@@ -291,12 +282,14 @@ unsafe fn get_capability_impl(
             }
         }
 
+        // This vision export contains many dynamic control-flow/shape branches. ORT's fusion API
+        // accounts for implicit control dependencies that are not exposed by the tensor-name graph
+        // used by `build_convex_clusters`, so its maximal clusters can be rejected as non-convex.
+        // Maximal supported intervals in ORT's topological node order are conservatively convex:
+        // every node that could lie between two members is included, while still avoiding the
+        // thousands of singleton partitions previously used for this graph.
         let clusters = if mixed_vision_quant_graph {
-            supported
-                .iter()
-                .enumerate()
-                .filter_map(|(index, &is_supported)| is_supported.then_some(vec![index]))
-                .collect()
+            build_contiguous_clusters(&supported)
         } else {
             build_convex_clusters(api, &nodes, &supported)
         };
@@ -321,6 +314,26 @@ unsafe fn get_capability_impl(
         tr.record_claim(claimed, num, clusters.len(), &rejected);
         ptr::null_mut()
     }
+}
+
+fn build_contiguous_clusters(supported: &[bool]) -> Vec<Vec<usize>> {
+    let mut clusters = Vec::new();
+    let mut start = 0usize;
+    while start < supported.len() {
+        while start < supported.len() && !supported[start] {
+            start += 1;
+        }
+        if start == supported.len() {
+            break;
+        }
+        let mut end = start + 1;
+        while end < supported.len() && supported[end] {
+            end += 1;
+        }
+        clusters.push((start..end).collect());
+        start = end;
+    }
+    clusters
 }
 
 /// Release a non-null `OrtStatus` returned on an error / not-found path (the OrtApi allocates a
@@ -866,7 +879,8 @@ unsafe fn build_plan(
         // this form eager without blocking the 7-input external-RoPE decoder.
         fn has_compile_barrier(nodes: &[NodeDesc]) -> bool {
             nodes.iter().any(|n| {
-                (n.op_type == "GroupQueryAttention" && n.inputs.len() == 11)
+                n.op_type == "PackedMultiHeadAttention"
+                    || (n.op_type == "GroupQueryAttention" && n.inputs.len() == 11)
                     || n.subgraphs.iter().any(|sg| has_compile_barrier(&sg.nodes))
             })
         }

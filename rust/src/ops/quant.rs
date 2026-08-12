@@ -227,6 +227,37 @@ fn compute_float_dtype(act_dt: mlx::mlx_dtype) -> mlx::mlx_dtype {
     }
 }
 
+fn pad_last_dim(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    amount: i32,
+    dt: mlx::mlx_dtype,
+) -> Result<mlx::mlx_array, MlxError> {
+    if amount == 0 {
+        return Ok(a);
+    }
+    let zero = f32(ctx, 0.0);
+    let zero = ctx.astype(zero, dt)?;
+    let axis = [1i32];
+    let low = [0i32];
+    let high = [amount];
+    ctx.emit(|res, stream| unsafe {
+        mlx::mlx_pad(
+            res,
+            a,
+            axis.as_ptr(),
+            axis.len(),
+            low.as_ptr(),
+            low.len(),
+            high.as_ptr(),
+            high.len(),
+            zero,
+            c"constant".as_ptr(),
+            stream,
+        )
+    })
+}
+
 /// Repack ONNX Runtime's block-major uint8 weight to MLX affine uint32 words. Int4 stores two
 /// values per source byte and eight values per word; int8 stores one value per byte and four per
 /// word. Values are packed low-to-high along K. Cached (constant) or kept (dynamic).
@@ -247,7 +278,9 @@ fn matmulnbits_repack(
     }
     let host = ctx.raw_host(wref)?;
     let values_per_word = 32 / bits;
-    let words = (k / values_per_word) as usize;
+    let nblocks = (k + block - 1) / block;
+    let padded_k = nblocks * block;
+    let words = (padded_k / values_per_word) as usize;
     let expected_bytes = (big_n as usize) * words * std::mem::size_of::<u32>();
     if (wref.constant || wref.source == Src::Initializer)
         && cfg!(target_endian = "little")
@@ -263,14 +296,13 @@ fn matmulnbits_repack(
         return Ok(ctx.cache_put(key, arr));
     }
     let src = host.data as *const u8;
-    let nblocks = k / block;
     let values_per_byte = 8 / bits;
     let blob = block / values_per_byte;
     let mut packed = vec![0u32; (big_n as usize) * words];
     if !src.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(src, host.count) };
         for row in 0..big_n {
-            for kk in 0..k {
+            for kk in 0..padded_k {
                 let blk = kk / block;
                 let within = kk % block;
                 let byte = within / values_per_byte;
@@ -571,10 +603,11 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
     let big_n = *n.ints.get("N").ok_or("MatMulNBits: missing N")?;
     let block = n.ints.get("block_size").copied().unwrap_or(32);
     let bits = n.ints.get("bits").copied().unwrap_or(4);
-    if block <= 0 || k % block != 0 {
+    if block <= 0 {
         return Err("MatMulNBits: bad block_size".to_string());
     }
-    let nblocks = (k / block) as i32;
+    let nblocks = ((k + block - 1) / block) as i32;
+    let padded_k = i64::from(nblocks) * block;
     let has_zp = present(n, 3);
 
     let a = ctx.resolve(&n.inputs[0])?;
@@ -585,6 +618,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
     }
     let a2 = ctx.reshape(a, &[m, k as i32])?;
     let act_dt = ctx.dtype_of(a2);
+    let a2 = pad_last_dim(ctx, a2, (padded_k - k) as i32, act_dt)?;
 
     let supported = block == 32 || block == 64 || block == 128;
     let y = if supported {
@@ -620,10 +654,10 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
         ));
         let wpacked = ctx.resolve(&n.inputs[1])?;
         let q = if bits == 4 {
-            let wflat = ctx.reshape(wpacked, &[big_n as i32, (k / 2) as i32])?;
+            let wflat = ctx.reshape(wpacked, &[big_n as i32, (padded_k / 2) as i32])?;
             unpack_nibbles(ctx, wflat)?
         } else {
-            ctx.reshape(wpacked, &[big_n as i32, k as i32])?
+            ctx.reshape(wpacked, &[big_n as i32, padded_k as i32])?
         };
         let qf = ctx.astype(q, comp_dt)?;
         let centered = if has_zp {
