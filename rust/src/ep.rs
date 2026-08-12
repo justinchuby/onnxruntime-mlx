@@ -861,7 +861,16 @@ unsafe fn build_plan(
                     || n.subgraphs.iter().any(|sg| any_control_flow(&sg.nodes))
             })
         }
-        let has_control_flow = any_control_flow(&nodes);
+        // The 11-input GQA form carries a runtime attention-bias tensor. Its eager translation is
+        // correct, but the compiled route does not currently preserve its bias semantics. Keep
+        // this form eager without blocking the 7-input external-RoPE decoder.
+        fn has_compile_barrier(nodes: &[NodeDesc]) -> bool {
+            nodes.iter().any(|n| {
+                (n.op_type == "GroupQueryAttention" && n.inputs.len() == 11)
+                    || n.subgraphs.iter().any(|sg| has_compile_barrier(&sg.nodes))
+            })
+        }
+        let has_control_flow = any_control_flow(&nodes) || has_compile_barrier(&nodes);
         let mut plan = Plan::new(nodes);
         plan.compiled.enabled = crate::compiled::compile_enabled(has_control_flow);
         plan.prefill.enabled = crate::compiled::prefill_enabled(has_control_flow, &plan.nodes);

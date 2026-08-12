@@ -1141,7 +1141,7 @@ fn is_int32(t: ort::ONNXTensorElementDataType) -> bool {
     t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
 }
 
-/// GroupQueryAttention (com.microsoft): separate-QKV decode/prefill layout. Two accepted layouts:
+/// GroupQueryAttention (com.microsoft): separate-QKV decode/prefill layout. Three accepted layouts:
 ///   * 7-input (q, k, v, past_k, past_v, seqlens_k, total_seq) — external/no RoPE decoder.
 ///   * 9-input (q, k, v, past_k, past_v, seqlens_k, total_seq, cos, sin) — in-op RoPE decoder.
 ///   * 11-input (…, seqlens_k, total_seq, cos, sin, position_ids, attention_bias) — the Gemma3n

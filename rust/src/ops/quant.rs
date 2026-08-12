@@ -249,7 +249,10 @@ fn matmulnbits_repack(
     let values_per_word = 32 / bits;
     let words = (k / values_per_word) as usize;
     let expected_bytes = (big_n as usize) * words * std::mem::size_of::<u32>();
-    if wref.constant && cfg!(target_endian = "little") && host.count == expected_bytes {
+    if (wref.constant || wref.source == Src::Initializer)
+        && cfg!(target_endian = "little")
+        && host.count == expected_bytes
+    {
         // ORT's block-major layout is byte-for-byte the MLX row-major layout when K is divisible
         // by the group size: blocks are consecutive along K, and each byte packs low then high
         // nibbles. Reinterpret four adjacent bytes as one little-endian uint32 word, avoiding the
@@ -358,7 +361,7 @@ fn matmulnbits_scales(
     {
         return Ok(scales);
     }
-    if scales_ref.constant {
+    if scales_ref.constant || scales_ref.source == Src::Initializer {
         let host = ctx.raw_host(scales_ref)?;
         let count = (big_n as usize) * (nblocks as usize);
         if host.count != count {
