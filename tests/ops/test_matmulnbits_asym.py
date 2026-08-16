@@ -159,18 +159,25 @@ def test_matmulnbits_fp16_partial_final_block() -> None:
     _check(model, feeds, rtol=6e-2, atol=6e-2)
 
 
-def test_matmulnbits_bf16_explicit_fp16_matches_native(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("block", [32, 64, 128])
+@pytest.mark.parametrize("bits", [4, 8])
+@pytest.mark.parametrize("M", [8, 32], ids=["short", "long"])
+def test_matmulnbits_bf16_explicit_fp16_matches_native(
+    monkeypatch: pytest.MonkeyPatch, block: int, bits: int, M: int
+) -> None:
     rng = np.random.default_rng(0)
-    M, K, N, block = 8, 64, 32, 32
+    K, N = block * 3, 33
     nblocks = K // block
-    activation = rng.standard_normal((M, K)).astype(np.float32)
-    quantized = rng.integers(0, 16, size=(N, nblocks, block), dtype=np.uint8)
-    packed = (quantized[..., 0::2] | (quantized[..., 1::2] << 4)).astype(np.uint8)
-    scales = (rng.standard_normal(N * nblocks) * 0.05).astype(np.float32)
-    zero_points = rng.integers(0, 16, size=(N, nblocks), dtype=np.uint8)
-    zero_points = (
-        zero_points[..., 0::2] | (zero_points[..., 1::2] << 4)
-    ).reshape(-1)
+    activation = rng.standard_normal((1, M, K)).astype(np.float32)
+    quantized = rng.integers(0, 1 << bits, size=(N, nblocks, block), dtype=np.uint8)
+    packed = _pack_int4_last(quantized) if bits == 4 else quantized
+    scales = (rng.standard_normal(N * nblocks) * (0.8 / (1 << bits))).astype(np.float32)
+    zero_points = rng.integers(0, 1 << bits, size=(N, nblocks), dtype=np.uint8)
+    if bits == 4:
+        zero_points = np.concatenate(
+            [zero_points, np.zeros((N, 1), dtype=np.uint8)], axis=1
+        )
+        zero_points = _pack_int4_last(zero_points).reshape(-1)
 
     nodes = [
         helper.make_node("Cast", ["activation"], ["activation_bf16"], to=TensorProto.BFLOAT16),
@@ -182,7 +189,7 @@ def test_matmulnbits_bf16_explicit_fp16_matches_native(monkeypatch: pytest.Monke
             domain="com.microsoft",
             K=K,
             N=N,
-            bits=4,
+            bits=bits,
             block_size=block,
         ),
         helper.make_node("Cast", ["output_bf16"], ["output"], to=TensorProto.FLOAT),
@@ -190,8 +197,8 @@ def test_matmulnbits_bf16_explicit_fp16_matches_native(monkeypatch: pytest.Monke
     graph = helper.make_graph(
         nodes,
         "bf16-qmm-explicit-fp16",
-        [helper.make_tensor_value_info("activation", TensorProto.FLOAT, [M, K])],
-        [helper.make_tensor_value_info("output", TensorProto.FLOAT, [M, N])],
+        [helper.make_tensor_value_info("activation", TensorProto.FLOAT, [1, M, K])],
+        [helper.make_tensor_value_info("output", TensorProto.FLOAT, [1, M, N])],
         initializer=[
             numpy_helper.from_array(packed, "weight"),
             numpy_helper.from_array(scales, "scales"),
@@ -213,4 +220,8 @@ def test_matmulnbits_bf16_explicit_fp16_matches_native(monkeypatch: pytest.Monke
     monkeypatch.delenv("ONNXRUNTIME_EP_MLX_BF16_QMM_FP16")
     explicit = m.run_mlx(model_bytes, {"activation": activation})[0]
 
-    np.testing.assert_allclose(explicit, native, rtol=4e-2, atol=4e-2)
+    if M < 32:
+        np.testing.assert_array_equal(explicit, native)
+    else:
+        assert np.any(explicit != native)
+        np.testing.assert_allclose(explicit, native, rtol=5e-2, atol=8e-2)
