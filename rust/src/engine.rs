@@ -663,6 +663,10 @@ pub struct TranslationContext<'a> {
     env: HashMap<String, mlxsys::mlx_array>,
     /// All arrays produced this run; freed together on drop (RAII, no per-site frees).
     arena: Vec<Array>,
+    /// Per-translation cast CSE. This is intentionally scoped to one graph build: runtime inputs
+    /// must never be retained across Compute calls, while repeated Q/K/V and gate/up projections
+    /// should share one explicit activation cast inside the compiled closure.
+    astype_cache: HashMap<(usize, u32), mlxsys::mlx_array>,
     /// Path a handler declared for the CURRENT node (fast vs composed); the dispatcher
     /// resets this before each handler and reads it after (see `registry::translate`).
     path_mark: Option<crate::trace::PathMark>,
@@ -723,6 +727,7 @@ impl<'a> TranslationContext<'a> {
             stream,
             env: HashMap::new(),
             arena: Vec::new(),
+            astype_cache: HashMap::new(),
             path_mark: None,
             trace_enabled: crate::trace::tracer().is_enabled(),
             rope_dynamic: false,
@@ -1066,6 +1071,42 @@ impl<'a> TranslationContext<'a> {
             return Err("mlx_astype failed".to_string());
         }
         Ok(self.keep(res))
+    }
+
+    /// Cast once per source handle and target dtype during this graph translation.
+    pub fn astype_once(
+        &mut self,
+        a: mlxsys::mlx_array,
+        t: mlxsys::mlx_dtype,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
+        let key = (a.ctx as usize, t as u32);
+        if let Some(&casted) = self.astype_cache.get(&key) {
+            return Ok(casted);
+        }
+        let casted = self.astype(a, t)?;
+        self.astype_cache.insert(key, casted);
+        Ok(casted)
+    }
+
+    /// Materialize and retain a cast of a genuinely constant array in the plan cache.
+    pub fn cache_astype(
+        &mut self,
+        key: String,
+        a: mlxsys::mlx_array,
+        t: mlxsys::mlx_dtype,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
+        if let Some(casted) = self.cache_get(&key) {
+            return Ok(casted);
+        }
+        let mut raw = unsafe { mlxsys::mlx_array_new() };
+        let rc = unsafe { mlxsys::mlx_astype(&mut raw, a, t, self.stream) };
+        if rc != 0 {
+            unsafe { mlxsys::mlx_array_free(raw) };
+            return Err("mlx_astype failed".to_string());
+        }
+        let casted = Array::from_raw(raw);
+        casted.eval();
+        Ok(self.cache_put(key, casted))
     }
 
     /// `zeros_like(a)`.

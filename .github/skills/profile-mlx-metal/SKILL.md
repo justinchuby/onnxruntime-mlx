@@ -54,9 +54,8 @@ partition, materialization, or synchronization overhead.
   peak memory. Split large lazy graphs into layer groups; tune memory versus
   partition overhead.
 - Do not use `mlx_set_cache_limit(0)` blindly; it can destroy decode reuse.
-- For BF16 INT4 QMM, try BF16 I/O, FP16 tiles, FP32 accumulation, vectorized
-  `bfloat4 -> half4` loads, and wider tiles. Test production and vocab shapes.
-- `mlx_fast_metal_kernel` may trail private Steel kernels; keep the stock
-  fallback and validate JIT/AOT, edge shapes, batching, and token equality.
+- For BF16 INT4 QMM, explicitly cast activations and cached scales/biases to
+  FP16, run stock `quantized_matmul`, then cast the output back to BF16.
+  Share activation casts across sibling projections and keep decode/QMV unchanged.
 - Measure steady prefill separately from a 200-token decode run to avoid thermal
   contamination.

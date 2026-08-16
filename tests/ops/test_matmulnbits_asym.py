@@ -11,8 +11,10 @@ import json
 import os
 
 import numpy as np
+import onnx
 import onnxruntime as ort
 import pytest
+from onnx import TensorProto, helper, numpy_helper
 from onnx_ir import DataType as DT
 
 import _models as m
@@ -155,3 +157,60 @@ def test_matmulnbits_fp16_partial_final_block() -> None:
         M=4, K=1176, N=16, block=32, asymmetric=True, dtype=DT.FLOAT16
     )
     _check(model, feeds, rtol=6e-2, atol=6e-2)
+
+
+def test_matmulnbits_bf16_explicit_fp16_matches_native(monkeypatch: pytest.MonkeyPatch) -> None:
+    rng = np.random.default_rng(0)
+    M, K, N, block = 8, 64, 32, 32
+    nblocks = K // block
+    activation = rng.standard_normal((M, K)).astype(np.float32)
+    quantized = rng.integers(0, 16, size=(N, nblocks, block), dtype=np.uint8)
+    packed = (quantized[..., 0::2] | (quantized[..., 1::2] << 4)).astype(np.uint8)
+    scales = (rng.standard_normal(N * nblocks) * 0.05).astype(np.float32)
+    zero_points = rng.integers(0, 16, size=(N, nblocks), dtype=np.uint8)
+    zero_points = (
+        zero_points[..., 0::2] | (zero_points[..., 1::2] << 4)
+    ).reshape(-1)
+
+    nodes = [
+        helper.make_node("Cast", ["activation"], ["activation_bf16"], to=TensorProto.BFLOAT16),
+        helper.make_node("Cast", ["scales"], ["scales_bf16"], to=TensorProto.BFLOAT16),
+        helper.make_node(
+            "MatMulNBits",
+            ["activation_bf16", "weight", "scales_bf16", "zero_points"],
+            ["output_bf16"],
+            domain="com.microsoft",
+            K=K,
+            N=N,
+            bits=4,
+            block_size=block,
+        ),
+        helper.make_node("Cast", ["output_bf16"], ["output"], to=TensorProto.FLOAT),
+    ]
+    graph = helper.make_graph(
+        nodes,
+        "bf16-qmm-explicit-fp16",
+        [helper.make_tensor_value_info("activation", TensorProto.FLOAT, [M, K])],
+        [helper.make_tensor_value_info("output", TensorProto.FLOAT, [M, N])],
+        initializer=[
+            numpy_helper.from_array(packed, "weight"),
+            numpy_helper.from_array(scales, "scales"),
+            numpy_helper.from_array(zero_points, "zero_points"),
+        ],
+    )
+    model = helper.make_model(
+        graph,
+        opset_imports=[
+            helper.make_opsetid("", 21),
+            helper.make_opsetid("com.microsoft", 1),
+        ],
+    )
+    model.ir_version = 10
+    model_bytes = model.SerializeToString()
+
+    monkeypatch.setenv("ONNXRUNTIME_EP_MLX_BF16_QMM_FP16", "0")
+    native = m.run_mlx(model_bytes, {"activation": activation})[0]
+    monkeypatch.delenv("ONNXRUNTIME_EP_MLX_BF16_QMM_FP16")
+    explicit = m.run_mlx(model_bytes, {"activation": activation})[0]
+
+    np.testing.assert_allclose(explicit, native, rtol=4e-2, atol=4e-2)

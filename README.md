@@ -143,7 +143,7 @@ Feed-forward encoders (audio / CNN / vision) are the EP's sweet spot: the whole 
 single MLX closure that is traced + `mlx_compile`d once and replayed, so a static-shape model runs
 end-to-end on the GPU with one dispatch (e.g. Perch: 725/725 nodes claimed, 1 fused subgraph).
 
-Eligible BF16 INT4 prefill matmuls use the FP16-tile kernel by default; set
+Eligible BF16 INT4 prefill matmuls explicitly use stock MLX's FP16 compute path by default; set
 `ONNXRUNTIME_EP_MLX_BF16_QMM_FP16=0` to disable it.
 
 The **Foundry Local** q4f16 decoders below run on the same M1 Max, warm, MLX EP vs the ORT CPU EP
