@@ -238,8 +238,6 @@ fn explicit_fp16_qmm_eligible(
     ctx: &TranslationContext,
     out_ndim: usize,
     m: i32,
-    k: i32,
-    big_n: i32,
     block: i64,
     bits: i64,
     x_dtype: mlx::mlx_dtype,
@@ -249,12 +247,10 @@ fn explicit_fp16_qmm_eligible(
 ) -> bool {
     explicit_fp16_qmm_enabled()
         && ctx.shape_keyed_compile()
-        && block == 32
-        && bits == 4
-        && out_ndim == 2
-        && m > 1
-        && k % 32 == 0
-        && big_n % 32 == 0
+        && matches!(block, 32 | 64 | 128)
+        && matches!(bits, 4 | 8)
+        && out_ndim >= 2
+        && m >= 32
         && x_dtype == mlx::mlx_dtype__MLX_BFLOAT16
         && scales_dtype == mlx::mlx_dtype__MLX_BFLOAT16
         && biases_dtype == mlx::mlx_dtype__MLX_BFLOAT16
@@ -713,8 +709,6 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             ctx,
             ashape.len(),
             m,
-            padded_k as i32,
-            big_n as i32,
             block,
             bits,
             act_dt,
