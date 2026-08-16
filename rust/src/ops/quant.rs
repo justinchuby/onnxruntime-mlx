@@ -227,6 +227,73 @@ fn compute_float_dtype(act_dt: mlx::mlx_dtype) -> mlx::mlx_dtype {
     }
 }
 
+fn explicit_fp16_qmm_enabled() -> bool {
+    std::env::var_os("ONNXRUNTIME_EP_MLX_BF16_QMM_FP16")
+        .map(|value| value != "0" && !value.is_empty())
+        .unwrap_or(true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn explicit_fp16_qmm_eligible(
+    ctx: &TranslationContext,
+    out_ndim: usize,
+    m: i32,
+    k: i32,
+    big_n: i32,
+    block: i64,
+    bits: i64,
+    x_dtype: mlx::mlx_dtype,
+    scales_dtype: mlx::mlx_dtype,
+    biases_dtype: mlx::mlx_dtype,
+    w_dtype: mlx::mlx_dtype,
+) -> bool {
+    explicit_fp16_qmm_enabled()
+        && ctx.shape_keyed_compile()
+        && block == 32
+        && bits == 4
+        && out_ndim == 2
+        && m > 1
+        && k % 32 == 0
+        && big_n % 32 == 0
+        && x_dtype == mlx::mlx_dtype__MLX_BFLOAT16
+        && scales_dtype == mlx::mlx_dtype__MLX_BFLOAT16
+        && biases_dtype == mlx::mlx_dtype__MLX_BFLOAT16
+        && w_dtype == mlx::mlx_dtype__MLX_UINT32
+}
+
+fn quantized_matmul(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    w: mlx::mlx_array,
+    scales: mlx::mlx_array,
+    biases: mlx::mlx_array,
+    block: i64,
+    bits: i64,
+) -> Result<mlx::mlx_array, MlxError> {
+    let group_size = mlx::mlx_optional_int_ {
+        value: block as i32,
+        has_value: true,
+    };
+    let bit_width = mlx::mlx_optional_int_ {
+        value: bits as i32,
+        has_value: true,
+    };
+    ctx.emit(|res, stream| unsafe {
+        mlx::mlx_quantized_matmul(
+            res,
+            x,
+            w,
+            scales,
+            biases,
+            true,
+            group_size,
+            bit_width,
+            c"affine".as_ptr(),
+            stream,
+        )
+    })
+}
+
 fn pad_last_dim(
     ctx: &mut TranslationContext,
     a: mlx::mlx_array,
@@ -628,14 +695,12 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
     for &d in &ashape[..ashape.len().saturating_sub(1)] {
         m *= d;
     }
-    let a2 = ctx.reshape(a, &[m, k as i32])?;
-    let act_dt = ctx.dtype_of(a2);
-    let a2 = pad_last_dim(ctx, a2, (padded_k - k) as i32, act_dt)?;
+    let act_dt = ctx.dtype_of(a);
 
     let supported = block == 32 || block == 64 || block == 128;
     let y = if supported {
-        // Repacked uint32 weight + per-block scales/biases, shared by both the fast Metal
-        // kernel below and the always-on `mlx_quantized_matmul` fallback.
+        // Repacked uint32 weight + per-block scales/biases, shared by the explicit-FP16 prefill
+        // route and the activation-dtype `mlx_quantized_matmul` fallback.
         let w = matmulnbits_repack(ctx, n, big_n, k, block, bits)?;
         let scales2d = matmulnbits_scales(ctx, n, big_n as i32, nblocks)?;
         let biases = if has_zp {
@@ -644,11 +709,7 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             matmulnbits_symmetric_biases(ctx, n, big_n as i32, nblocks, bits, scales2d)?
         };
 
-        // Default-on fast custom Metal kernel: BF16 I/O, FP16 threadgroup tiles + simdgroup MMA,
-        // float accumulation. It is narrowly scoped (see `quant_fastkernel::eligible`) to
-        // shape-keyed matrix-matrix prefill (M>1), never decode, and falls back below on any
-        // ineligibility or runtime failure.
-        let fast = if crate::ops::quant_fastkernel::eligible(
+        if explicit_fp16_qmm_eligible(
             ctx,
             ashape.len(),
             m,
@@ -661,30 +722,58 @@ fn matmulnbits_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
             ctx.dtype_of(biases),
             ctx.dtype_of(w),
         ) {
-            crate::ops::quant_fastkernel::try_apply(ctx, a2, w, scales2d, biases, m, big_n as i32)
-        } else {
-            None
-        };
-
-        if let Some(y) = fast {
-            ctx.mark_fast("onnxrt_mlx_qmm_bf16_fp16");
+            // MLX intentionally requires callers to select FP16 computation explicitly. Share one
+            // activation cast across sibling projections, cast constant-derived quantization
+            // parameters inside the compiled closure, and restore the ONNX BF16 output contract.
+            let a_fp16 = ctx.astype_once(a, mlx::mlx_dtype__MLX_FLOAT16)?;
+            let a2_fp16 = ctx.reshape(a_fp16, &[m, k as i32])?;
+            let a2_fp16 = pad_last_dim(
+                ctx,
+                a2_fp16,
+                (padded_k - k) as i32,
+                mlx::mlx_dtype__MLX_FLOAT16,
+            )?;
+            let scales_constant = n.inputs[2].constant || n.inputs[2].source == Src::Initializer;
+            let biases_constant = scales_constant
+                && (!has_zp || n.inputs[3].constant || n.inputs[3].source == Src::Initializer);
+            let scales_fp16 = if scales_constant {
+                ctx.cache_astype(
+                    format!("{}#qs_fp16#{big_n}x{nblocks}", n.inputs[2].name),
+                    scales2d,
+                    mlx::mlx_dtype__MLX_FLOAT16,
+                )?
+            } else {
+                ctx.astype_once(scales2d, mlx::mlx_dtype__MLX_FLOAT16)?
+            };
+            let biases_fp16 = if biases_constant {
+                ctx.cache_astype(
+                    format!(
+                        "{}#{}#qb_fp16#{big_n}x{nblocks}b{bits}",
+                        n.inputs[2].name,
+                        n.inputs
+                            .get(3)
+                            .map(|input| input.name.as_str())
+                            .unwrap_or("")
+                    ),
+                    biases,
+                    mlx::mlx_dtype__MLX_FLOAT16,
+                )?
+            } else {
+                ctx.astype_once(biases, mlx::mlx_dtype__MLX_FLOAT16)?
+            };
+            let y_fp16 = quantized_matmul(ctx, a2_fp16, w, scales_fp16, biases_fp16, block, bits)?;
+            let y = ctx.astype(y_fp16, mlx::mlx_dtype__MLX_BFLOAT16)?;
+            ctx.mark_fast("mlx_quantized_matmul_fp16");
             y
         } else {
+            let a2 = ctx.reshape(a, &[m, k as i32])?;
+            let a2 = pad_last_dim(ctx, a2, (padded_k - k) as i32, act_dt)?;
             ctx.mark_fast("mlx_quantized_matmul");
-            let gs = mlx::mlx_optional_int_ {
-                value: block as i32,
-                has_value: true,
-            };
-            let bb = mlx::mlx_optional_int_ {
-                value: bits as i32,
-                has_value: true,
-            };
-            let mode = c"affine".as_ptr();
-            ctx.emit(|res, s| unsafe {
-                mlx::mlx_quantized_matmul(res, a2, w, scales2d, biases, true, gs, bb, mode, s)
-            })?
+            quantized_matmul(ctx, a2, w, scales2d, biases, block, bits)?
         }
     } else {
+        let a2 = ctx.reshape(a, &[m, k as i32])?;
+        let a2 = pad_last_dim(ctx, a2, (padded_k - k) as i32, act_dt)?;
         // Fallback (block_size mlx_quantized_matmul cannot handle, e.g. 16): dequantize in-graph.
         // Dequant + dense matmul run in the activation's float dtype (fp16/bf16 halves the weight
         // bytes + speeds the matmul; fp32 activations keep fp32 — no change).

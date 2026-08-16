@@ -46,7 +46,7 @@ asynchronous token pipelining may require an explicit model-native interface.
   materializations.
 - Tune layer-group partitions for both peak memory and per-token boundary
   overhead.
-- Do not assume FP16 QMM implies faster FP16 QMV. Gate mixed kernels to prefill
-  unless end-to-end decode proves otherwise.
+- Explicit FP16 QMM casts can accelerate BF16 prefill; do not apply them to
+  QMV/decode unless end-to-end decode proves otherwise.
 - Verify cache size before replacing shared RoPE tables.
 - Benchmark at least 200 tokens, skip startup tokens, and verify token equality.
