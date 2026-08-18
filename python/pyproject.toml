@@ -62,10 +62,18 @@ artifacts = [
 path = "hatch_build.py"
 
 [tool.hatch.build.targets.sdist]
-# The sdist carries the Python layer + the build hook. Wheels are built from a
-# full repo checkout (where ../rust is present) so the hook can run cargo.
+# Carry the Rust crate too, so `pip wheel` can build the macOS wheel directly
+# from the PyPI sdist rather than requiring a full repository checkout.
 include = [
   "src/onnxruntime_ep_mlx",
   "hatch_build.py",
   "README.md",
 ]
+
+[tool.hatch.build.targets.sdist.force-include]
+"../rust/Cargo.toml" = "rust/Cargo.toml"
+"../rust/build.rs" = "rust/build.rs"
+"../rust/README.md" = "rust/README.md"
+"../rust/src" = "rust/src"
+"../rust/wrapper_mlx.h" = "rust/wrapper_mlx.h"
+"../rust/wrapper_ort.h" = "rust/wrapper_ort.h"
