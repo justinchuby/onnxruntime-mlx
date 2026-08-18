@@ -3,6 +3,7 @@
 pub mod attention;
 pub mod conv;
 pub mod elementwise;
+pub mod image;
 pub mod math;
 pub mod matmul;
 pub mod norm;

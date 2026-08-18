@@ -75,6 +75,9 @@ unary_handler!(cosh_op, mlx::mlx_cosh);
 unary_handler!(asin_op, mlx::mlx_arcsin);
 unary_handler!(acos_op, mlx::mlx_arccos);
 unary_handler!(atan_op, mlx::mlx_arctan);
+unary_handler!(asinh_op, mlx::mlx_arcsinh);
+unary_handler!(acosh_op, mlx::mlx_arccosh);
+unary_handler!(atanh_op, mlx::mlx_arctanh);
 
 /// ONNX `Round` rounds halves to even (banker's rounding), which is exactly `mlx_round(x, 0)`.
 fn round_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
@@ -182,6 +185,60 @@ fn hard_sigmoid_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), Mlx
     let t = ctx.binary(mlx::mlx_add, ax, beta_s)?;
     let lo = ctx.binary(mlx::mlx_maximum, t, zero)?;
     let r = ctx.binary(mlx::mlx_minimum, lo, one)?;
+    bind_as_out(ctx, n, r)
+}
+
+/// HardSwish: `x * max(0, min(1, x / 6 + 1 / 2))`.
+fn hard_swish_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let one_sixth = scalar_like(ctx, x, 1.0 / 6.0)?;
+    let half = scalar_like(ctx, x, 0.5)?;
+    let zero = scalar_like(ctx, x, 0.0)?;
+    let one = scalar_like(ctx, x, 1.0)?;
+    let scaled = ctx.binary(mlx::mlx_multiply, x, one_sixth)?;
+    let shifted = ctx.binary(mlx::mlx_add, scaled, half)?;
+    let lo = ctx.binary(mlx::mlx_maximum, shifted, zero)?;
+    let gate = ctx.binary(mlx::mlx_minimum, lo, one)?;
+    let r = ctx.binary(mlx::mlx_multiply, x, gate)?;
+    bind_as_out(ctx, n, r)
+}
+
+/// Mish: `x * tanh(softplus(x))`, with stable `softplus(x) = logaddexp(0, x)`.
+fn mish_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let zero = ctx.zeros_like(x)?;
+    let softplus = ctx.binary(mlx::mlx_logaddexp, zero, x)?;
+    let gate = ctx.unary(mlx::mlx_tanh, softplus)?;
+    let r = ctx.binary(mlx::mlx_multiply, x, gate)?;
+    bind_as_out(ctx, n, r)
+}
+
+/// PRelu: `x < 0 ? slope * x : x`.
+fn prelu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let slope = ctx.resolve(&n.inputs[1])?;
+    let zero = ctx.zeros_like(x)?;
+    let negative = ctx.binary(mlx::mlx_less, x, zero)?;
+    let scaled = ctx.binary(mlx::mlx_multiply, slope, x)?;
+    let r = ctx.where_(negative, scaled, x)?;
+    bind_as_out(ctx, n, r)
+}
+
+/// Shrink: `x < -lambd ? x + bias : x > lambd ? x - bias : 0`.
+fn shrink_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let lambd = n.floats.get("lambd").copied().unwrap_or(0.5);
+    let bias = n.floats.get("bias").copied().unwrap_or(0.0);
+    let low = scalar_like(ctx, x, -lambd)?;
+    let high = scalar_like(ctx, x, lambd)?;
+    let bias = scalar_like(ctx, x, bias)?;
+    let zero = ctx.zeros_like(x)?;
+    let below = ctx.binary(mlx::mlx_less, x, low)?;
+    let above = ctx.binary(mlx::mlx_greater, x, high)?;
+    let shifted_low = ctx.binary(mlx::mlx_add, x, bias)?;
+    let shifted_high = ctx.binary(mlx::mlx_subtract, x, bias)?;
+    let positive = ctx.where_(above, shifted_high, zero)?;
+    let r = ctx.where_(below, shifted_low, positive)?;
     bind_as_out(ctx, n, r)
 }
 
@@ -394,6 +451,61 @@ fn signed_numeric_unary_claim(node: &NodeView) -> ClaimResult {
     unary_same_type_claim(node, true)
 }
 
+fn prelu_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "expects 2 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (x, slope, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(x), Some(s), Some(o)) => (x, s, o),
+        _ => deny!("missing tensor type/shape info on an input or the output"),
+    };
+    require!(
+        x.dtype == slope.dtype
+            && slope.dtype == out.dtype
+            && (is_mlx_float(x.dtype)
+                || is_signed_integer(x.dtype)
+                || x.dtype
+                    == crate::sys::ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32),
+        "inputs/output must share one MLX float, signed-integer, or uint32 dtype"
+    );
+    require!(
+        x.shape == out.shape,
+        "output shape {:?} must equal input shape {:?}",
+        out.shape,
+        x.shape
+    );
+    require!(
+        slope.shape.len() <= x.shape.len()
+            && slope
+                .shape
+                .iter()
+                .rev()
+                .zip(x.shape.iter().rev())
+                .all(|(&s, &d)| s == 1 || s == d),
+        "slope shape {:?} must unidirectionally broadcast to input shape {:?}",
+        slope.shape,
+        x.shape
+    );
+    Ok(())
+}
+
+fn shrink_claim(node: &NodeView) -> ClaimResult {
+    unary_same_type_claim(node, true)?;
+    let input = node.input_info(0).expect("validated above");
+    if is_signed_integer(input.dtype) {
+        let lambd = node.float_attr("lambd", 0.5);
+        let bias = node.float_attr("bias", 0.0);
+        require!(
+            lambd.is_finite() && bias.is_finite() && lambd.fract() == 0.0 && bias.fract() == 0.0,
+            "integer Shrink requires finite integral lambd and bias attributes"
+        );
+    }
+    Ok(())
+}
+
 /// Div: fp32/fp16/bf16, same dtype in/out, scalar-or-suffix broadcast.
 fn div_claim(node: &NodeView) -> ClaimResult {
     require!(
@@ -520,6 +632,23 @@ fn reg(
     });
 }
 
+fn reg_since(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    min_opset: i32,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+) {
+    registry.register(OpRegistration {
+        domain: "",
+        op_type,
+        min_opset,
+        max_opset: K_ANY_OPSET,
+        handler,
+        claim,
+    });
+}
+
 fn reg_dom(
     registry: &mut OpRegistry,
     domain: &'static str,
@@ -565,6 +694,9 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Asin", asin_op, float_unary_claim);
     reg(registry, "Acos", acos_op, float_unary_claim);
     reg(registry, "Atan", atan_op, float_unary_claim);
+    reg_since(registry, "Asinh", 9, asinh_op, float_unary_claim);
+    reg_since(registry, "Acosh", 9, acosh_op, float_unary_claim);
+    reg_since(registry, "Atanh", 9, atanh_op, float_unary_claim);
 
     // Activations (unary + attrs).
     reg(registry, "LeakyRelu", leaky_relu_op, float_unary_claim);
@@ -572,6 +704,10 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Selu", selu_op, float_unary_claim);
     reg(registry, "Celu", celu_op, float_unary_claim);
     reg(registry, "HardSigmoid", hard_sigmoid_op, float_unary_claim);
+    reg_since(registry, "HardSwish", 14, hard_swish_op, float_unary_claim);
+    reg_since(registry, "Mish", 18, mish_op, float_unary_claim);
+    reg_since(registry, "PRelu", 1, prelu_op, prelu_claim);
+    reg_since(registry, "Shrink", 9, shrink_op, shrink_claim);
     reg(registry, "Swish", swish_op, float_unary_claim);
     reg(
         registry,

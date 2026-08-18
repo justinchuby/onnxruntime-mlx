@@ -109,6 +109,7 @@ fn registry() -> &'static OpRegistry {
 /// Populate the table with every built-in op module (wave-1: elementwise + math).
 fn register_builtin_ops(registry: &mut OpRegistry) {
     crate::ops::elementwise::register(registry);
+    crate::ops::image::register(registry);
     crate::ops::math::register(registry);
     crate::ops::reduction::register(registry);
     crate::ops::shape::register(registry);

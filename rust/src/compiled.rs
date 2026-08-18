@@ -54,10 +54,9 @@ pub fn compile_enabled(has_control_flow: bool) -> bool {
 /// incompatible with a single static-shape fused trace:
 ///   * attention ops carry KV-cache aliasing + delta copy-out semantics not modelled by the general
 ///     config (they take the decode/prefill configs instead);
-///   * host-computed ops (`Det`/`NonZero`/`Unique`) GPU-eval their DYNAMIC input DATA mid-translate
-///     (`contiguous_eval`) and/or emit a data-dependent output shape — both illegal inside an
-///     `mlx_compile` trace (the placeholder has no data), so a subgraph containing one is never
-///     general-compiled.
+///   * host-computed ops GPU-eval their DYNAMIC input DATA mid-translate (`contiguous_eval`) and/or
+///     emit a data-dependent output shape — both illegal inside an `mlx_compile` trace (the
+///     placeholder has no data), so a subgraph containing one is never general-compiled.
 fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
     is_separate_qkv_attention(n)
         || matches!(
@@ -65,8 +64,12 @@ fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
             "GroupQueryAttention"
                 | "PagedAttention"
                 | "SparseAttention"
+                | "CumProd"
                 | "Det"
+                | "ImageDecoder"
+                | "NonMaxSuppression"
                 | "NonZero"
+                | "TfIdfVectorizer"
                 | "Unique"
         )
 }

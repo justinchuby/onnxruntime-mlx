@@ -86,7 +86,9 @@ def test_instance_norm(dt, shape) -> None:
         attrs=[ir.AttrFloat32("epsilon", 1e-5)],
         initializers=[scale, bias],
     )
-    m.assert_matches_cpu(model, {"x": sample(shape, dt)}, **tol(dt))
+    feeds = {"x": sample(shape, dt)}
+    m.assert_matches_cpu(model, feeds, **tol(dt))
+    m.assert_mlx_claims(model, feeds)
 
 
 # --- MeanVarianceNormalization ----------------------------------------------------------------
