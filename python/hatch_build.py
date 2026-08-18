@@ -85,12 +85,15 @@ class CustomBuildHook(BuildHookInterface):
             raise RuntimeError("onnxruntime-ep-mlx only builds on macOS (Apple Silicon).")
 
         project_root = Path(self.root)          # the python/ dir
-        repo_root = project_root.parent
-        rust_dir = repo_root / "rust"
+        # In a repository checkout the crate is ../rust. In an sdist it is
+        # included as ./rust so installers can build the wheel from source.
+        rust_dir = project_root / "rust"
+        if not (rust_dir / "Cargo.toml").is_file():
+            rust_dir = project_root.parent / "rust"
         if not (rust_dir / "Cargo.toml").is_file():
             raise RuntimeError(
-                f"Rust crate not found at {rust_dir}. The wheel must be built "
-                "from a full repository checkout (python/ next to rust/)."
+                "Rust crate not found. Expected ./rust in an sdist or ../rust "
+                "in a repository checkout."
             )
 
         pkg_dir = project_root / "src" / "onnxruntime_ep_mlx"
