@@ -123,6 +123,8 @@ fn register_builtin_ops(registry: &mut OpRegistry) {
     crate::ops::controlflow::register(registry);
     // norm+attention
     crate::ops::norm::register_norm(registry);
+    crate::ops::onnx_ml_linear::register(registry);
+    crate::ops::onnx_ml_preprocess::register(registry);
     crate::ops::attention::register_attention(registry);
     // conv+vision
     crate::ops::conv::register_conv(registry);

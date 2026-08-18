@@ -72,7 +72,17 @@ The following table is the current support contract. Do not broaden claims witho
 | **Sigmoid** | `ai.onnx`, `com.microsoft` | `fp32`/`fp16`/`bf16` | MLX elementwise sigmoid | Standalone `SiLU`/`Swish` are not claimed. |
 | **Cast** | `ai.onnx` | float↔float among `fp32`/`fp16`/`bf16`, `int64`→`int32` | MLX cast | Other casts remain on CPU. |
 
-### 2.1 Coverage status (2026-08-18) — every numeric/bool tensor ai.onnx operator covered
+### 2.1 Numeric `ai.onnx.ml` acceleration
+
+The EP claims the numeric tensor forms of **ArrayFeatureExtractor, Binarizer, FeatureVectorizer,
+Imputer, LabelEncoder, Normalizer, OneHotEncoder, Scaler, LinearClassifier, LinearRegressor,
+SVMClassifier, and SVMRegressor**. String/map forms remain on ORT CPU. TreeEnsemble operators are
+also left on CPU because the MLX translation was substantially slower than ORT's optimized CPU
+kernel. The retained SVM path is compute-bound enough to benefit from Metal; a 1024×128 RBF
+regression case with 256 support vectors measured about **10.9×** faster than ORT CPU on the
+development machine.
+
+### 2.2 Coverage status (2026-08-18) — every numeric/bool tensor ai.onnx operator covered
 
 Coverage spans the full Mobius-emitted op set plus **188 of 202 non-deprecated ai.onnx ops**,
 verified against ONNX 1.22/opset 27. The remaining 14 operators all require sequence, string, or
