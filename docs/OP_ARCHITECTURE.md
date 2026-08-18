@@ -72,31 +72,32 @@ The following table is the current support contract. Do not broaden claims witho
 | **Sigmoid** | `ai.onnx`, `com.microsoft` | `fp32`/`fp16`/`bf16` | MLX elementwise sigmoid | Standalone `SiLU`/`Swish` are not claimed. |
 | **Cast** | `ai.onnx` | float↔float among `fp32`/`fp16`/`bf16`, `int64`→`int32` | MLX cast | Other casts remain on CPU. |
 
-### 2.1 Coverage status (2026-07-13) — full Mobius + broad ai.onnx opset-17+ coverage
+### 2.1 Coverage status (2026-08-18) — every numeric/bool tensor ai.onnx operator covered
 
-Coverage spans the full Mobius-emitted op set **plus almost the entire ai.onnx opset-17+ standard**:
-**184 of 202 non-deprecated ai.onnx ops** (up from 11 originally), verified by diffing `onnx.defs`
-against the registry. Every op claims the **most relaxed dtype set** its MLX translation supports
+Coverage spans the full Mobius-emitted op set plus **188 of 202 non-deprecated ai.onnx ops**,
+verified against ONNX 1.22/opset 27. The remaining 14 operators all require sequence, string, or
+optional values that cannot cross the EP's MLX-array-only boundary. Every numeric/bool tensor
+operator now has an MLX or host-computed implementation, including Mish, CumProd, Hardmax, DeformConv,
+NonMaxSuppression, numeric TfIdfVectorizer, and ImageDecoder.
+
+Every op claims the **most relaxed dtype set** its translation supports
 (`is_mlx_supported_type`: bool/int/uint 8-64/fp16/bf16/fp32; **float64 excepted** — Apple GPUs have no
-double precision). The pytest op suite is **~750 passing / ~56 skipped** (skips are `op×dtype` combos
-ORT CPU itself lacks a kernel for). Coverage includes elementwise/math/trig/activations,
+double precision). Coverage includes elementwise/math/trig/activations,
 logical/bitwise, all reductions, shape/data-movement, normalizations, attention, MatMul/Gemm,
 conv/pooling, **all quantization (Quantize/Dequantize/DynamicQuantize/MatMulInteger/ConvInteger/
 QLinearMatMul/QLinearConv)**, random, signal/FFT (DFT/STFT/windows/MelWeightMatrix — audio),
-vision (GridSample/AffineGrid/Col2Im/RoiAlign/MaxRoiPool/MaxUnpool), **recurrent (RNN/GRU/LSTM and
+vision/detection, **recurrent (RNN/GRU/LSTM and
 com.microsoft LinearAttention via static unrolling)**, **control flow (If/Scan/Loop via recursive
-subgraph-body translation)**, and
-NonZero/Unique/Det/loss ops — one handler + claim + registration per op in `rust/src/ops/*.rs`.
+subgraph-body translation)**, and host-computed data-dependent operators.
 
-**The 18 ops still on ORT CPU** — each needs a non-tensor value type, non-numeric data, or a codec
-that a GPU tensor engine fundamentally cannot provide (not force-fit):
+**The 14 operators that remain on ORT CPU** require value kinds the current EP boundary cannot
+materialize:
 
 | Category | Ops |
 |---|---|
 | Sequence type (opaque list-of-tensors) | ConcatFromSequence, SequenceAt/Construct/Empty/Erase/Insert/Length/Map, SplitToSequence |
-| String tensors (no GPU string ops) | RegexFullMatch, StringConcat, StringNormalizer, StringSplit, TfIdfVectorizer |
-| Codec / wrapper type | ImageDecoder (JPEG/PNG decode), Optional (optional-typed output) |
-| Complex / data-dependent | DeformConv, NonMaxSuppression (greedy, dynamic, host-bound) |
+| String tensors | RegexFullMatch, StringConcat, StringNormalizer, StringSplit |
+| Optional value | Optional |
 
 Float64 everywhere falls back to ORT CPU (Metal hardware limit). Zero-size/empty tensors are
 **handled on MLX** (not rejected). Control-flow BODIES still offload to MLX even when a rare CF form
@@ -106,20 +107,22 @@ The **core Rust modules** register:
 
 | Module | Registered ops |
 |---|---|
-| `elementwise.rs` | Add, Mul, Sub, Sigmoid, Softmax, Cast |
-| `math.rs` | Div, Relu, Tanh, Softplus, Clip, Gelu, Exp, Log, Sqrt, Reciprocal, Neg, Abs, Floor, Sign, Erf, Sin, Cos, Min, Max, Pow, Mod, Round, CastLike, Where, Equal, Less, Greater, GreaterOrEqual, LessOrEqual, And, Or, Not, Elu, Swish, LogSoftmax, OneHot, Trilu, ArgMin, ArgMax |
-| `reduction.rs` | ReduceSum, ReduceMax, ReduceMean, ReduceMin, ReduceSumSquare, ReduceL2, CumSum, TopK |
-| `shape.rs` | Gather, GatherElements, Concat, Reshape, Transpose, Unsqueeze, Squeeze, Flatten, Expand, Slice, Split, Tile, Pad, Identity, ConstantOfShape, Range, ScatterElements, Shape, Size, SpaceToDepth, Compress, Constant, **Resize** (nearest+linear) |
-| `norm.rs` | RMSNormalization, SkipSimplifiedLayerNormalization, LayerNormalization, SimplifiedLayerNormalization, SkipLayerNormalization, GroupNormalization, LpNormalization, BatchNormalization |
+| `elementwise.rs` / `math.rs` | Arithmetic, comparison, logical/bitwise, casts/bitcasts, transcendental functions, and activations including Mish/PRelu/HardSwish |
+| `reduction.rs` | Reduce family, ArgMin/ArgMax, CumSum/CumProd, Hardmax, TopK |
+| `shape.rs` | Gather/scatter, reshape/layout, crop/pad, depth/space transforms, Resize/Upsample, Compress, ReverseSequence, EyeLike |
+| `norm.rs` | RMS/Layer/Group/Instance/Batch/Lp normalization, LRN, Microsoft skip-norm variants |
 | `attention.rs` | GroupQueryAttention, Attention (opset 23 & 24), MultiHeadAttention, RotaryEmbedding |
 | `matmul.rs` | MatMul, Gemm |
-| `conv.rs` | Conv, ConvTranspose, AveragePool, GlobalAveragePool, MaxPool, GlobalMaxPool |
+| `conv.rs` | Conv/ConvTranspose/DeformConv and local/global pooling |
 | `quant.rs` | MatMulNBits, GatherBlockQuantized, Quantize/Dequantize/DynamicQuantize, MatMulInteger, ConvInteger, QLinearMatMul, QLinearConv |
 | `ssm.rs` | TensorScatter (opset 24), CausalConvWithState, LinearAttention (linear/gated/delta/gated_delta, GQA) |
-| `misc.rs` | Consolidated miscellaneous handlers that used to be split across multiple C++ families. |
-| `random.rs` / `signal.rs` / `recurrent.rs` / `vision.rs` / `controlflow.rs` | Random, signal/FFT/window, RNN/GRU/LSTM, vision, and recursive control-flow translations. |
+| `misc.rs` / `image.rs` | Constants, losses, NonZero/Unique/Det, numeric TF-IDF, and image decoding |
+| `random.rs` / `signal.rs` / `recurrent.rs` / `vision.rs` / `controlflow.rs` | Random, signal/FFT/window, RNN/GRU/LSTM, vision/detection, and recursive control-flow translations |
 
-Every claim is **conservative**: a handler claims only the ONNX forms it can translate correctly (dtype/shape/attr/opset checked in its `ClaimPredicate`); every other form falls back to ORT CPU, which is always correct. Each op has pytest coverage in `tests/ops/` (**660 passing**, ~54 skipped for ORT-CPU dtype gaps); the attention/matmul/resize/quant tests assert the node actually ran on `MLXExecutionProvider` (no vacuous CPU-fallback passes).
+Every claim is **conservative**: a handler claims only the ONNX forms it can translate correctly
+(dtype/shape/attr/opset checked in its `ClaimPredicate`); every other form falls back to ORT CPU.
+The op suite passes **1215 tests** with 62 ORT/dtype skips; the ONNX backend suite passes 1607 tests
+with unsupported/environment-specific cases skipped.
 
 **Within the Mobius-emitted subset**, the ops left on ORT CPU (each needs engine-level support the flat plan does not provide) are:
 

@@ -6,6 +6,7 @@
 //!   * SkipLayerNormalization (com.microsoft)           — residual add + mlx_fast_layer_norm
 //!   * SkipSimplifiedLayerNormalization (com.microsoft) — residual add + mlx_fast_rms_norm
 //!   * GroupNormalization (ai.onnx opset 21 form)       — composed mean/var/rsqrt
+//!   * InstanceNormalization (ai.onnx)                   — composed spatial mean/var/affine
 //!   * LpNormalization (ai.onnx)                        — composed abs/sum or square/sum/sqrt
 //!   * BatchNormalization (ai.onnx, inference form)     — composed per-channel affine
 //!   * LRN (ai.onnx, across-channel)                    — composed square/window-sum/power/divide
@@ -133,6 +134,31 @@ fn present(n: &NodeDesc, i: usize) -> bool {
 }
 
 // ---- handlers ----------------------------------------------------------------------------------
+
+fn instance_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let scale = ctx.resolve(&n.inputs[1])?;
+    let bias = ctx.resolve(&n.inputs[2])?;
+    let shape = ctx.shape_of(x);
+    let axes: Vec<i32> = (2..shape.len() as i32).collect();
+    let mean = ctx.emit(|res, stream| unsafe {
+        mlx::mlx_mean_axes(res, x, axes.as_ptr(), axes.len(), true, stream)
+    })?;
+    let variance = ctx.emit(|res, stream| unsafe {
+        mlx::mlx_var_axes(res, x, axes.as_ptr(), axes.len(), true, 0, stream)
+    })?;
+    let eps = scalar_like(ctx, epsilon(n, 1e-5), ctx.dtype_of(x))?;
+    let variance_eps = add(ctx, variance, eps)?;
+    let inv_std = rsqrt(ctx, variance_eps)?;
+    let centered = sub(ctx, x, mean)?;
+    let normalized = mul(ctx, centered, inv_std)?;
+    let scale = channel_broadcast(ctx, scale, shape.len(), shape[1])?;
+    let bias = channel_broadcast(ctx, bias, shape.len(), shape[1])?;
+    let scaled = mul(ctx, normalized, scale)?;
+    let out = add(ctx, scaled, bias)?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
 
 /// RMSNormalization (ai.onnx opset 23+): out = rms_norm(x) * scale over the last axis.
 fn rms_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
@@ -744,10 +770,52 @@ fn batch_norm_claim(node: &NodeView) -> ClaimResult {
             crate::registry::ort_dtype_name(dtype)
         );
     }
+
     let training_mode = node.int_attr("training_mode", 0);
     require!(
         training_mode == 0,
         "training_mode must be 0; training outputs are unsupported (got {training_mode})"
+    );
+    Ok(())
+}
+
+fn instance_norm_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 3 && node.num_outputs() == 1,
+        "expects 3 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (x, scale, bias, out) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.output_info(0),
+    ) {
+        (Some(x), Some(scale), Some(bias), Some(out)) => (x, scale, bias, out),
+        _ => deny!("missing tensor type/shape info"),
+    };
+    require!(
+        is_mlx_float(x.dtype)
+            && scale.dtype == x.dtype
+            && bias.dtype == x.dtype
+            && out.dtype == x.dtype,
+        "input, scale, bias, and output must share one MLX float dtype"
+    );
+    require!(
+        x.shape.len() >= 3 && x.shape.iter().all(|&dim| dim > 0),
+        "input must have a static positive [N,C,spatial...] shape"
+    );
+    require!(
+        scale.shape == [x.shape[1]] && bias.shape == [x.shape[1]],
+        "scale and bias must have shape [C]={:?}",
+        [x.shape[1]]
+    );
+    require!(
+        out.shape == x.shape,
+        "output shape {:?} must match input shape {:?}",
+        out.shape,
+        x.shape
     );
     Ok(())
 }
@@ -808,6 +876,14 @@ fn reg(
 }
 
 pub fn register_norm(registry: &mut OpRegistry) {
+    reg(
+        registry,
+        "",
+        "InstanceNormalization",
+        6,
+        instance_norm_op,
+        instance_norm_claim,
+    );
     // RMSNormalization entered ai.onnx at opset 23.
     reg(
         registry,

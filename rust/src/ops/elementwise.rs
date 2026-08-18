@@ -5,7 +5,8 @@
 use crate::engine::{MlxError, NodeDesc, TranslationContext, mlx_dtype_from_onnx};
 use crate::registry::{
     ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_int_index, is_mlx_float,
-    is_mlx_numeric, is_signed_integer, is_unsigned_integer, scalar_or_suffix_broadcast,
+    is_mlx_numeric, is_mlx_supported, is_signed_integer, is_unsigned_integer,
+    scalar_or_suffix_broadcast,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -63,6 +64,21 @@ fn softmax_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError
 fn cast_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
     let r = ctx.astype(x, mlx_dtype_from_onnx(n.outputs[0].otype))?;
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
+
+fn cast_like_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let r = ctx.astype(x, mlx_dtype_from_onnx(n.outputs[0].otype))?;
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
+
+fn bit_cast_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let dtype = mlx_dtype_from_onnx(n.outputs[0].otype);
+    let r = ctx.emit(|res, s| unsafe { mlx::mlx_view(res, x, dtype, s) })?;
     ctx.bind(&n.outputs[0], r);
     Ok(())
 }
@@ -148,10 +164,75 @@ binary_bool_handler!(and_op, mlx::mlx_logical_and);
 binary_bool_handler!(or_op, mlx::mlx_logical_or);
 // ONNX Xor over bools == elementwise not-equal.
 binary_bool_handler!(xor_op, mlx::mlx_not_equal);
+binary_bool_handler!(bitwise_and_op, mlx::mlx_bitwise_and);
+binary_bool_handler!(bitwise_or_op, mlx::mlx_bitwise_or);
+binary_bool_handler!(bitwise_xor_op, mlx::mlx_bitwise_xor);
 
 fn not_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
     let r = ctx.unary(mlx::mlx_logical_not, x)?;
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
+
+fn bitwise_not_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let r = ctx.unary(mlx::mlx_bitwise_invert, x)?;
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
+
+fn is_nan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let r = ctx.unary(mlx::mlx_isnan, x)?;
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
+
+fn is_inf_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let detect_negative = n.ints.get("detect_negative").copied().unwrap_or(1) != 0;
+    let detect_positive = n.ints.get("detect_positive").copied().unwrap_or(1) != 0;
+    let inf = ctx.unary(mlx::mlx_isinf, x)?;
+    let r = match (detect_negative, detect_positive) {
+        (true, true) => inf,
+        (false, false) => {
+            let zero = ctx.zeros_like(x)?;
+            ctx.binary(mlx::mlx_not_equal, zero, zero)?
+        }
+        _ => {
+            let zero = ctx.zeros_like(x)?;
+            let sign = if detect_negative {
+                ctx.binary(mlx::mlx_less, x, zero)?
+            } else {
+                ctx.binary(mlx::mlx_greater, x, zero)?
+            };
+            ctx.binary(mlx::mlx_logical_and, inf, sign)?
+        }
+    };
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
+
+fn log_softmax_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let rank = ctx.ndim(x) as i64;
+    let default_axis = if n.since_version >= 13 { -1 } else { 1 };
+    let axis_attr = n.ints.get("axis").copied().unwrap_or(default_axis);
+    let axis = if axis_attr < 0 {
+        axis_attr + rank
+    } else {
+        axis_attr
+    } as i32;
+    let lse = if n.since_version >= 13 {
+        ctx.emit(|res, s| unsafe { mlx::mlx_logsumexp_axis(res, x, axis, true, s) })?
+    } else {
+        let axes: Vec<i32> = (axis..rank as i32).collect();
+        ctx.emit(|res, s| unsafe {
+            mlx::mlx_logsumexp_axes(res, x, axes.as_ptr(), axes.len(), true, s)
+        })?
+    };
+    let r = ctx.binary(mlx::mlx_subtract, x, lse)?;
     ctx.bind(&n.outputs[0], r);
     Ok(())
 }
@@ -382,6 +463,98 @@ fn cast_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+fn cast_like_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "expects 2 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (x, target, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(x), Some(t), Some(o)) => (x, t, o),
+        _ => deny!("missing tensor type/shape info on an input or the output"),
+    };
+    require!(
+        target.dtype == out.dtype,
+        "output dtype {} must match target dtype {}",
+        crate::registry::ort_dtype_name(out.dtype),
+        crate::registry::ort_dtype_name(target.dtype)
+    );
+    require!(
+        (x.dtype == out.dtype
+            && crate::registry::is_movable(x.dtype)
+            && x.dtype != ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64)
+            || cast_pair_claimable(x.dtype, out.dtype),
+        "CastLike {}->{} is outside the verified Cast conversion set",
+        crate::registry::ort_dtype_name(x.dtype),
+        crate::registry::ort_dtype_name(out.dtype)
+    );
+    Ok(())
+}
+
+fn dtype_bit_width(t: ort::ONNXTensorElementDataType) -> Option<u8> {
+    if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL
+        || t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8
+        || t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8
+    {
+        Some(8)
+    } else if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16
+        || t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16
+        || t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16
+        || t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16
+    {
+        Some(16)
+    } else if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
+        || t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+        || t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32
+    {
+        Some(32)
+    } else if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+        || t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64
+    {
+        Some(64)
+    } else {
+        None
+    }
+}
+
+fn bit_cast_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "expects 1 input and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (input, output) = match (node.input_info(0), node.output_info(0)) {
+        (Some(i), Some(o)) => (i, o),
+        _ => deny!("missing tensor type/shape info on input or output"),
+    };
+    require!(
+        node.has_attr("to") && node.int_attr("to", -1) == output.dtype as i64,
+        "required 'to' attribute must match output dtype {}",
+        crate::registry::ort_dtype_name(output.dtype)
+    );
+    require!(
+        is_mlx_supported(input.dtype) && is_mlx_supported(output.dtype),
+        "source/target must be non-string MLX-supported types (got {} -> {})",
+        crate::registry::ort_dtype_name(input.dtype),
+        crate::registry::ort_dtype_name(output.dtype)
+    );
+    require!(
+        dtype_bit_width(input.dtype) == dtype_bit_width(output.dtype),
+        "source/target must have equal bit width (got {} -> {})",
+        crate::registry::ort_dtype_name(input.dtype),
+        crate::registry::ort_dtype_name(output.dtype)
+    );
+    require!(
+        input.shape == output.shape,
+        "BitCast must preserve shape (got {:?} -> {:?})",
+        input.shape,
+        output.shape
+    );
+    Ok(())
+}
+
 fn is_bool(t: ort::ONNXTensorElementDataType) -> bool {
     t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL
 }
@@ -538,6 +711,106 @@ fn not_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+fn bitwise_binary_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "expects 2 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (a, b, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(a), Some(b), Some(o)) => (a, b, o),
+        _ => deny!("missing tensor type/shape info on an input or the output"),
+    };
+    let u64_t = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64;
+    require!(
+        a.dtype == b.dtype
+            && b.dtype == out.dtype
+            && (is_signed_integer(a.dtype) || is_unsigned_integer(a.dtype))
+            && a.dtype != u64_t,
+        "inputs/output must share an integer dtype other than uint64"
+    );
+    require!(
+        scalar_or_suffix_broadcast(&a.shape, &b.shape),
+        "only scalar or trailing-suffix broadcast is supported (shapes {:?} vs {:?})",
+        a.shape,
+        b.shape
+    );
+    Ok(())
+}
+
+fn bitwise_not_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "expects 1 input and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (i, o) = match (node.input_info(0), node.output_info(0)) {
+        (Some(i), Some(o)) => (i, o),
+        _ => deny!("missing tensor type/shape info on input or output"),
+    };
+    let u64_t = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64;
+    require!(
+        i.dtype == o.dtype
+            && (is_signed_integer(i.dtype) || is_unsigned_integer(i.dtype))
+            && i.dtype != u64_t,
+        "input/output must share an integer dtype other than uint64"
+    );
+    Ok(())
+}
+
+fn float_predicate_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "expects 1 input and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (i, o) = match (node.input_info(0), node.output_info(0)) {
+        (Some(i), Some(o)) => (i, o),
+        _ => deny!("missing tensor type/shape info on input or output"),
+    };
+    require!(
+        is_mlx_float(i.dtype) && is_bool(o.dtype),
+        "input must be fp32/fp16/bf16 and output must be bool"
+    );
+    require!(
+        i.shape == o.shape,
+        "output shape {:?} must equal input shape {:?}",
+        o.shape,
+        i.shape
+    );
+    Ok(())
+}
+
+fn is_inf_claim(node: &NodeView) -> ClaimResult {
+    float_predicate_claim(node)?;
+    for name in ["detect_negative", "detect_positive"] {
+        let value = node.int_attr(name, 1);
+        require!(
+            value == 0 || value == 1,
+            "{name} must be 0 or 1, got {value}"
+        );
+    }
+    Ok(())
+}
+
+fn log_softmax_claim(node: &NodeView) -> ClaimResult {
+    float_unary_claim(node)?;
+    let input = node.input_info(0).expect("validated above");
+    let rank = input.shape.len() as i64;
+    require!(rank > 0, "input must have rank >= 1 (got a scalar)");
+    let default_axis = if node.since_version() >= 13 { -1 } else { 1 };
+    let axis = node.int_attr("axis", default_axis);
+    let norm = if axis < 0 { axis + rank } else { axis };
+    require!(
+        norm >= 0 && norm < rank,
+        "axis {axis} is out of range for rank {rank}"
+    );
+    Ok(())
+}
+
 /// Mod: two same-dtype inputs, scalar-or-suffix broadcast. `fmod=0` (Python modulo) serves float and
 /// integer; `fmod=1` (C fmod) is float-only (the truncation composition needs float floor/ceil).
 fn mod_claim(node: &NodeView) -> ClaimResult {
@@ -632,6 +905,23 @@ fn reg(
     });
 }
 
+fn reg_since(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    min_opset: i32,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+) {
+    registry.register(OpRegistration {
+        domain: "",
+        op_type,
+        min_opset,
+        max_opset: K_ANY_OPSET,
+        handler,
+        claim,
+    });
+}
+
 pub fn register(registry: &mut OpRegistry) {
     registry.register(OpRegistration {
         domain: "",
@@ -681,6 +971,9 @@ pub fn register(registry: &mut OpRegistry) {
         handler: cast_op,
         claim: cast_claim,
     });
+    reg_since(registry, "CastLike", 15, cast_like_op, cast_like_claim);
+    reg_since(registry, "BitCast", 26, bit_cast_op, bit_cast_claim);
+    reg_since(registry, "LogSoftmax", 1, log_softmax_op, log_softmax_claim);
     // Sigmoid is also claimed in the com.microsoft domain (fused activation).
     registry.register(OpRegistration {
         domain: "com.microsoft",
@@ -719,6 +1012,36 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Or", or_op, logical_binary_claim);
     reg(registry, "Xor", xor_op, logical_binary_claim);
     reg(registry, "Not", not_op, not_claim);
+    reg_since(
+        registry,
+        "BitwiseAnd",
+        18,
+        bitwise_and_op,
+        bitwise_binary_claim,
+    );
+    reg_since(
+        registry,
+        "BitwiseOr",
+        18,
+        bitwise_or_op,
+        bitwise_binary_claim,
+    );
+    reg_since(
+        registry,
+        "BitwiseXor",
+        18,
+        bitwise_xor_op,
+        bitwise_binary_claim,
+    );
+    reg_since(
+        registry,
+        "BitwiseNot",
+        18,
+        bitwise_not_op,
+        bitwise_not_claim,
+    );
+    reg_since(registry, "IsInf", 10, is_inf_op, is_inf_claim);
+    reg_since(registry, "IsNaN", 9, is_nan_op, float_predicate_claim);
 
     // Misc elementwise.
     reg(registry, "Mod", mod_op, mod_claim);

@@ -10,7 +10,7 @@
 //! via `mlx_conv_general`, unit dilations where MLX cannot express them, no ceil_mode); everything
 //! else is left to ORT CPU.
 
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_void};
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::registry::{
@@ -197,6 +197,258 @@ fn conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     }
     let y = from_channels_last(ctx, out, spatial_rank)?;
     ctx.bind(&n.outputs[0], y);
+    Ok(())
+}
+
+// ---- DeformConv (2D) ---------------------------------------------------------------------------
+
+fn deform_take(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    y: mlx::mlx_array,
+    x_coord: mlx::mlx_array,
+    channel_begin: i32,
+    channel_count: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let shape = ctx.shape_of(x);
+    let (batch, channels, height, width) = (shape[0], shape[1], shape[2], shape[3]);
+    let out_shape = ctx.shape_of(y);
+    let (out_h, out_w) = (out_shape[1], out_shape[2]);
+    let dt = ctx.dtype_of(x);
+    let zero = scalar_for_dtype(ctx, 0.0, dt)?;
+    let max_y = scalar_for_dtype(ctx, (height - 1) as f32, dt)?;
+    let max_x = scalar_for_dtype(ctx, (width - 1) as f32, dt)?;
+
+    let ge_y = ctx.binary(mlx::mlx_greater_equal, y, zero)?;
+    let le_y = ctx.binary(mlx::mlx_less_equal, y, max_y)?;
+    let ge_x = ctx.binary(mlx::mlx_greater_equal, x_coord, zero)?;
+    let le_x = ctx.binary(mlx::mlx_less_equal, x_coord, max_x)?;
+    let valid_y = ctx.binary(mlx::mlx_logical_and, ge_y, le_y)?;
+    let valid_x = ctx.binary(mlx::mlx_logical_and, ge_x, le_x)?;
+    let valid = ctx.binary(mlx::mlx_logical_and, valid_y, valid_x)?;
+    let valid = ctx.astype(valid, dt)?;
+
+    let clipped_y = ctx.emit(|res, s| unsafe { mlx::mlx_clip(res, y, zero, max_y, s) })?;
+    let clipped_x = ctx.emit(|res, s| unsafe { mlx::mlx_clip(res, x_coord, zero, max_x, s) })?;
+    let yi = ctx.astype(clipped_y, mlx::mlx_dtype__MLX_INT32)?;
+    let xi = ctx.astype(clipped_x, mlx::mlx_dtype__MLX_INT32)?;
+    let width_scalar = ctx.scalar_i32(width);
+    let row = ctx.mul(yi, width_scalar)?;
+    let spatial = ctx.add(row, xi)?;
+    let spatial = ctx.expand_dims(spatial, 1)?;
+
+    let mut bases = Vec::with_capacity((batch * channel_count) as usize);
+    for n in 0..batch {
+        for c in channel_begin..channel_begin + channel_count {
+            bases.push((n * channels + c) * height * width);
+        }
+    }
+    let base = ctx.from_host(
+        bases.as_ptr() as *const c_void,
+        &[batch, channel_count, 1, 1],
+        mlx::mlx_dtype__MLX_INT32,
+    );
+    let indices = ctx.add(base, spatial)?;
+    let flat = ctx.reshape(x, &[batch * channels * height * width])?;
+    let gathered = ctx.emit(|res, s| unsafe { mlx::mlx_take(res, flat, indices, s) })?;
+    let valid = ctx.expand_dims(valid, 1)?;
+    let valid = ctx.emit(|res, s| unsafe {
+        mlx::mlx_broadcast_to(
+            res,
+            valid,
+            [batch, channel_count, out_h, out_w].as_ptr(),
+            4,
+            s,
+        )
+    })?;
+    ctx.mul(gathered, valid)
+}
+
+fn deform_bilinear_sample(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    y: mlx::mlx_array,
+    x_coord: mlx::mlx_array,
+    channel_begin: i32,
+    channel_count: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let dt = ctx.dtype_of(x);
+    let one = scalar_for_dtype(ctx, 1.0, dt)?;
+    let y0 = ctx.unary(mlx::mlx_floor, y)?;
+    let x0 = ctx.unary(mlx::mlx_floor, x_coord)?;
+    let y1 = ctx.add(y0, one)?;
+    let x1 = ctx.add(x0, one)?;
+    let wy1 = ctx.sub(y, y0)?;
+    let wx1 = ctx.sub(x_coord, x0)?;
+    let wy0 = ctx.sub(one, wy1)?;
+    let wx0 = ctx.sub(one, wx1)?;
+
+    let v00 = deform_take(ctx, x, y0, x0, channel_begin, channel_count)?;
+    let v01 = deform_take(ctx, x, y0, x1, channel_begin, channel_count)?;
+    let v10 = deform_take(ctx, x, y1, x0, channel_begin, channel_count)?;
+    let v11 = deform_take(ctx, x, y1, x1, channel_begin, channel_count)?;
+    let w00 = ctx.mul(wy0, wx0)?;
+    let w01 = ctx.mul(wy0, wx1)?;
+    let w10 = ctx.mul(wy1, wx0)?;
+    let w11 = ctx.mul(wy1, wx1)?;
+    let w00 = ctx.expand_dims(w00, 1)?;
+    let w01 = ctx.expand_dims(w01, 1)?;
+    let w10 = ctx.expand_dims(w10, 1)?;
+    let w11 = ctx.expand_dims(w11, 1)?;
+    let p00 = ctx.mul(v00, w00)?;
+    let p01 = ctx.mul(v01, w01)?;
+    let p10 = ctx.mul(v10, w10)?;
+    let p11 = ctx.mul(v11, w11)?;
+    let top = ctx.add(p00, p01)?;
+    let bottom = ctx.add(p10, p11)?;
+    ctx.add(top, bottom)
+}
+
+fn deform_conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let weight = ctx.resolve(&n.inputs[1])?;
+    let offset = ctx.resolve(&n.inputs[2])?;
+    let x_shape = ctx.shape_of(x);
+    let w_shape = ctx.shape_of(weight);
+    let offset_shape = ctx.shape_of(offset);
+    let (batch, channels, out_h, out_w) =
+        (x_shape[0], x_shape[1], offset_shape[2], offset_shape[3]);
+    let (out_channels, kernel_h, kernel_w) = (w_shape[0], w_shape[2], w_shape[3]);
+    let kernel_size = kernel_h * kernel_w;
+    let group = n.ints.get("group").copied().unwrap_or(1) as i32;
+    let offset_group = n.ints.get("offset_group").copied().unwrap_or(1) as i32;
+    let strides = attr_or(n, "strides", 2, 1);
+    let pads = attr_or(n, "pads", 4, 0);
+    let dilations = attr_or(n, "dilations", 2, 1);
+    let dt = ctx.dtype_of(x);
+
+    let mut base_h = Vec::with_capacity((out_h * out_w) as usize);
+    let mut base_w = Vec::with_capacity((out_h * out_w) as usize);
+    for oh in 0..out_h {
+        for ow in 0..out_w {
+            base_h.push((oh as i64 * strides[0] - pads[0]) as f32);
+            base_w.push((ow as i64 * strides[1] - pads[1]) as f32);
+        }
+    }
+    let base_h = ctx.from_host(
+        base_h.as_ptr() as *const c_void,
+        &[1, out_h, out_w],
+        mlx::mlx_dtype__MLX_FLOAT32,
+    );
+    let base_w = ctx.from_host(
+        base_w.as_ptr() as *const c_void,
+        &[1, out_h, out_w],
+        mlx::mlx_dtype__MLX_FLOAT32,
+    );
+    let base_h = ctx.astype(base_h, dt)?;
+    let base_w = ctx.astype(base_w, dt)?;
+    let channels_per_offset_group = channels / offset_group;
+    let mut kernel_samples = Vec::with_capacity(kernel_size as usize);
+
+    for kh in 0..kernel_h {
+        for kw in 0..kernel_w {
+            let kernel_index = kh * kernel_w + kw;
+            let kh_offset = scalar_for_dtype(ctx, (kh as i64 * dilations[0]) as f32, dt)?;
+            let kw_offset = scalar_for_dtype(ctx, (kw as i64 * dilations[1]) as f32, dt)?;
+            let kernel_base_h = ctx.add(base_h, kh_offset)?;
+            let kernel_base_w = ctx.add(base_w, kw_offset)?;
+            let mut offset_group_samples = Vec::with_capacity(offset_group as usize);
+            for og in 0..offset_group {
+                let offset_channel = (og * kernel_size + kernel_index) * 2;
+                let off_h = ctx.slice(
+                    offset,
+                    &[0, offset_channel, 0, 0],
+                    &[batch, offset_channel + 1, out_h, out_w],
+                )?;
+                let off_w = ctx.slice(
+                    offset,
+                    &[0, offset_channel + 1, 0, 0],
+                    &[batch, offset_channel + 2, out_h, out_w],
+                )?;
+                let off_h = ctx.squeeze(off_h, 1)?;
+                let off_w = ctx.squeeze(off_w, 1)?;
+                let sample_h = ctx.add(kernel_base_h, off_h)?;
+                let sample_w = ctx.add(kernel_base_w, off_w)?;
+                let mut sampled = deform_bilinear_sample(
+                    ctx,
+                    x,
+                    sample_h,
+                    sample_w,
+                    og * channels_per_offset_group,
+                    channels_per_offset_group,
+                )?;
+                if present(n, 4) {
+                    let mask = ctx.resolve(&n.inputs[4])?;
+                    let mask_channel = og * kernel_size + kernel_index;
+                    let mask = ctx.slice(
+                        mask,
+                        &[0, mask_channel, 0, 0],
+                        &[batch, mask_channel + 1, out_h, out_w],
+                    )?;
+                    sampled = ctx.mul(sampled, mask)?;
+                }
+                offset_group_samples.push(sampled);
+            }
+            let mut sampled = offset_group_samples[0];
+            for &part in &offset_group_samples[1..] {
+                sampled = ctx.concat2(sampled, part, 1)?;
+            }
+            kernel_samples.push(sampled);
+        }
+    }
+
+    let columns = ctx.stack(&kernel_samples, 2)?;
+    let channels_per_group = channels / group;
+    let outputs_per_group = out_channels / group;
+    let mut group_outputs = Vec::with_capacity(group as usize);
+    for g in 0..group {
+        let columns = ctx.slice(
+            columns,
+            &[0, g * channels_per_group, 0, 0, 0],
+            &[
+                batch,
+                (g + 1) * channels_per_group,
+                kernel_size,
+                out_h,
+                out_w,
+            ],
+        )?;
+        let columns = ctx.transpose(columns, &[0, 3, 4, 1, 2])?;
+        let columns = ctx.contiguous(columns)?;
+        let columns = ctx.reshape(
+            columns,
+            &[batch * out_h * out_w, channels_per_group * kernel_size],
+        )?;
+        let group_weight = ctx.slice(
+            weight,
+            &[g * outputs_per_group, 0, 0, 0],
+            &[
+                (g + 1) * outputs_per_group,
+                channels_per_group,
+                kernel_h,
+                kernel_w,
+            ],
+        )?;
+        let group_weight = ctx.reshape(
+            group_weight,
+            &[outputs_per_group, channels_per_group * kernel_size],
+        )?;
+        let group_weight = ctx.transpose(group_weight, &[1, 0])?;
+        let output = ctx.matmul(columns, group_weight)?;
+        let output = ctx.reshape(output, &[batch, out_h, out_w, outputs_per_group])?;
+        group_outputs.push(ctx.transpose(output, &[0, 3, 1, 2])?);
+    }
+    let mut output = group_outputs[0];
+    for &part in &group_outputs[1..] {
+        output = ctx.concat2(output, part, 1)?;
+    }
+    if present(n, 3) {
+        let bias = ctx.resolve(&n.inputs[3])?;
+        let bias = ctx.reshape(bias, &[1, out_channels, 1, 1])?;
+        output = ctx.add(output, bias)?;
+    }
+    output = ctx.contiguous(output)?;
+    ctx.bind(&n.outputs[0], output);
     Ok(())
 }
 
@@ -736,6 +988,153 @@ fn conv_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+fn deform_conv_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        (3..=5).contains(&node.num_inputs()) && node.num_outputs() == 1,
+        "expects 3 to 5 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (x, w, offset, out) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.output_info(0),
+    ) {
+        (Some(x), Some(w), Some(offset), Some(out)) => (x, w, offset, out),
+        _ => deny!("missing tensor type/shape info on X, W, offset, or output"),
+    };
+    require!(
+        is_mlx_float(x.dtype)
+            && w.dtype == x.dtype
+            && offset.dtype == x.dtype
+            && out.dtype == x.dtype,
+        "X/W/offset/output must share one float dtype (fp32/fp16/bf16), got {}, {}, {}, -> {}",
+        crate::registry::ort_dtype_name(x.dtype),
+        crate::registry::ort_dtype_name(w.dtype),
+        crate::registry::ort_dtype_name(offset.dtype),
+        crate::registry::ort_dtype_name(out.dtype)
+    );
+    require!(
+        static_positive_shape(&x.shape, 4),
+        "DeformConv requires static positive rank-4 NCHW X (shape {:?})",
+        x.shape
+    );
+    require!(
+        static_positive_shape(&w.shape, 4),
+        "DeformConv requires static positive rank-4 W (shape {:?})",
+        w.shape
+    );
+    require!(
+        static_positive_shape(&offset.shape, 4),
+        "DeformConv requires static positive rank-4 offset (shape {:?})",
+        offset.shape
+    );
+    require!(
+        static_positive_shape(&out.shape, 4),
+        "DeformConv requires static positive rank-4 output (shape {:?})",
+        out.shape
+    );
+    let kernel = match read_spatial_attribute(node, "kernel_shape", 2, 0) {
+        Some(v) => v,
+        None if !node.ints_attr("kernel_shape").0 => vec![w.shape[2], w.shape[3]],
+        None => deny!("kernel_shape must contain 2 positive values"),
+    };
+    require!(
+        kernel == w.shape[2..],
+        "kernel_shape {:?} must match W spatial shape {:?}",
+        kernel,
+        &w.shape[2..]
+    );
+    let strides = match read_spatial_attribute(node, "strides", 2, 1) {
+        Some(v) => v,
+        None => deny!("strides must contain 2 positive values"),
+    };
+    let dilations = match read_spatial_attribute(node, "dilations", 2, 1) {
+        Some(v) => v,
+        None => deny!("dilations must contain 2 positive values"),
+    };
+    let pads = match read_pads(node, 2) {
+        Some(v) => v,
+        None => deny!("pads must contain 4 non-negative values"),
+    };
+    let group = node.int_attr("group", 1);
+    let offset_group = node.int_attr("offset_group", 1);
+    require!(group > 0, "group must be positive (got {group})");
+    require!(
+        offset_group > 0,
+        "offset_group must be positive (got {offset_group})"
+    );
+    let channels = x.shape[1];
+    let out_channels = w.shape[0];
+    require!(
+        channels % group == 0 && out_channels % group == 0,
+        "group {group} must divide input channels {channels} and output channels {out_channels}"
+    );
+    require!(
+        w.shape[1] == channels / group,
+        "W input-channel dim must equal X channels/group (got {} vs {}/{})",
+        w.shape[1],
+        channels,
+        group
+    );
+    require!(
+        channels % offset_group == 0,
+        "offset_group {offset_group} must divide input channels {channels}"
+    );
+    let effective_h = dilations[0] * (kernel[0] - 1) + 1;
+    let effective_w = dilations[1] * (kernel[1] - 1) + 1;
+    let padded_h = x.shape[2] + pads[0] + pads[2];
+    let padded_w = x.shape[3] + pads[1] + pads[3];
+    require!(
+        padded_h >= effective_h && padded_w >= effective_w,
+        "padded input [{padded_h}, {padded_w}] is smaller than effective kernel [{effective_h}, {effective_w}]"
+    );
+    let out_h = (padded_h - effective_h) / strides[0] + 1;
+    let out_w = (padded_w - effective_w) / strides[1] + 1;
+    let kernel_size = kernel[0] * kernel[1];
+    let expected_offset = vec![x.shape[0], offset_group * kernel_size * 2, out_h, out_w];
+    require!(
+        offset.shape == expected_offset,
+        "offset shape {:?} must be {:?}",
+        offset.shape,
+        expected_offset
+    );
+    let expected_output = vec![x.shape[0], out_channels, out_h, out_w];
+    require!(
+        out.shape == expected_output,
+        "output shape {:?} must be {:?}",
+        out.shape,
+        expected_output
+    );
+    if node.input_present(3) {
+        let bias = match node.input_info(3) {
+            Some(info) => info,
+            None => deny!("missing tensor type/shape info on bias"),
+        };
+        require!(
+            bias.dtype == x.dtype && bias.shape == vec![out_channels],
+            "bias must have dtype {} and shape [{}]",
+            crate::registry::ort_dtype_name(x.dtype),
+            out_channels
+        );
+    }
+    if node.input_present(4) {
+        let mask = match node.input_info(4) {
+            Some(info) => info,
+            None => deny!("missing tensor type/shape info on mask"),
+        };
+        let expected_mask = vec![x.shape[0], offset_group * kernel_size, out_h, out_w];
+        require!(
+            mask.dtype == x.dtype && mask.shape == expected_mask,
+            "mask must have dtype {} and shape {:?}",
+            crate::registry::ort_dtype_name(x.dtype),
+            expected_mask
+        );
+    }
+    Ok(())
+}
+
 fn conv_transpose_claim(node: &NodeView) -> ClaimResult {
     let ni = node.num_inputs();
     require!(
@@ -1167,6 +1566,14 @@ fn reg(
 
 pub fn register_conv(registry: &mut OpRegistry) {
     reg(registry, "Conv", conv_op, conv_claim);
+    registry.register(OpRegistration {
+        domain: "",
+        op_type: "DeformConv",
+        min_opset: 22,
+        max_opset: K_ANY_OPSET,
+        handler: deform_conv_op,
+        claim: deform_conv_claim,
+    });
     reg(
         registry,
         "ConvTranspose",

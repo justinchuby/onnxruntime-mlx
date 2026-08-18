@@ -267,6 +267,228 @@ fn scatter_elements_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     Ok(())
 }
 
+fn center_crop_pad_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let data = ctx.resolve(&n.inputs[0])?;
+    let input_shape = ctx.shape_of(data);
+    let rank = input_shape.len() as i32;
+    let target = read_ints(ctx, n, 1)?;
+    let axes: Vec<i64> = n
+        .int_arrays
+        .get("axes")
+        .cloned()
+        .unwrap_or_else(|| (0..rank as i64).collect());
+
+    let mut cropped_shape = input_shape.clone();
+    let mut start = vec![0i32; rank as usize];
+    let mut stop = input_shape.clone();
+    let mut low = vec![0i32; axes.len()];
+    let mut high = vec![0i32; axes.len()];
+    let mut norm_axes = vec![0i32; axes.len()];
+    for (i, (&axis, &wanted)) in axes.iter().zip(&target).enumerate() {
+        let ax = norm_axis(axis, rank) as usize;
+        let wanted = dim_i32(wanted)?;
+        norm_axes[i] = ax as i32;
+        if wanted < input_shape[ax] {
+            start[ax] = (input_shape[ax] - wanted) / 2;
+            stop[ax] = start[ax] + wanted;
+            cropped_shape[ax] = wanted;
+        } else {
+            low[i] = (wanted - input_shape[ax]) / 2;
+            high[i] = wanted - input_shape[ax] - low[i];
+        }
+    }
+
+    let cropped = if cropped_shape != input_shape {
+        ctx.slice(data, &start, &stop)?
+    } else {
+        data
+    };
+    let zero_i64 = ctx.scalar_i64(0);
+    let zero = ctx.astype(zero_i64, ctx.dtype_of(data))?;
+    let out = ctx.emit(|res, s| unsafe {
+        mlx::mlx_pad(
+            res,
+            cropped,
+            norm_axes.as_ptr(),
+            norm_axes.len(),
+            low.as_ptr(),
+            low.len(),
+            high.as_ptr(),
+            high.len(),
+            zero,
+            c"constant".as_ptr(),
+            s,
+        )
+    })?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+fn compress_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let mut data = ctx.resolve(&n.inputs[0])?;
+    let mut shape = ctx.shape_of(data);
+    let axis = n.ints.get("axis").copied();
+    let axis = if let Some(axis) = axis {
+        norm_axis(axis, shape.len() as i32)
+    } else {
+        data = ctx.reshape(data, &[shape.iter().product()])?;
+        shape = ctx.shape_of(data);
+        0
+    };
+    let condition = ctx.raw_host(&n.inputs[1])?;
+    let values =
+        unsafe { std::slice::from_raw_parts(condition.data as *const u8, condition.count) };
+    let extent = shape[axis as usize] as usize;
+    let indices: Vec<i32> = values
+        .iter()
+        .take(extent)
+        .enumerate()
+        .filter_map(|(i, &value)| (value != 0).then_some(i as i32))
+        .collect();
+    let index = ctx.keep(Array::from_data(
+        indices.as_ptr() as *const std::os::raw::c_void,
+        &[indices.len() as i32],
+        mlx::mlx_dtype__MLX_INT32,
+    ));
+    let out = ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, data, index, axis, s) })?;
+    let out = ctx.contiguous(out)?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+fn depth_to_space_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let data = ctx.resolve(&n.inputs[0])?;
+    let shape = ctx.shape_of(data);
+    let block = int_attr(n, "blocksize", 0) as i32;
+    let channels = shape[1] / (block * block);
+    let reshaped = if n.strings.get("mode").map(String::as_str).unwrap_or("DCR") == "CRD" {
+        let x = ctx.reshape(
+            data,
+            &[shape[0], channels, block, block, shape[2], shape[3]],
+        )?;
+        ctx.transpose(x, &[0, 1, 4, 2, 5, 3])?
+    } else {
+        let x = ctx.reshape(
+            data,
+            &[shape[0], block, block, channels, shape[2], shape[3]],
+        )?;
+        ctx.transpose(x, &[0, 3, 4, 1, 5, 2])?
+    };
+    let out = ctx.reshape(
+        reshaped,
+        &[shape[0], channels, shape[2] * block, shape[3] * block],
+    )?;
+    let out = ctx.contiguous(out)?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+fn eye_like_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let input = ctx.resolve(&n.inputs[0])?;
+    let shape = ctx.shape_of(input);
+    let dtype = mlx_dtype_from_onnx(n.outputs[0].otype);
+    let k = int_attr(n, "k", 0) as i32;
+    let out = ctx.emit(|res, s| unsafe { mlx::mlx_eye(res, shape[0], shape[1], k, dtype, s) })?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+fn reverse_sequence_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let data = ctx.resolve(&n.inputs[0])?;
+    let lengths = ctx.resolve(&n.inputs[1])?;
+    let rank = ctx.ndim(data) as i32;
+    let batch_axis = norm_axis(int_attr(n, "batch_axis", 1), rank);
+    let time_axis = norm_axis(int_attr(n, "time_axis", 0), rank);
+
+    let mut perm = vec![batch_axis, time_axis];
+    perm.extend((0..rank).filter(|&axis| axis != batch_axis && axis != time_axis));
+    let mut inverse = vec![0i32; rank as usize];
+    for (i, &axis) in perm.iter().enumerate() {
+        inverse[axis as usize] = i as i32;
+    }
+    let transposed = ctx.transpose(data, &perm)?;
+    let shape = ctx.shape_of(transposed);
+    let lens = ctx.astype(lengths, mlx::mlx_dtype__MLX_INT32)?;
+    let lens = ctx.reshape(lens, &[shape[0], 1])?;
+    let time = ctx.arange(0.0, shape[1] as f64, 1.0, mlx::mlx_dtype__MLX_INT32)?;
+    let time = ctx.reshape(time, &[1, shape[1]])?;
+    let before = ctx.binary(mlx::mlx_less, time, lens)?;
+    let one = ctx.scalar_i32(1);
+    let last = ctx.binary(mlx::mlx_subtract, lens, one)?;
+    let reversed = ctx.binary(mlx::mlx_subtract, last, time)?;
+    let indices = ctx.where_(before, reversed, time)?;
+    let mut index_shape = vec![shape[0], shape[1]];
+    index_shape.resize(shape.len(), 1);
+    let indices = ctx.reshape(indices, &index_shape)?;
+    let indices = ctx.emit(|res, s| unsafe {
+        mlx::mlx_broadcast_to(res, indices, shape.as_ptr(), shape.len(), s)
+    })?;
+    let out =
+        ctx.emit(|res, s| unsafe { mlx::mlx_take_along_axis(res, transposed, indices, 1, s) })?;
+    let out = ctx.transpose(out, &inverse)?;
+    let out = ctx.contiguous(out)?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+fn scatter_nd_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let data = ctx.resolve(&n.inputs[0])?;
+    let indices = ctx.resolve(&n.inputs[1])?;
+    let updates = ctx.resolve(&n.inputs[2])?;
+    let dshape = ctx.shape_of(data);
+    let ishape = ctx.shape_of(indices);
+    let m = *ishape
+        .last()
+        .ok_or("ScatterND: indices must have rank >= 1")? as usize;
+    let rows: i32 = dshape[..m].iter().product();
+    let tail: i32 = dshape[m..].iter().product::<i32>().max(1);
+    let data_flat = ctx.reshape(data, &[rows, tail])?;
+    let p: i32 = ishape[..ishape.len() - 1].iter().product::<i32>().max(1);
+    let idx2d = ctx.reshape(indices, &[p, m as i32])?;
+    let idx64 = ctx.astype(idx2d, mlx::mlx_dtype__MLX_INT64)?;
+
+    let dims: Vec<i64> = dshape[..m].iter().map(|&d| d as i64).collect();
+    let mut strides = vec![0i64; m];
+    let mut acc = 1i64;
+    for j in (0..m).rev() {
+        strides[j] = acc;
+        acc *= dims[j];
+    }
+    let dims_a = i64_row(ctx, &dims);
+    let strides_a = i64_row(ctx, &strides);
+    let zero = ctx.scalar_i64(0);
+    let negative = ctx.binary(mlx::mlx_less, idx64, zero)?;
+    let wrapped = ctx.binary(mlx::mlx_add, idx64, dims_a)?;
+    let normalized = ctx.where_(negative, wrapped, idx64)?;
+    let scaled = ctx.binary(mlx::mlx_multiply, normalized, strides_a)?;
+    let flat = ctx.emit(|res, s| unsafe { mlx::mlx_sum_axis(res, scaled, 1, false, s) })?;
+    let flat = ctx.astype(flat, mlx::mlx_dtype__MLX_INT32)?;
+    let flat = ctx.reshape(flat, &[p, 1])?;
+    let flat =
+        ctx.emit(|res, s| unsafe { mlx::mlx_broadcast_to(res, flat, [p, tail].as_ptr(), 2, s) })?;
+    let updates = ctx.reshape(updates, &[p, tail])?;
+    let out =
+        ctx.emit(|res, s| unsafe { mlx::mlx_put_along_axis(res, data_flat, flat, updates, 0, s) })?;
+    let out = ctx.reshape(out, &dshape)?;
+    let out = ctx.contiguous(out)?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+fn space_to_depth_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let data = ctx.resolve(&n.inputs[0])?;
+    let shape = ctx.shape_of(data);
+    let block = int_attr(n, "blocksize", 0) as i32;
+    let h = shape[2] / block;
+    let w = shape[3] / block;
+    let reshaped = ctx.reshape(data, &[shape[0], shape[1], h, block, w, block])?;
+    let transposed = ctx.transpose(reshaped, &[0, 3, 5, 1, 2, 4])?;
+    let out = ctx.reshape(transposed, &[shape[0], shape[1] * block * block, h, w])?;
+    let out = ctx.contiguous(out)?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
 fn concat_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let mut vec = VectorArray::new();
     let mut rank = 0i32;
@@ -705,24 +927,31 @@ fn resize_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
     let mut data = ctx.resolve(&n.inputs[0])?;
     let input_shape = ctx.shape_of(data);
     let rank = input_shape.len();
+    let legacy_upsample = n.op_type == "Upsample";
     let output_dtype = mlx_dtype_from_onnx(n.outputs[0].otype);
     let mode = n
         .strings
         .get("mode")
         .map(String::as_str)
         .unwrap_or("nearest");
-    let coordinate_mode = n
-        .strings
-        .get("coordinate_transformation_mode")
-        .map(String::as_str)
-        .unwrap_or("half_pixel");
-    let nearest_mode = n
-        .strings
-        .get("nearest_mode")
-        .map(String::as_str)
-        .unwrap_or("round_prefer_floor");
+    let coordinate_mode = if legacy_upsample {
+        "asymmetric"
+    } else {
+        n.strings
+            .get("coordinate_transformation_mode")
+            .map(String::as_str)
+            .unwrap_or("half_pixel")
+    };
+    let nearest_mode = if legacy_upsample {
+        "floor"
+    } else {
+        n.strings
+            .get("nearest_mode")
+            .map(String::as_str)
+            .unwrap_or("round_prefer_floor")
+    };
 
-    let (output_lengths, scales): (Vec<i32>, Vec<f64>) = if present(n, 3) {
+    let (output_lengths, scales): (Vec<i32>, Vec<f64>) = if !legacy_upsample && present(n, 3) {
         let sizes = read_ints(ctx, n, 3)?;
         (
             sizes.iter().map(|&size| size as i32).collect(),
@@ -733,9 +962,13 @@ fn resize_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
                 .collect(),
         )
     } else {
-        let scales_host = ctx.raw_host(&n.inputs[2])?;
+        let scales_input = if legacy_upsample { 1 } else { 2 };
+        let scales_host = ctx.raw_host(&n.inputs[scales_input])?;
         if scales_host.data.is_null() || scales_host.count != rank {
-            return Err("MLX Resize requires constant float32 scales".to_string());
+            return Err(format!(
+                "MLX {} requires constant float32 scales",
+                n.op_type
+            ));
         }
         let scales = unsafe {
             std::slice::from_raw_parts(scales_host.data as *const f32, scales_host.count)
@@ -954,6 +1187,342 @@ fn scatter_elements_claim(node: &NodeView) -> ClaimResult {
             data.shape[i]
         );
     }
+    Ok(())
+}
+
+fn center_crop_pad_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "CenterCropPad expects 2 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (data, output) = match (node.input_info(0), node.output_info(0)) {
+        (Some(data), Some(output)) => (data, output),
+        _ => deny!("CenterCropPad: missing tensor type/shape info"),
+    };
+    require!(
+        is_movable(data.dtype) && output.dtype == data.dtype,
+        "CenterCropPad: input/output must share a movable dtype"
+    );
+    require!(
+        !data.shape.is_empty()
+            && data.shape.iter().all(|&d| d >= 0)
+            && output.shape.iter().all(|&d| d >= 0),
+        "CenterCropPad: input/output shapes must be fully static"
+    );
+    let target = match node.read_const_int64(1) {
+        Some(target) => target,
+        None => deny!("CenterCropPad: `shape` must be a constant int64 initializer"),
+    };
+    let rank = data.shape.len() as i64;
+    let (have_axes, axes) = node.ints_attr("axes");
+    let axes = if have_axes { axes } else { (0..rank).collect() };
+    require!(
+        target.len() == axes.len(),
+        "CenterCropPad: shape length {} must equal axes length {}",
+        target.len(),
+        axes.len()
+    );
+    require!(
+        output.shape.len() == data.shape.len(),
+        "CenterCropPad: output rank must equal input rank"
+    );
+    let mut expected = data.shape.clone();
+    let mut seen = vec![false; rank as usize];
+    for (&axis, &size) in axes.iter().zip(&target) {
+        require!(
+            axis >= -rank && axis < rank,
+            "CenterCropPad: axis {axis} is out of range for rank {rank}"
+        );
+        require!(
+            size >= 0 && size <= i32::MAX as i64,
+            "CenterCropPad: target sizes must be in [0, i32::MAX]"
+        );
+        let axis = norm_axis(axis, rank as i32) as usize;
+        require!(!seen[axis], "CenterCropPad: axes must be unique");
+        seen[axis] = true;
+        expected[axis] = size;
+    }
+    require!(
+        output.shape == expected,
+        "CenterCropPad: output shape {:?} must equal expected {:?}",
+        output.shape,
+        expected
+    );
+    Ok(())
+}
+
+fn compress_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "Compress expects 2 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (data, condition, output) =
+        match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+            (Some(data), Some(condition), Some(output)) => (data, condition, output),
+            _ => deny!("Compress: missing tensor type/shape info"),
+        };
+    require!(
+        is_movable(data.dtype) && output.dtype == data.dtype,
+        "Compress: input/output must share a movable dtype"
+    );
+    require!(
+        condition.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL
+            && condition.shape.len() == 1,
+        "Compress: condition must be a rank-1 bool tensor"
+    );
+    require!(
+        node.is_constant_initializer(1),
+        "Compress: condition must be a constant initializer because the output extent is value-dependent"
+    );
+    require!(
+        data.shape.iter().all(|&d| d >= 0) && output.shape.iter().all(|&d| d >= 0),
+        "Compress: input/output shapes must be fully static"
+    );
+    if node.has_attr("axis") {
+        let rank = data.shape.len() as i64;
+        let axis = node.int_attr("axis", 0);
+        require!(
+            rank > 0 && axis >= -rank && axis < rank,
+            "Compress: axis {axis} is out of range for rank {rank}"
+        );
+        require!(
+            output.shape.len() == data.shape.len(),
+            "Compress: output rank must equal input rank when axis is present"
+        );
+        let ax = norm_axis(axis, rank as i32) as usize;
+        require!(
+            output
+                .shape
+                .iter()
+                .enumerate()
+                .all(|(i, &d)| i == ax || d == data.shape[i]),
+            "Compress: non-axis output dimensions must equal the input dimensions"
+        );
+    } else {
+        require!(
+            output.shape.len() == 1,
+            "Compress without axis must produce a rank-1 output"
+        );
+    }
+    Ok(())
+}
+
+fn depth_to_space_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "DepthToSpace expects 1 input and 1 output"
+    );
+    let (data, output) = match (node.input_info(0), node.output_info(0)) {
+        (Some(data), Some(output)) => (data, output),
+        _ => deny!("DepthToSpace: missing tensor type/shape info"),
+    };
+    require!(
+        is_movable(data.dtype) && output.dtype == data.dtype,
+        "DepthToSpace: input/output must share a movable dtype"
+    );
+    require!(
+        data.shape.len() == 4 && data.shape.iter().all(|&d| d >= 0),
+        "DepthToSpace: only fully-static rank-4 NCHW input is supported"
+    );
+    let block = node.int_attr("blocksize", 0);
+    require!(
+        block > 0 && block <= i32::MAX as i64,
+        "DepthToSpace: blocksize must be positive"
+    );
+    require!(
+        data.shape[1] % (block * block) == 0,
+        "DepthToSpace: channel extent must be divisible by blocksize squared"
+    );
+    let mode = node.string_attr("mode", "DCR");
+    require!(
+        mode == "DCR" || mode == "CRD",
+        "DepthToSpace: mode must be DCR or CRD"
+    );
+    let expected = vec![
+        data.shape[0],
+        data.shape[1] / (block * block),
+        data.shape[2] * block,
+        data.shape[3] * block,
+    ];
+    require!(
+        output.shape == expected,
+        "DepthToSpace: output shape {:?} must equal expected {:?}",
+        output.shape,
+        expected
+    );
+    Ok(())
+}
+
+fn eye_like_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "EyeLike expects 1 input and 1 output"
+    );
+    let (input, output) = match (node.input_info(0), node.output_info(0)) {
+        (Some(input), Some(output)) => (input, output),
+        _ => deny!("EyeLike: missing tensor type/shape info"),
+    };
+    require!(
+        input.shape.len() == 2 && input.shape.iter().all(|&d| d >= 0),
+        "EyeLike: input must be a fully-static rank-2 tensor"
+    );
+    require!(
+        is_mlx_numeric(input.dtype) && is_mlx_numeric(output.dtype),
+        "EyeLike: input/output dtypes must be MLX-compatible numeric types"
+    );
+    require!(
+        output.shape == input.shape,
+        "EyeLike: output shape must equal input shape"
+    );
+    let expected_dtype = node.int_attr("dtype", input.dtype as i64);
+    require!(
+        expected_dtype == output.dtype as i64,
+        "EyeLike: output dtype must match the dtype attribute or input dtype"
+    );
+    let k = node.int_attr("k", 0);
+    require!(
+        k >= i32::MIN as i64 && k <= i32::MAX as i64,
+        "EyeLike: k must fit int32"
+    );
+    Ok(())
+}
+
+fn reverse_sequence_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "ReverseSequence expects 2 inputs and 1 output"
+    );
+    let (data, lengths, output) =
+        match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+            (Some(data), Some(lengths), Some(output)) => (data, lengths, output),
+            _ => deny!("ReverseSequence: missing tensor type/shape info"),
+        };
+    require!(
+        is_movable(data.dtype) && output.dtype == data.dtype && output.shape == data.shape,
+        "ReverseSequence: input/output must have the same movable dtype and shape"
+    );
+    require!(
+        data.shape.len() >= 2 && data.shape.iter().all(|&d| d >= 0),
+        "ReverseSequence: input must have rank >= 2 and a fully-static shape"
+    );
+    require!(
+        lengths.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+            && lengths.shape.len() == 1,
+        "ReverseSequence: sequence_lens must be rank-1 int64"
+    );
+    let rank = data.shape.len() as i64;
+    let batch_axis = node.int_attr("batch_axis", 1);
+    let time_axis = node.int_attr("time_axis", 0);
+    require!(
+        batch_axis >= -rank && batch_axis < rank && time_axis >= -rank && time_axis < rank,
+        "ReverseSequence: batch_axis/time_axis must be in range"
+    );
+    let batch_axis = norm_axis(batch_axis, rank as i32) as usize;
+    let time_axis = norm_axis(time_axis, rank as i32) as usize;
+    require!(
+        batch_axis != time_axis,
+        "ReverseSequence: batch_axis and time_axis must differ"
+    );
+    require!(
+        lengths.shape[0] == data.shape[batch_axis],
+        "ReverseSequence: sequence_lens length must equal the batch extent"
+    );
+    Ok(())
+}
+
+fn scatter_nd_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 3 && node.num_outputs() == 1,
+        "ScatterND expects 3 inputs and 1 output"
+    );
+    require!(
+        node.string_attr("reduction", "none") == "none",
+        "ScatterND: only reduction=none is supported"
+    );
+    let (data, indices, updates, output) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.output_info(0),
+    ) {
+        (Some(data), Some(indices), Some(updates), Some(output)) => {
+            (data, indices, updates, output)
+        }
+        _ => deny!("ScatterND: missing tensor type/shape info"),
+    };
+    require!(
+        is_mlx_float(data.dtype),
+        "ScatterND: data must be fp32/fp16/bf16 because MLX scatter payload kernels require float"
+    );
+    require!(
+        output.dtype == data.dtype && updates.dtype == data.dtype && output.shape == data.shape,
+        "ScatterND: updates/output must match data dtype and output shape"
+    );
+    require!(
+        is_int_index(indices.dtype)
+            && !indices.shape.is_empty()
+            && indices.shape.iter().all(|&d| d > 0)
+            && data.shape.iter().all(|&d| d > 0),
+        "ScatterND: indices must be non-empty int32/int64 and shapes must be fully static and positive"
+    );
+    let width = *indices.shape.last().unwrap() as usize;
+    require!(
+        width > 0 && width <= data.shape.len(),
+        "ScatterND: indices tuple width must be in [1, data rank]"
+    );
+    let mut expected_updates = indices.shape[..indices.shape.len() - 1].to_vec();
+    expected_updates.extend_from_slice(&data.shape[width..]);
+    require!(
+        updates.shape == expected_updates,
+        "ScatterND: updates shape {:?} must equal {:?}",
+        updates.shape,
+        expected_updates
+    );
+    Ok(())
+}
+
+fn space_to_depth_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "SpaceToDepth expects 1 input and 1 output"
+    );
+    let (data, output) = match (node.input_info(0), node.output_info(0)) {
+        (Some(data), Some(output)) => (data, output),
+        _ => deny!("SpaceToDepth: missing tensor type/shape info"),
+    };
+    require!(
+        is_movable(data.dtype) && output.dtype == data.dtype,
+        "SpaceToDepth: input/output must share a movable dtype"
+    );
+    require!(
+        data.shape.len() == 4 && data.shape.iter().all(|&d| d >= 0),
+        "SpaceToDepth: only fully-static rank-4 NCHW input is supported"
+    );
+    let block = node.int_attr("blocksize", 0);
+    require!(
+        block > 0 && block <= i32::MAX as i64,
+        "SpaceToDepth: blocksize must be positive"
+    );
+    require!(
+        data.shape[2] % block == 0 && data.shape[3] % block == 0,
+        "SpaceToDepth: spatial extents must be divisible by blocksize"
+    );
+    let expected = vec![
+        data.shape[0],
+        data.shape[1] * block * block,
+        data.shape[2] / block,
+        data.shape[3] / block,
+    ];
+    require!(
+        output.shape == expected,
+        "SpaceToDepth: output shape {:?} must equal expected {:?}",
+        output.shape,
+        expected
+    );
     Ok(())
 }
 
@@ -1651,6 +2220,68 @@ fn resize_claim(node: &NodeView) -> ClaimResult {
     }
 }
 
+fn upsample_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "Upsample-9 expects 2 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (input, scales_info, output) =
+        match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+            (Some(input), Some(scales), Some(output)) => (input, scales, output),
+            _ => deny!("Upsample: missing tensor type/shape info"),
+        };
+    let rank = input.shape.len();
+    require!(
+        rank != 0
+            && rank <= 4
+            && input.shape.iter().all(|&d| d > 0)
+            && output.shape.iter().all(|&d| d > 0),
+        "Upsample: input/output must have fully-static positive rank-1..4 shapes"
+    );
+    require!(
+        output.shape.len() == rank && output.dtype == input.dtype,
+        "Upsample: output rank and dtype must match the input"
+    );
+    let mode = node.string_attr("mode", "nearest");
+    require!(
+        mode == "nearest" || mode == "linear",
+        "Upsample: only legacy mode=nearest|linear is supported"
+    );
+    require!(
+        (mode == "nearest" && is_movable(input.dtype))
+            || (mode == "linear" && is_mlx_float(input.dtype)),
+        "Upsample: nearest supports movable numeric/bool dtypes; linear requires fp32/fp16/bf16"
+    );
+    require!(
+        scales_info.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
+            && scales_info.shape == vec![rank as i64],
+        "Upsample: scales must be a rank-sized float32 vector"
+    );
+    let scales = match node.read_const_f32(1) {
+        Some(scales) if scales.len() == rank && scales.iter().all(|&scale| scale > 0.0) => scales,
+        Some(scales) => deny!(
+            "Upsample: scales must contain {rank} positive values (got {:?})",
+            scales
+        ),
+        None => deny!(
+            "Upsample: scales must be a constant float32 initializer because output shape is scale-dependent"
+        ),
+    };
+    for axis in 0..rank {
+        let expected = (input.shape[axis] as f64 * scales[axis] as f64).floor() as i64;
+        require!(
+            output.shape[axis] == expected,
+            "Upsample: output dim {axis} ({}) must equal floor(input {} * scale {}) = {expected}",
+            output.shape[axis],
+            input.shape[axis],
+            scales[axis]
+        );
+    }
+    Ok(())
+}
+
 fn where_claim(node: &NodeView) -> ClaimResult {
     require!(
         node.num_inputs() == 3 && node.num_outputs() == 1,
@@ -1729,6 +2360,33 @@ pub fn register(registry: &mut OpRegistry) {
         scatter_elements_op,
         scatter_elements_claim,
     );
+    reg(
+        registry,
+        "CenterCropPad",
+        center_crop_pad_op,
+        center_crop_pad_claim,
+    );
+    reg(registry, "Compress", compress_op, compress_claim);
+    reg(
+        registry,
+        "DepthToSpace",
+        depth_to_space_op,
+        depth_to_space_claim,
+    );
+    reg(registry, "EyeLike", eye_like_op, eye_like_claim);
+    reg(
+        registry,
+        "ReverseSequence",
+        reverse_sequence_op,
+        reverse_sequence_claim,
+    );
+    reg(registry, "ScatterND", scatter_nd_op, scatter_nd_claim);
+    reg(
+        registry,
+        "SpaceToDepth",
+        space_to_depth_op,
+        space_to_depth_claim,
+    );
     reg(registry, "Concat", concat_op, concat_claim);
     reg(registry, "Reshape", reshape_op, reshape_claim);
     reg(registry, "Transpose", transpose_op, transpose_claim);
@@ -1752,4 +2410,12 @@ pub fn register(registry: &mut OpRegistry) {
     );
     reg(registry, "Where", where_handler, where_claim);
     reg(registry, "Resize", resize_op, resize_claim);
+    registry.register(OpRegistration {
+        domain: "",
+        op_type: "Upsample",
+        min_opset: 9,
+        max_opset: 9,
+        handler: resize_op,
+        claim: upsample_claim,
+    });
 }

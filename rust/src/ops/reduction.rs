@@ -1,5 +1,5 @@
 //! Reduction op handlers: ReduceSum/Mean/Max/Min/Prod/SumSquare/L1/L2/LogSum/LogSumExp, ArgMax,
-//! ArgMin, CumSum and (multi-output) TopK. Faithful port of the C++ `ops/reduction.cc` +
+//! ArgMin, CumSum, CumProd, Hardmax and (multi-output) TopK. Faithful port of the C++ `ops/reduction.cc` +
 //! `ops/reduction2.cc` + the ArgMin/ArgMax handlers from `ops/math.cc`.
 //!
 //! Both opset forms are handled: axes as the legacy INTS attribute (opset-13) AND as the opset-18
@@ -8,6 +8,7 @@
 //! correctly-shaped identity array instead of calling the aborting kernel).
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
+use crate::mlx::VectorArray;
 use crate::registry::{
     ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float, is_mlx_numeric,
 };
@@ -319,6 +320,131 @@ fn cumsum_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
     Ok(())
 }
 
+// ---- CumProd -----------------------------------------------------------------------------------
+
+fn take_axis_index(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    axis: i32,
+    index: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    let selector = ctx.arange(
+        index as f64,
+        (index + 1) as f64,
+        1.0,
+        mlx::mlx_dtype__MLX_INT32,
+    )?;
+    ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, x, selector, axis, s) })
+}
+
+fn ones_like(ctx: &mut TranslationContext, x: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
+    let zero = ctx.zeros_like(x)?;
+    let one = ctx.scalar_i32(1);
+    let one = ctx.astype(one, ctx.dtype_of(x))?;
+    ctx.binary(mlx::mlx_add, zero, one)
+}
+
+fn cumprod_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let rank = ctx.ndim(x) as i64;
+    let mut axis = read_scalar_int(ctx, &n.inputs[1])?;
+    if axis < 0 {
+        axis += rank;
+    }
+    if axis < 0 || axis >= rank {
+        return Err("MLX CumProd axis is out of range".to_string());
+    }
+    let axis = axis as i32;
+    let dim = ctx.dim(x, axis);
+    if dim <= 0 {
+        return Err("MLX CumProd requires a non-empty cumulative axis".to_string());
+    }
+
+    let exclusive = n.ints.get("exclusive").copied().unwrap_or(0) != 0;
+    let reverse = n.ints.get("reverse").copied().unwrap_or(0) != 0;
+    let mut accumulated: Option<mlx::mlx_array> = None;
+    let mut outputs = vec![None; dim as usize];
+
+    for step in 0..dim {
+        let index = if reverse { dim - 1 - step } else { step };
+        let current = take_axis_index(ctx, x, axis, index)?;
+        let output = if exclusive {
+            match accumulated {
+                Some(value) => value,
+                None => ones_like(ctx, current)?,
+            }
+        } else {
+            match accumulated {
+                Some(value) => ctx.binary(mlx::mlx_multiply, value, current)?,
+                None => current,
+            }
+        };
+        outputs[index as usize] = Some(output);
+        accumulated = Some(if exclusive {
+            ctx.binary(mlx::mlx_multiply, output, current)?
+        } else {
+            output
+        });
+    }
+
+    let mut values = VectorArray::new();
+    for output in outputs {
+        values.append(output.ok_or_else(|| "MLX CumProd internal output gap".to_string())?);
+    }
+    let out =
+        ctx.emit(|res, s| unsafe { mlx::mlx_concatenate_axis(res, values.as_raw(), axis, s) })?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+// ---- Hardmax -----------------------------------------------------------------------------------
+
+fn hardmax_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let shape = ctx.shape_of(x);
+    let rank = shape.len() as i32;
+    let legacy = n.since_version < 13;
+    let mut axis = n
+        .ints
+        .get("axis")
+        .copied()
+        .unwrap_or(if legacy { 1 } else { -1 }) as i32;
+    if axis < 0 {
+        axis += rank;
+    }
+    if axis < 0 || axis >= rank {
+        return Err("MLX Hardmax axis is out of range".to_string());
+    }
+
+    let (input, hardmax_axis, hardmax_dim) = if legacy {
+        let outer = shape[..axis as usize].iter().product();
+        let inner = shape[axis as usize..].iter().product();
+        (ctx.reshape(x, &[outer, inner])?, 1, inner)
+    } else {
+        (x, axis, shape[axis as usize])
+    };
+    if hardmax_dim <= 0 {
+        return Err("MLX Hardmax requires a non-empty selected axis".to_string());
+    }
+
+    let maxima =
+        ctx.emit(|res, s| unsafe { mlx::mlx_argmax_axis(res, input, hardmax_axis, true, s) })?;
+    let indices = ctx.arange(0.0, hardmax_dim as f64, 1.0, mlx::mlx_dtype__MLX_UINT32)?;
+    let mut index_shape = vec![1; ctx.ndim(input)];
+    index_shape[hardmax_axis as usize] = hardmax_dim;
+    let indices = ctx.reshape(indices, &index_shape)?;
+    let selected = ctx.binary(mlx::mlx_equal, indices, maxima)?;
+    let selected = ctx.astype(selected, ctx.dtype_of(x))?;
+    let out = if legacy {
+        let reshaped = ctx.reshape(selected, &shape)?;
+        ctx.contiguous(reshaped)?
+    } else {
+        selected
+    };
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
 // ---- TopK (multi-output) -----------------------------------------------------------------------
 
 fn topk_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
@@ -547,6 +673,136 @@ fn cumsum_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+fn cumprod_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "expects 2 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (x, axis, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(x), Some(a), Some(o)) => (x, a, o),
+        _ => deny!("missing tensor type/shape info on input, axis, or output"),
+    };
+    require!(
+        !x.shape.is_empty(),
+        "input must have rank >= 1 (got a scalar)"
+    );
+    let dtype_supported = is_mlx_float(x.dtype)
+        || x.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+        || x.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+        || x.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32
+        || x.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64;
+    require!(
+        x.dtype == out.dtype && dtype_supported,
+        "input/output must share a CumProd dtype supported by MLX, got {} -> {}",
+        crate::registry::ort_dtype_name(x.dtype),
+        crate::registry::ort_dtype_name(out.dtype)
+    );
+    require!(
+        axis.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+            || axis.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64,
+        "axis input must be int32 or int64, got {}",
+        crate::registry::ort_dtype_name(axis.dtype)
+    );
+    require!(
+        axis.shape.is_empty(),
+        "axis input must be a scalar, got shape {:?}",
+        axis.shape
+    );
+    require!(
+        node.input_is_host_readable(1),
+        "axis must be a graph input or constant initializer readable at execution time"
+    );
+    if let Some(axis_values) = node.read_const_ints_any(1) {
+        require!(
+            axis_values.len() == 1,
+            "axis initializer must contain exactly one value"
+        );
+        let raw_axis = axis_values[0];
+        let normalized = if raw_axis < 0 {
+            raw_axis + x.shape.len() as i64
+        } else {
+            raw_axis
+        };
+        require!(
+            normalized >= 0 && normalized < x.shape.len() as i64,
+            "axis {raw_axis} is out of range for rank {}",
+            x.shape.len()
+        );
+        require!(
+            x.shape[normalized as usize] > 0,
+            "selected axis must have a known positive dimension, got {}",
+            x.shape[normalized as usize]
+        );
+    } else {
+        require!(
+            x.shape.iter().all(|&dim| dim > 0),
+            "runtime axis requires every possible selected dimension to be known and positive, got {:?}",
+            x.shape
+        );
+    }
+    let exclusive = node.int_attr("exclusive", 0);
+    let reverse = node.int_attr("reverse", 0);
+    require!(
+        exclusive == 0 || exclusive == 1,
+        "exclusive must be 0 or 1 (got {exclusive})"
+    );
+    require!(
+        reverse == 0 || reverse == 1,
+        "reverse must be 0 or 1 (got {reverse})"
+    );
+    Ok(())
+}
+
+fn hardmax_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "expects 1 input and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (input, output) = match (node.input_info(0), node.output_info(0)) {
+        (Some(input), Some(output)) => (input, output),
+        _ => deny!("missing tensor type/shape info on input or output"),
+    };
+    require!(
+        !input.shape.is_empty(),
+        "input must have rank >= 1 (got a scalar)"
+    );
+    require!(
+        input.dtype == output.dtype && is_mlx_float(input.dtype),
+        "input/output must share an MLX float dtype, got {} -> {}",
+        crate::registry::ort_dtype_name(input.dtype),
+        crate::registry::ort_dtype_name(output.dtype)
+    );
+    let legacy = node.since_version() < 13;
+    let mut axis = node.int_attr("axis", if legacy { 1 } else { -1 });
+    let raw_axis = axis;
+    if axis < 0 {
+        axis += input.shape.len() as i64;
+    }
+    require!(
+        axis >= 0 && axis < input.shape.len() as i64,
+        "axis {raw_axis} is out of range for rank {}",
+        input.shape.len()
+    );
+    if legacy {
+        require!(
+            input.shape.iter().all(|&dim| dim > 0),
+            "legacy Hardmax flattening requires all dimensions to be known and positive, got {:?}",
+            input.shape
+        );
+    } else {
+        require!(
+            input.shape[axis as usize] > 0,
+            "selected axis must have a known positive dimension, got {}",
+            input.shape[axis as usize]
+        );
+    }
+    Ok(())
+}
+
 fn topk_claim(node: &NodeView) -> ClaimResult {
     require!(
         node.num_inputs() == 2 && node.num_outputs() == 2,
@@ -706,5 +962,7 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "ArgMax", K_ANY_OPSET, argmax_op, argminmax_claim);
     reg(registry, "ArgMin", K_ANY_OPSET, argmin_op, argminmax_claim);
     reg(registry, "CumSum", 11, cumsum_op, cumsum_claim);
+    reg(registry, "CumProd", 26, cumprod_op, cumprod_claim);
+    reg(registry, "Hardmax", K_ANY_OPSET, hardmax_op, hardmax_claim);
     reg(registry, "TopK", 10, topk_op, topk_claim);
 }

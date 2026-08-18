@@ -6,7 +6,9 @@
 //! arithmetic — so they translate exactly to MLX with no bespoke kernel. Only the static, float
 //! forms the C++ claim accepts are claimed; exotic forms (cubic GridSample, 5-D volumetric,
 //! adaptive RoiAlign `sampling_ratio==0`, the 3-input MaxUnpool, non-float payloads) are left to CPU.
+//! NonMaxSuppression is host-computed because MLX has no data-dependent compacting primitive.
 
+use std::cmp::Ordering;
 use std::os::raw::c_void;
 
 use crate::engine::{MlxError, NodeDesc, TensorRef, TranslationContext, mlx_dtype_from_onnx};
@@ -77,6 +79,50 @@ fn floor(ctx: &mut TranslationContext, a: mlx::mlx_array) -> Result<mlx::mlx_arr
 }
 fn ceil(ctx: &mut TranslationContext, a: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
     ctx.unary(mlx::mlx_ceil, a)
+}
+
+fn input_present(n: &NodeDesc, index: usize) -> bool {
+    n.inputs
+        .get(index)
+        .is_some_and(|input| !input.name.is_empty())
+}
+
+fn eval_f32(ctx: &mut TranslationContext, input: &TensorRef) -> Result<mlx::mlx_array, MlxError> {
+    let value = ctx.resolve(input)?;
+    ctx.contiguous_eval(value)
+}
+
+fn scalar_f32_input(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    index: usize,
+    default: f32,
+) -> Result<f32, MlxError> {
+    if !input_present(n, index) {
+        return Ok(default);
+    }
+    let value = eval_f32(ctx, &n.inputs[index])?;
+    if ctx.size_of(value) != 1 {
+        return Err(format!("input {index} must be a scalar"));
+    }
+    Ok(unsafe { *mlx::mlx_array_data_float32(value) })
+}
+
+fn scalar_i64_input(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    index: usize,
+    default: i64,
+) -> Result<i64, MlxError> {
+    if !input_present(n, index) {
+        return Ok(default);
+    }
+    let value = ctx.resolve(&n.inputs[index])?;
+    let value = ctx.contiguous_eval(value)?;
+    if ctx.size_of(value) != 1 {
+        return Err(format!("input {index} must be a scalar"));
+    }
+    Ok(unsafe { *mlx::mlx_array_data_int64(value) })
 }
 fn round0(ctx: &mut TranslationContext, a: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
     ctx.emit(|res, s| unsafe { mlx::mlx_round(res, a, 0, s) })
@@ -1243,6 +1289,191 @@ fn max_unpool_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+// ---- NonMaxSuppression --------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+struct NmsBox {
+    y1: f32,
+    x1: f32,
+    y2: f32,
+    x2: f32,
+}
+
+fn nms_box(raw: &[f32], center_point_box: bool) -> NmsBox {
+    if center_point_box {
+        let x_half = raw[2] * 0.5;
+        let y_half = raw[3] * 0.5;
+        NmsBox {
+            y1: raw[1] - y_half,
+            x1: raw[0] - x_half,
+            y2: raw[1] + y_half,
+            x2: raw[0] + x_half,
+        }
+    } else {
+        NmsBox {
+            y1: raw[0].min(raw[2]),
+            x1: raw[1].min(raw[3]),
+            y2: raw[0].max(raw[2]),
+            x2: raw[1].max(raw[3]),
+        }
+    }
+}
+
+fn nms_iou(a: NmsBox, b: NmsBox) -> f32 {
+    let intersection_h = (a.y2.min(b.y2) - a.y1.max(b.y1)).max(0.0);
+    let intersection_w = (a.x2.min(b.x2) - a.x1.max(b.x1)).max(0.0);
+    let intersection = intersection_h * intersection_w;
+    let area_a = (a.y2 - a.y1).max(0.0) * (a.x2 - a.x1).max(0.0);
+    let area_b = (b.y2 - b.y1).max(0.0) * (b.x2 - b.x1).max(0.0);
+    let union = area_a + area_b - intersection;
+    if union <= 0.0 {
+        0.0
+    } else {
+        intersection / union
+    }
+}
+
+fn non_max_suppression_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let boxes = eval_f32(ctx, &n.inputs[0])?;
+    let scores = eval_f32(ctx, &n.inputs[1])?;
+    let bshape = ctx.shape_of(boxes);
+    let sshape = ctx.shape_of(scores);
+    let batches = bshape[0] as usize;
+    let box_count = bshape[1] as usize;
+    let classes = sshape[1] as usize;
+    let max_output = scalar_i64_input(ctx, n, 2, 0)?.max(0) as usize;
+    let iou_threshold = scalar_f32_input(ctx, n, 3, 0.0)?;
+    let score_threshold = if input_present(n, 4) {
+        Some(scalar_f32_input(ctx, n, 4, 0.0)?)
+    } else {
+        None
+    };
+    let center_point_box = n.ints.get("center_point_box").copied().unwrap_or(0) != 0;
+
+    let boxes_data = unsafe {
+        std::slice::from_raw_parts(mlx::mlx_array_data_float32(boxes), batches * box_count * 4)
+    };
+    let scores_data = unsafe {
+        std::slice::from_raw_parts(
+            mlx::mlx_array_data_float32(scores),
+            batches * classes * box_count,
+        )
+    };
+    let mut selected = Vec::<i64>::new();
+    if max_output > 0 {
+        for batch in 0..batches {
+            for class in 0..classes {
+                let score_base = (batch * classes + class) * box_count;
+                let mut candidates: Vec<usize> = (0..box_count)
+                    .filter(|&index| {
+                        score_threshold
+                            .is_none_or(|threshold| scores_data[score_base + index] > threshold)
+                    })
+                    .collect();
+                candidates.sort_by(|&left, &right| {
+                    scores_data[score_base + right]
+                        .partial_cmp(&scores_data[score_base + left])
+                        .unwrap_or(Ordering::Equal)
+                        .then_with(|| left.cmp(&right))
+                });
+
+                let mut kept = Vec::<usize>::new();
+                for candidate in candidates {
+                    let candidate_offset = (batch * box_count + candidate) * 4;
+                    let candidate_box = nms_box(
+                        &boxes_data[candidate_offset..candidate_offset + 4],
+                        center_point_box,
+                    );
+                    let suppressed = kept.iter().any(|&prior| {
+                        let prior_offset = (batch * box_count + prior) * 4;
+                        let prior_box = nms_box(
+                            &boxes_data[prior_offset..prior_offset + 4],
+                            center_point_box,
+                        );
+                        nms_iou(candidate_box, prior_box) > iou_threshold
+                    });
+                    if !suppressed {
+                        kept.push(candidate);
+                        selected.extend([batch as i64, class as i64, candidate as i64]);
+                        if kept.len() == max_output {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let rows = (selected.len() / 3) as i32;
+    let out = if selected.is_empty() {
+        ctx.zeros(&[0, 3], mlx::mlx_dtype__MLX_INT64)?
+    } else {
+        ctx.from_host_i64(&selected, &[rows, 3])
+    };
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+fn non_max_suppression_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        (2..=5).contains(&node.num_inputs()) && node.num_outputs() == 1,
+        "expects 2-5 inputs and 1 output"
+    );
+    let (boxes, scores, output) =
+        match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+            (Some(boxes), Some(scores), Some(output)) => (boxes, scores, output),
+            _ => deny!("missing tensor type/shape info"),
+        };
+    require!(
+        boxes.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
+            && scores.dtype == boxes.dtype,
+        "boxes and scores must be float32"
+    );
+    require!(
+        boxes.shape.len() == 3 && boxes.shape[2] == 4 && boxes.shape[0] > 0 && boxes.shape[1] >= 0,
+        "boxes must have static shape [batch, boxes, 4]"
+    );
+    require!(
+        scores.shape.len() == 3
+            && scores.shape[0] == boxes.shape[0]
+            && scores.shape[2] == boxes.shape[1]
+            && scores.shape[1] >= 0,
+        "scores must have static shape [batch, classes, boxes]"
+    );
+    require!(
+        output.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64,
+        "selected_indices output must be int64"
+    );
+    if node.input_present(2) {
+        let max_output = match node.input_info(2) {
+            Some(info) => info,
+            None => deny!("max_output_boxes_per_class lacks tensor type info"),
+        };
+        require!(
+            max_output.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+                && max_output.shape.is_empty(),
+            "max_output_boxes_per_class must be an int64 scalar"
+        );
+    }
+    for index in 3..=4 {
+        if node.input_present(index) {
+            let threshold = match node.input_info(index) {
+                Some(info) => info,
+                None => deny!("threshold input {index} lacks tensor type info"),
+            };
+            require!(
+                threshold.dtype == boxes.dtype && threshold.shape.is_empty(),
+                "threshold input {index} must be a float32 scalar"
+            );
+        }
+    }
+    require!(
+        matches!(node.int_attr("center_point_box", 0), 0 | 1),
+        "center_point_box must be 0 or 1"
+    );
+    Ok(())
+}
+
 // ---- registration -------------------------------------------------------------------------------
 
 fn reg(
@@ -1268,4 +1499,10 @@ pub fn register_vision(registry: &mut OpRegistry) {
     reg(registry, "RoiAlign", roi_align_op, roi_align_claim);
     reg(registry, "MaxRoiPool", max_roi_pool_op, max_roi_pool_claim);
     reg(registry, "MaxUnpool", max_unpool_op, max_unpool_claim);
+    reg(
+        registry,
+        "NonMaxSuppression",
+        non_max_suppression_op,
+        non_max_suppression_claim,
+    );
 }

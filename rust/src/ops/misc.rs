@@ -1,5 +1,5 @@
-//! Misc op handlers: Constant (scalar/list value forms), OneHot, Trilu, Scatter (opset 9/10),
-//! Det, NonZero, Unique, OptionalHasElement/GetElement and the loss ops
+//! Misc op handlers: Constant (scalar/list value forms), TfIdfVectorizer, OneHot, Trilu, Scatter
+//! (opset 9/10), Det, NonZero, Unique, OptionalHasElement/GetElement and the loss ops
 //! (NegativeLogLikelihoodLoss / SoftmaxCrossEntropyLoss). Faithful port of the C++ `ops/misc2.cc`
 //! (plus OneHot/Trilu from `math.cc` and Constant from `shape.cc`). Host-computed ops (Det /
 //! NonZero / Unique) materialise their input, compute on the host, and wrap the result back as a
@@ -73,6 +73,346 @@ fn is_int_index(t: ort::ONNXTensorElementDataType) -> bool {
 
 fn static_tensor(info: &SlotInfo) -> bool {
     info.shape.iter().all(|&d| d >= 0)
+}
+
+// =============================================================================================
+// TfIdfVectorizer — numeric-token, pool_int64s form, statically unrolled in ORT traversal order.
+// =============================================================================================
+fn tfidf_pool(n: &NodeDesc) -> Result<Vec<HashMap<Vec<i64>, usize>>, MlxError> {
+    let counts = n
+        .int_arrays
+        .get("ngram_counts")
+        .ok_or_else(|| "MLX TfIdfVectorizer: missing ngram_counts".to_string())?;
+    let pool = n
+        .int_arrays
+        .get("pool_int64s")
+        .ok_or_else(|| "MLX TfIdfVectorizer: missing pool_int64s".to_string())?;
+    let indexes = n
+        .int_arrays
+        .get("ngram_indexes")
+        .ok_or_else(|| "MLX TfIdfVectorizer: missing ngram_indexes".to_string())?;
+    let mut grams = vec![HashMap::new(); counts.len() + 1];
+    let mut gram_id = 0usize;
+    for (i, &start64) in counts.iter().enumerate() {
+        let size = i + 1;
+        let start = usize::try_from(start64)
+            .map_err(|_| "MLX TfIdfVectorizer: negative ngram_counts value".to_string())?;
+        let end64 = counts.get(i + 1).copied().unwrap_or(pool.len() as i64);
+        let end = usize::try_from(end64)
+            .map_err(|_| "MLX TfIdfVectorizer: negative ngram_counts value".to_string())?;
+        if end < start || end > pool.len() {
+            return Err("MLX TfIdfVectorizer: ngram_counts are out of pool bounds".to_string());
+        }
+        if (end - start) % size != 0 {
+            return Err(format!(
+                "MLX TfIdfVectorizer: pool items do not form whole {size}-grams"
+            ));
+        }
+        for tokens in pool[start..end].chunks_exact(size) {
+            if grams[size].insert(tokens.to_vec(), gram_id).is_some() {
+                return Err(format!(
+                    "MLX TfIdfVectorizer: duplicate {size}-gram in pool_int64s"
+                ));
+            }
+            gram_id += 1;
+        }
+    }
+    if gram_id != indexes.len() {
+        return Err(format!(
+            "MLX TfIdfVectorizer: {} pooled n-grams but {} ngram_indexes",
+            gram_id,
+            indexes.len()
+        ));
+    }
+    Ok(grams)
+}
+
+fn tfidf_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let shape = ctx.shape_of(x);
+    let (rows, row_size) = if shape.len() == 1 {
+        (1usize, shape[0] as usize)
+    } else {
+        (shape[0] as usize, shape[1] as usize)
+    };
+    let min_gram = *n.ints.get("min_gram_length").unwrap() as usize;
+    let max_gram = *n.ints.get("max_gram_length").unwrap() as usize;
+    let max_skip = *n.ints.get("max_skip_count").unwrap() as usize;
+    let mode = n.strings.get("mode").unwrap().as_str();
+    let indexes = n.int_arrays.get("ngram_indexes").unwrap();
+    let weights = n.float_arrays.get("weights");
+    if let Some(w) = weights {
+        if w.len() != indexes.len() {
+            return Err(format!(
+                "MLX TfIdfVectorizer: weights size {} must equal ngram_indexes size {}",
+                w.len(),
+                indexes.len()
+            ));
+        }
+        if indexes
+            .iter()
+            .any(|&index| index < 0 || index as usize >= w.len())
+        {
+            return Err(
+                "MLX TfIdfVectorizer: weighted ngram_indexes must index the weights array"
+                    .to_string(),
+            );
+        }
+    }
+    let grams = tfidf_pool(n)?;
+    let output_size = indexes.iter().copied().max().unwrap() as usize + 1;
+    let flat = ctx.reshape(x, &[(rows * row_size) as i32])?;
+    let mut output = Vec::with_capacity(rows * output_size);
+
+    for row in 0..rows {
+        let row_output_start = output.len();
+        output.extend((0..output_size).map(|_| ctx.scalar_f32(0.0)));
+        let mut start_gram = min_gram;
+        let useful_skip_distances = if max_gram <= 1 {
+            1
+        } else {
+            max_skip
+                .saturating_add(1)
+                .min(row_size.saturating_sub(1).max(1))
+        };
+        for skip_distance in 1..=useful_skip_distances {
+            for start in 0..row_size {
+                let Some(last_min) = (start_gram - 1)
+                    .checked_mul(skip_distance)
+                    .and_then(|d| start.checked_add(d))
+                else {
+                    break;
+                };
+                if last_min >= row_size {
+                    break;
+                }
+                for gram_size in 1..=max_gram {
+                    let Some(pos) = (gram_size - 1)
+                        .checked_mul(skip_distance)
+                        .and_then(|d| start.checked_add(d))
+                    else {
+                        break;
+                    };
+                    if pos >= row_size {
+                        break;
+                    }
+                    if gram_size < start_gram {
+                        continue;
+                    }
+                    for (tokens, &pool_idx) in &grams[gram_size] {
+                        let mut matches = None;
+                        for (token_offset, &expected_value) in tokens.iter().enumerate() {
+                            let token_pos = start + token_offset * skip_distance;
+                            let index = ctx.scalar_i64((row * row_size + token_pos) as i64);
+                            let token =
+                                ctx.emit(|res, s| unsafe { mlx::mlx_take(res, flat, index, s) })?;
+                            let expected = scalar_like(ctx, expected_value, flat)?;
+                            let eq = ctx.binary(mlx::mlx_equal, token, expected)?;
+                            matches = Some(match matches {
+                                Some(prefix) => ctx.binary(mlx::mlx_logical_and, prefix, eq)?,
+                                None => eq,
+                            });
+                        }
+                        let matches = matches.unwrap();
+                        let out_idx = indexes[pool_idx] as usize;
+                        let slot = row_output_start + out_idx;
+                        let weight = weights.map_or(1.0, |w| w[out_idx]);
+                        output[slot] = match mode {
+                            "TF" => {
+                                let match_f = ctx.astype(matches, F32)?;
+                                ctx.add(output[slot], match_f)?
+                            }
+                            "IDF" => {
+                                let value = ctx.scalar_f32(weight);
+                                ctx.emit(|res, s| unsafe {
+                                    mlx::mlx_where(res, matches, value, output[slot], s)
+                                })?
+                            }
+                            "TFIDF" => {
+                                let value = ctx.scalar_f32(weight);
+                                let zero = ctx.scalar_f32(0.0);
+                                let increment = ctx.emit(|res, s| unsafe {
+                                    mlx::mlx_where(res, matches, value, zero, s)
+                                })?;
+                                ctx.add(output[slot], increment)?
+                            }
+                            _ => unreachable!(),
+                        };
+                    }
+                }
+            }
+            if start_gram == 1 {
+                start_gram = 2;
+                if start_gram > max_gram {
+                    break;
+                }
+            }
+        }
+    }
+
+    let result = ctx.stack(&output, 0)?;
+    let result = if shape.len() == 1 {
+        result
+    } else {
+        ctx.reshape(result, &[rows as i32, output_size as i32])?
+    };
+    ctx.bind(&n.outputs[0], result);
+    Ok(())
+}
+
+fn tfidf_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "expects 1 input and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (input, output) = match (node.input_info(0), node.output_info(0)) {
+        (Some(i), Some(o)) => (i, o),
+        _ => deny!("missing tensor type/shape info on input or output"),
+    };
+    require!(
+        static_tensor(&input) && static_tensor(&output),
+        "input and output shapes must be static"
+    );
+    require!(
+        input.dtype == T_INT32 || input.dtype == T_INT64,
+        "only numeric int32/int64 token inputs are supported (string tensors are not supported)"
+    );
+    require!(
+        output.dtype == T_FLOAT,
+        "output must have float32 element type"
+    );
+    require!(
+        input.shape.len() == 1 || input.shape.len() == 2,
+        "input must have rank 1 or 2"
+    );
+    require!(
+        input.shape.iter().all(|&d| i32::try_from(d).is_ok())
+            && input
+                .shape
+                .iter()
+                .try_fold(1i64, |n, &d| n.checked_mul(d))
+                .is_some_and(|n| i32::try_from(n).is_ok()),
+        "input dimensions and element count must fit MLX int32 shapes"
+    );
+    if input.shape.len() == 2 && input.shape[0] < 1 {
+        deny!("rank-2 input batch dimension must be positive");
+    }
+
+    require!(
+        node.attr_type("mode") == ort::OrtOpAttrType_ORT_OP_ATTR_STRING,
+        "mode must be a required STRING attribute"
+    );
+    let mode = node.string_attr("mode", "");
+    require!(
+        mode == "TF" || mode == "IDF" || mode == "TFIDF",
+        "mode must be TF, IDF, or TFIDF (got {mode})"
+    );
+    for name in ["min_gram_length", "max_gram_length", "max_skip_count"] {
+        if node.attr_type(name) != ort::OrtOpAttrType_ORT_OP_ATTR_INT {
+            deny!("{name} must be a required INT attribute");
+        }
+    }
+    let min_gram = node.int_attr("min_gram_length", 0);
+    let max_gram = node.int_attr("max_gram_length", 0);
+    let max_skip = node.int_attr("max_skip_count", -1);
+    require!(min_gram > 0, "min_gram_length must be positive");
+    require!(
+        max_gram >= min_gram,
+        "max_gram_length must be at least min_gram_length"
+    );
+    require!(max_skip >= 0, "max_skip_count must be non-negative");
+    require!(
+        usize::try_from(max_skip).is_ok(),
+        "max_skip_count exceeds host indexing range"
+    );
+
+    let (have_counts, counts) = node.ints_attr("ngram_counts");
+    let (have_indexes, indexes) = node.ints_attr("ngram_indexes");
+    let (have_pool, pool) = node.ints_attr("pool_int64s");
+    require!(
+        have_counts && !counts.is_empty(),
+        "non-empty INTS ngram_counts is required"
+    );
+    require!(
+        have_indexes && !indexes.is_empty(),
+        "non-empty INTS ngram_indexes is required"
+    );
+    require!(
+        have_pool && !pool.is_empty(),
+        "non-empty INTS pool_int64s is required"
+    );
+    require!(
+        !node.has_attr("pool_strings"),
+        "pool_strings/string-token form is not supported"
+    );
+    if node.has_attr("weights")
+        && node.attr_type("weights") != ort::OrtOpAttrType_ORT_OP_ATTR_FLOATS
+    {
+        deny!("weights must be a FLOATS attribute");
+    }
+    require!(
+        max_gram as usize <= counts.len(),
+        "max_gram_length must be within ngram_counts"
+    );
+    require!(
+        indexes.iter().all(|&v| v >= 0),
+        "ngram_indexes values must be non-negative"
+    );
+
+    let mut total_grams = 0usize;
+    let mut seen = HashMap::<Vec<i64>, ()>::new();
+    for (i, &start64) in counts.iter().enumerate() {
+        let size = i + 1;
+        let start = match usize::try_from(start64) {
+            Ok(v) => v,
+            Err(_) => deny!("ngram_counts values must be non-negative"),
+        };
+        let end64 = counts.get(i + 1).copied().unwrap_or(pool.len() as i64);
+        let end = match usize::try_from(end64) {
+            Ok(v) => v,
+            Err(_) => deny!("ngram_counts values must be non-negative"),
+        };
+        if end < start || end > pool.len() {
+            deny!("ngram_counts are not monotonic offsets within pool_int64s");
+        }
+        if (end - start) % size != 0 {
+            deny!("pool_int64s items do not form whole {size}-grams");
+        }
+        for gram in pool[start..end].chunks_exact(size) {
+            if seen.insert(gram.to_vec(), ()).is_some() {
+                deny!("duplicate {size}-gram in pool_int64s");
+            }
+            total_grams += 1;
+        }
+        seen.clear();
+    }
+    require!(
+        total_grams == indexes.len(),
+        "pooled n-gram count ({total_grams}) must equal ngram_indexes size ({})",
+        indexes.len()
+    );
+    let output_size = match indexes.iter().copied().max().and_then(|v| v.checked_add(1)) {
+        Some(v) => v,
+        None => deny!("ngram_indexes output size overflows"),
+    };
+    require!(
+        i32::try_from(output_size).is_ok(),
+        "ngram_indexes output size must fit an MLX int32 dimension"
+    );
+    let expected = if input.shape.len() == 1 {
+        vec![output_size]
+    } else {
+        vec![input.shape[0], output_size]
+    };
+    require!(
+        output.shape == expected,
+        "output shape must be {:?}, got {:?}",
+        expected,
+        output.shape
+    );
+    Ok(())
 }
 
 // =============================================================================================
@@ -886,6 +1226,14 @@ pub fn register(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         constant_op,
         constant_claim,
+    );
+    reg(
+        registry,
+        "TfIdfVectorizer",
+        9,
+        K_ANY_OPSET,
+        tfidf_op,
+        tfidf_claim,
     );
     reg(
         registry,
