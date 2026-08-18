@@ -7,6 +7,8 @@ pub mod image;
 pub mod math;
 pub mod matmul;
 pub mod norm;
+pub mod onnx_ml_linear;
+pub mod onnx_ml_preprocess;
 pub mod quant;
 pub mod reduction;
 pub mod shape;
