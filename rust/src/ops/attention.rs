@@ -1337,6 +1337,10 @@ fn is_int32(t: ort::ONNXTensorElementDataType) -> bool {
 ///     All floating inputs/outputs share one dtype; seqlens_k / total_sequence_length are int32.
 fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
     require!(node.num_outputs() > 0, "requires at least 1 output");
+    require!(
+        node.int_attr("sliding_window_cache", 0) == 0,
+        "sliding_window_cache=1 is unsupported"
+    );
     let out_type = match node.output_info(0) {
         Some(o) if is_mlx_float(o.dtype) => o.dtype,
         Some(o) => deny!(
@@ -2053,6 +2057,10 @@ fn mrotary_embedding_claim(node: &NodeView) -> ClaimResult {
         node.num_inputs() == 4 && node.num_outputs() == 1,
         "MRotaryEmbedding expects 4 inputs and 1 output"
     );
+    require!(
+        node.int_attr("is_packed_batching", 0) == 0,
+        "is_packed_batching=1 is unsupported"
+    );
     let (x, pos, cos, sin, out) = match (
         node.input_info(0),
         node.input_info(1),
@@ -2451,6 +2459,21 @@ fn paged_attention_claim(node: &NodeView) -> ClaimResult {
         node.num_outputs() >= 1,
         "PagedAttention requires at least 1 output"
     );
+    require!(
+        node.int_attr("v_head_size", 0) == 0,
+        "asymmetric v_head_size is unsupported"
+    );
+    require!(
+        node.int_attr("rotary_offset", 0) == 0,
+        "non-zero rotary_offset is unsupported"
+    );
+    for attr in ["k_cache_dtype", "v_cache_dtype"] {
+        let dtype = node.string_attr(attr, "");
+        require!(
+            !matches!(dtype.as_str(), "int4" | "float4e2m1"),
+            "{attr}={dtype:?} sub-byte packing is unsupported"
+        );
+    }
     // T = fp16/bf16 only; output dtype must match the query.
     let out_dt = match node.output_info(0) {
         Some(o) if is_mlx_float(o.dtype) => o.dtype,

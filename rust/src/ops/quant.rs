@@ -491,6 +491,13 @@ fn block_quant_matmul_claim(node: &NodeView, fp4: bool) -> ClaimResult {
                 .is_some_and(|v| v.dtype == float && v.shape.iter().product::<i64>() == 1),
             "weight_scale_2 must be scalar fp32"
         );
+        if node.input_present(4) {
+            require!(
+                node.input_info(4)
+                    .is_some_and(|v| v.dtype == float && v.shape.iter().product::<i64>() == 1),
+                "input_scale must be scalar fp32"
+            );
+        }
         if node.input_present(5) {
             require!(
                 node.input_info(5)
@@ -2436,6 +2443,10 @@ fn qmoe_claim(node: &NodeView) -> ClaimResult {
         qt == "int",
         "only quant_type='int' is supported (got {:?})",
         qt
+    );
+    require!(
+        node.int_attr("weights_prepacked", -1) != 1,
+        "weights_prepacked=1 uses an EP-specific layout and is unsupported"
     );
     let bits = node.int_attr("expert_weight_bits", 4);
     require!(

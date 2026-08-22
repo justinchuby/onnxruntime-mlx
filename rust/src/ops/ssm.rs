@@ -784,6 +784,10 @@ fn linear_attention_common_claim(node: &NodeView, allow_mixed_state: bool) -> Cl
         node.num_inputs(),
         node.num_outputs()
     );
+    require!(
+        node.int_attr("state_window", 0) == 0,
+        "state_window != 0 (5D speculative-decode state) is unsupported"
+    );
     let rule = node.string_attr("update_rule", "gated_delta");
     require!(is_known_rule(&rule), "unsupported update_rule {rule:?}");
     let hq = node.int_attr("q_num_heads", 0);
