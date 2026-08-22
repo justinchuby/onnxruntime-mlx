@@ -310,6 +310,44 @@ def test_slice_no_axes_no_steps():
     m.assert_matches_cpu(model, {"d": data}, **tol(np.float32))
 
 
+@pytest.mark.parametrize("dt", MOVE_DTYPES)
+@pytest.mark.parametrize(
+    ("starts", "ends", "axes", "steps"),
+    [
+        ([np.iinfo(np.int64).max], [np.iinfo(np.int64).min], [1], [-1]),
+        ([-1], [-6], [1], [-2]),
+        ([-10], [np.iinfo(np.int64).min], [1], [-1]),
+        ([2, 0], [0, 5], [0, 1], [-1, 2]),
+    ],
+    ids=["full-reverse", "negative-bounds", "start-before-dimension", "mixed-directions"],
+)
+def test_slice_negative_step(dt, starts, ends, axes, steps):
+    data = sample(dt, [3, 5])
+    values = tuple(
+        initz(name, np.asarray(value, np.int64))
+        for name, value in zip(("s", "e", "a", "t"), (starts, ends, axes, steps))
+    )
+    expected = data[
+        tuple(
+            slice(starts[axes.index(axis)], ends[axes.index(axis)], steps[axes.index(axis)])
+            if axis in axes
+            else slice(None)
+            for axis in range(data.ndim)
+        )
+    ]
+    if starts == [-10]:
+        # ONNX clamps a reverse Slice start to [0, dim-1], unlike NumPy's empty result here.
+        expected = data[:, :1]
+    model = build(
+        "Slice",
+        [m.tensor("d", ir_of(dt), [3, 5]), *values],
+        [m.tensor("o", ir_of(dt), list(expected.shape))],
+        inits=values,
+    )
+    m.assert_matches_cpu(model, {"d": data}, **tol(dt))
+    np.testing.assert_array_equal(m.run_mlx(model, {"d": data})[0], expected)
+
+
 # --- Split ------------------------------------------------------------------------------------
 @pytest.mark.parametrize("dt", MOVE_DTYPES)
 def test_split_sizes(dt):

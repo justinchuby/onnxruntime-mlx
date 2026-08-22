@@ -9,8 +9,9 @@
 //!   * If — HOST-READABLE `cond` (graph input / initializer / outer-scope); read host-side and
 //!     translate the taken branch only. A data-dependent `cond` produced by another node is declined
 //!     (runs on ORT's CPU control-flow kernels).
-//!   * Scan — STATIC trip count (scan axis length known from the input shape). Unroll the body over
-//!     axis 0, carrying state and stacking scan outputs. Forward, axis 0 only (MVP).
+//!   * Scan — SHAPE-SPECIALIZED trip count (the runtime scan-axis extent is fixed while tracing a
+//!     shape-keyed closure). Unroll the body over each input's configured axis/direction, carrying
+//!     state and stacking each output along its configured axis/direction.
 //!   * Loop — CONSTANT trip count M with a cond that is a pass-through of the loop cond input (the
 //!     canonical `for i in range(M)` idiom). Unroll M times; carried-state-only (MVP).
 //!
@@ -57,13 +58,21 @@ fn is_int64(node: &NodeView, i: usize) -> bool {
         if info.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
 }
 
-/// Reject non-default (non-forward / non-axis-0) direction/axis attributes.
-fn all_zero_ints_attr(node: &NodeView, name: &str) -> bool {
-    let (present, v) = node.ints_attr(name);
-    if !present {
-        return true;
+fn normalized_axis(axis: i64, rank: usize) -> Option<usize> {
+    let rank = rank as i64;
+    let axis = if axis < 0 { axis + rank } else { axis };
+    (0..rank).contains(&axis).then_some(axis as usize)
+}
+
+fn scan_attr(n: &NodeDesc, name: &str, len: usize) -> Result<Vec<i64>, MlxError> {
+    match n.int_arrays.get(name) {
+        Some(values) if values.len() == len => Ok(values.clone()),
+        Some(values) => Err(format!(
+            "MLX Scan: {name} has {} values, expected {len}",
+            values.len()
+        )),
+        None => Ok(vec![0; len]),
     }
-    v.iter().all(|&x| x == 0)
 }
 
 // ---- If -----------------------------------------------------------------------------------------
@@ -159,30 +168,92 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         scans.push(ctx.resolve(&n.inputs[num_state + i])?);
     }
 
-    let s0 = ctx.shape_of(scans[0]);
-    if s0.is_empty() {
-        return Err("MLX Scan: scan input is a scalar".to_string());
-    }
-    let trip = s0[0];
-
     let num_scan_out = body.output_names.len() as i64 - num_state as i64;
     if num_scan_out < 0 {
         return Err("MLX Scan: body output arity".to_string());
     }
     let num_scan_out = num_scan_out as usize;
+    let input_axes = scan_attr(n, "scan_input_axes", num_scan)?;
+    let input_directions = scan_attr(n, "scan_input_directions", num_scan)?;
+    let output_axes = scan_attr(n, "scan_output_axes", num_scan_out)?;
+    let output_directions = scan_attr(n, "scan_output_directions", num_scan_out)?;
+
+    let scan_shapes: Vec<Vec<i32>> = scans.iter().map(|&scan| ctx.shape_of(scan)).collect();
+    let scan_axes: Vec<usize> = input_axes
+        .iter()
+        .zip(&scan_shapes)
+        .map(|(&axis, shape)| {
+            normalized_axis(axis, shape.len()).ok_or_else(|| {
+                format!(
+                    "MLX Scan: input axis {axis} invalid for rank {}",
+                    shape.len()
+                )
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    let trip = scan_shapes[0][scan_axes[0]];
+    if scan_shapes
+        .iter()
+        .zip(&scan_axes)
+        .any(|(shape, &axis)| shape[axis] != trip)
+    {
+        return Err("MLX Scan: scan input sequence lengths differ".to_string());
+    }
+
+    if trip == 0 {
+        for (o, &s) in n.outputs[..num_state].iter().zip(&state[..num_state]) {
+            ctx.bind(o, s);
+        }
+        if num_scan_out == 0 {
+            return Ok(());
+        }
+        // Infer each body output's element shape from one symbolic dummy iteration, then construct
+        // the required zero-length accumulated output. The dummy graph is never bound or evaluated.
+        let mut bin = state.clone();
+        for (i, &scan) in scans.iter().enumerate() {
+            let mut element_shape = scan_shapes[i].clone();
+            element_shape.remove(scan_axes[i]);
+            let dtype = ctx.dtype_of(scan);
+            bin.push(ctx.zeros(&element_shape, dtype)?);
+        }
+        let templates = ctx.run_subgraph(&body, &bin)?;
+        for i in 0..num_scan_out {
+            let template = templates[num_state + i];
+            let mut shape = ctx.shape_of(template);
+            let axis = normalized_axis(output_axes[i], shape.len() + 1).ok_or_else(|| {
+                format!(
+                    "MLX Scan: output axis {} invalid for rank {}",
+                    output_axes[i],
+                    shape.len() + 1
+                )
+            })?;
+            shape.insert(axis, 0);
+            let dtype = ctx.dtype_of(template);
+            let empty = ctx.zeros(&shape, dtype)?;
+            ctx.bind(&n.outputs[num_state + i], empty);
+        }
+        return Ok(());
+    }
+
     let mut collected: Vec<Vec<mlx::mlx_array>> = vec![Vec::new(); num_scan_out];
 
     for t in 0..trip {
         let mut bin: Vec<mlx::mlx_array> = Vec::with_capacity(num_state + num_scan);
         bin.extend_from_slice(&state[..num_state]);
-        for scan in &scans[..num_scan] {
-            let shp = ctx.shape_of(*scan);
+        for (i, scan) in scans[..num_scan].iter().enumerate() {
+            let shp = &scan_shapes[i];
+            let axis = scan_axes[i];
+            let index = if input_directions[i] == 0 {
+                t
+            } else {
+                trip - 1 - t
+            };
             let mut start = vec![0i32; shp.len()];
             let mut stop = shp.clone();
-            start[0] = t;
-            stop[0] = t + 1;
+            start[axis] = index;
+            stop[axis] = index + 1;
             let sl = ctx.slice(*scan, &start, &stop)?;
-            let sq = ctx.squeeze(sl, 0)?;
+            let sq = ctx.squeeze(sl, axis as i32)?;
             bin.push(sq);
         }
         let bout = ctx.run_subgraph(&body, &bin)?;
@@ -199,7 +270,22 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         ctx.bind(o, s);
     }
     for (i, coll) in collected.iter().enumerate() {
-        let stacked = ctx.stack(coll, 0)?;
+        if coll.is_empty() {
+            return Err("MLX Scan: cannot stack an empty scan output".to_string());
+        }
+        let rank = ctx.shape_of(coll[0]).len() + 1;
+        let axis = normalized_axis(output_axes[i], rank).ok_or_else(|| {
+            format!(
+                "MLX Scan: output axis {} invalid for rank {rank}",
+                output_axes[i]
+            )
+        })?;
+        let parts: Vec<mlx::mlx_array> = if output_directions[i] == 0 {
+            coll.clone()
+        } else {
+            coll.iter().rev().copied().collect()
+        };
+        let stacked = ctx.stack(&parts, axis as i32)?;
         ctx.bind(&n.outputs[num_state + i], stacked);
     }
     Ok(())
@@ -218,34 +304,60 @@ fn scan_claim(node: &NodeView) -> ClaimResult {
     let num_state = ninputs as i64 - num_scan;
     require!(num_state >= 0, "num_scan_inputs exceeds input count");
 
+    let read_attr = |name: &str, len: usize| -> Result<Vec<i64>, String> {
+        let (present, values) = node.ints_attr(name);
+        if !present {
+            return Ok(vec![0; len]);
+        }
+        if values.len() != len {
+            return Err(format!(
+                "{name} has {} values, expected {len}",
+                values.len()
+            ));
+        }
+        Ok(values)
+    };
+    let input_axes = read_attr("scan_input_axes", num_scan as usize)?;
+    let input_directions = read_attr("scan_input_directions", num_scan as usize)?;
     require!(
-        all_zero_ints_attr(node, "scan_input_directions"),
-        "only forward scan_input_directions are supported"
-    );
-    require!(
-        all_zero_ints_attr(node, "scan_output_directions"),
-        "only forward scan_output_directions are supported"
-    );
-    require!(
-        all_zero_ints_attr(node, "scan_input_axes"),
-        "only scan_input_axes=0 is supported"
-    );
-    require!(
-        all_zero_ints_attr(node, "scan_output_axes"),
-        "only scan_output_axes=0 is supported"
+        input_directions.iter().all(|&v| v == 0 || v == 1),
+        "scan_input_directions values must be 0 or 1"
     );
 
-    for i in num_state..ninputs as i64 {
+    let mut trip = None;
+    for (scan_index, i) in (num_state..ninputs as i64).enumerate() {
         let info = match node.input_info(i as usize) {
             Some(info) => info,
             None => deny!("scan input {} lacks tensor type/shape info", i),
         };
+        let axis = match normalized_axis(input_axes[scan_index], info.shape.len()) {
+            Some(axis) => axis,
+            None => deny!(
+                "scan input {} axis {} is invalid for rank {}",
+                i,
+                input_axes[scan_index],
+                info.shape.len()
+            ),
+        };
         require!(
-            !info.shape.is_empty() && info.shape[0] >= 1,
-            "scan input {} must have a statically known non-empty axis 0, got shape {:?}",
+            info.shape[axis] == -1 || info.shape[axis] >= 1,
+            "scan input {} axis {} must be non-empty or dynamic, got shape {:?}",
             i,
+            input_axes[scan_index],
             info.shape
         );
+        if info.shape[axis] >= 1 {
+            if let Some(expected) = trip {
+                require!(
+                    info.shape[axis] == expected,
+                    "scan inputs must have equal known sequence lengths, got {} and {}",
+                    expected,
+                    info.shape[axis]
+                );
+            } else {
+                trip = Some(info.shape[axis]);
+            }
+        }
     }
 
     let subs = node.subgraphs();
@@ -276,6 +388,30 @@ fn scan_claim(node: &NodeView) -> ClaimResult {
         body_claimable(body),
         "body contains an unclaimable operation"
     );
+    let num_scan_out = body.output_names().len() - num_state as usize;
+    let output_axes_present = node.ints_attr("scan_output_axes").0;
+    let output_axes = read_attr("scan_output_axes", num_scan_out)?;
+    let output_directions = read_attr("scan_output_directions", num_scan_out)?;
+    require!(
+        output_directions.iter().all(|&v| v == 0 || v == 1),
+        "scan_output_directions values must be 0 or 1"
+    );
+    if output_axes_present {
+        for (i, &axis) in output_axes.iter().enumerate() {
+            let output_index = num_state as usize + i;
+            let info = match node.output_info(output_index) {
+                Some(info) => info,
+                None => deny!("scan output {} lacks tensor type/shape info", output_index),
+            };
+            require!(
+                normalized_axis(axis, info.shape.len()).is_some(),
+                "scan output {} axis {} is invalid for rank {}",
+                output_index,
+                axis,
+                info.shape.len()
+            );
+        }
+    }
     Ok(())
 }
 

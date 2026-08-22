@@ -1125,48 +1125,62 @@ unsafe fn build_plan(
         // dependency), so a reshape/expand/slice/range target built from it can be eval'd mid-trace
         // and used as a static shape. `nodes` are topologically ordered (producers precede consumers).
         {
-            let mut sc: std::collections::HashSet<String> = initializers.keys().cloned().collect();
-            let is_random = |op: &str| {
-                matches!(
-                    op,
-                    "RandomNormal"
-                        | "RandomUniform"
-                        | "RandomNormalLike"
-                        | "RandomUniformLike"
-                        | "Bernoulli"
-                        | "Multinomial"
-                        | "Dropout"
-                )
-            };
-            for nd in nodes.iter_mut() {
-                for tr in nd.inputs.iter_mut() {
-                    if !tr.name.is_empty() && sc.contains(&tr.name) {
-                        tr.shape_const = true;
-                    }
-                }
-                let input_const = |tr: &TensorRef| {
-                    matches!(tr.source, Src::Absent | Src::Initializer)
-                        || tr.constant
-                        || tr.shape_const
+            fn mark_shape_constants(nodes: &mut [NodeDesc], inherited: &HashSet<String>) {
+                let mut sc = inherited.clone();
+                let is_random = |op: &str| {
+                    matches!(
+                        op,
+                        "RandomNormal"
+                            | "RandomUniform"
+                            | "RandomNormalLike"
+                            | "RandomUniformLike"
+                            | "Bernoulli"
+                            | "Multinomial"
+                            | "Dropout"
+                    )
                 };
-                let out_const = nd.subgraphs.is_empty()
-                    && (matches!(nd.op_type.as_str(), "Shape" | "Size")
-                        || (!is_random(&nd.op_type) && nd.inputs.iter().all(input_const)));
-                if out_const {
-                    for o in &nd.outputs {
-                        if !o.name.is_empty() {
-                            sc.insert(o.name.clone());
+                for nd in nodes.iter_mut() {
+                    for tr in nd.inputs.iter_mut() {
+                        if !tr.name.is_empty() && sc.contains(&tr.name) {
+                            tr.shape_const = true;
+                        }
+                    }
+                    for sg in &mut nd.subgraphs {
+                        let mut inner = sc.clone();
+                        for name in &sg.input_names {
+                            inner.remove(name);
+                        }
+                        for body_node in &sg.nodes {
+                            for output in &body_node.outputs {
+                                inner.remove(&output.name);
+                            }
+                        }
+                        mark_shape_constants(&mut sg.nodes, &inner);
+                    }
+                    let input_const = |tr: &TensorRef| {
+                        matches!(tr.source, Src::Absent | Src::Initializer)
+                            || tr.constant
+                            || tr.shape_const
+                    };
+                    let out_const = nd.subgraphs.is_empty()
+                        && (matches!(nd.op_type.as_str(), "Shape" | "Size")
+                            || (!is_random(&nd.op_type) && nd.inputs.iter().all(input_const)));
+                    if out_const {
+                        for o in &nd.outputs {
+                            if !o.name.is_empty() {
+                                sc.insert(o.name.clone());
+                            }
                         }
                     }
                 }
             }
+            let sc: HashSet<String> = initializers.keys().cloned().collect();
+            mark_shape_constants(&mut nodes, &sc);
         }
 
-        // Compiled-decode fast path (mlx_compile) is allowed unless a real control-flow node is
-        // present (its graph structure depends on runtime data) or the kill-switch env is set.
-        // Function-backed contrib ops may also expose a static body through Node_GetSubgraphs; that
-        // body is metadata for a fixed op contract, not runtime control flow, and must not disable
-        // whole-decoder compilation.
+        // Decode/prefill keep control flow out of their specialized KV-cache routes. The general
+        // route can compile the static forms claimed by this EP: Scan is shape-specialized, while
+        // If and Loop are explicitly specialized on their host-readable scalar decisions.
         fn any_control_flow(nodes: &[NodeDesc]) -> bool {
             nodes.iter().any(|n| {
                 matches!(n.op_type.as_str(), "If" | "Loop" | "Scan" | "SequenceMap")
@@ -1183,11 +1197,15 @@ unsafe fn build_plan(
                     || n.subgraphs.iter().any(|sg| has_compile_barrier(&sg.nodes))
             })
         }
-        let has_control_flow = any_control_flow(&nodes) || has_compile_barrier(&nodes);
+        let has_control_flow = any_control_flow(&nodes);
+        let has_compile_barrier = has_compile_barrier(&nodes);
         let mut plan = Plan::new(nodes);
-        plan.compiled.enabled = crate::compiled::compile_enabled(has_control_flow);
-        plan.prefill.enabled = crate::compiled::prefill_enabled(has_control_flow, &plan.nodes);
-        plan.general.enabled = crate::compiled::general_enabled(has_control_flow, &plan.nodes);
+        plan.compiled.enabled =
+            crate::compiled::compile_enabled(has_control_flow || has_compile_barrier);
+        plan.prefill.enabled =
+            crate::compiled::prefill_enabled(has_control_flow || has_compile_barrier, &plan.nodes);
+        plan.general.enabled = crate::compiled::general_enabled(has_compile_barrier, &plan.nodes);
+        plan.general.control_flow_specialization_enabled = has_control_flow;
         Ok(plan)
     }
 }
@@ -2050,9 +2068,9 @@ unsafe fn compute_impl(
             }
         }
 
-        // General compiled fast path: trace + fuse ANY claimed static-shape subgraph (CNN / audio)
-        // into a shape-keyed compiled closure and replay it. Declines (=> eager) for attention /
-        // control-flow subgraphs and on any trace/apply doubt.
+        // General compiled fast path: trace + fuse any claimed static-shape subgraph (CNN / audio /
+        // supported control flow) into a shape-keyed closure and replay it. Static Scan unrolls by
+        // shape; If/Loop add a host-decision specialization key. Declines on any trace/apply doubt.
         if (*plan_ptr).general.enabled {
             let pre_valid = (*plan_ptr).general.valid;
             match crate::compiled::try_compiled(plan_ptr, Slot::General, info.ort_api, kctx, stream)
@@ -2066,7 +2084,15 @@ unsafe fn compute_impl(
                     // Shape key from the primary dynamic input so a changed audio/frame size shows as
                     // a RETRACE (only read when observability is active).
                     let key = if tr.active() {
-                        compute_shape_key(info.ort_api, kctx)
+                        let mut key =
+                            compute_shape_key(info.ort_api, kctx, &(*plan_ptr).general.dyn_inputs);
+                        if let Some(control) = &(*plan_ptr).general.control_flow_key
+                            && !control.is_empty()
+                        {
+                            key.push('|');
+                            key.push_str(control);
+                        }
+                        key
                     } else {
                         String::new()
                     };
@@ -2107,17 +2133,26 @@ unsafe fn compute_impl(
     }
 }
 
-/// A cheap shape key from the primary (index-0) dynamic ctx input, used to classify a shape-keyed
-/// general-subgraph Compute as HIT vs RETRACE. Best-effort: an empty string when the input can't be
-/// read. Only called when observability is active.
+/// Shape/dtype key for every dynamic closure input, used to classify a shape-keyed general Compute
+/// as HIT vs RETRACE. Best-effort: inputs that cannot be read are omitted. Only called when
+/// observability is active.
 unsafe fn compute_shape_key(
     ort_api: *const ort::OrtApi,
     kctx: *mut ort::OrtKernelContext,
+    inputs: &[crate::engine::DynInput],
 ) -> String {
-    match crate::engine::read_ctx_input_raw(ort_api, kctx, 0) {
-        Ok((_data, shape, _dtype)) => format!("{shape:?}"),
-        Err(_) => String::new(),
+    let mut key = String::new();
+    for input in inputs {
+        if let Ok((_data, shape, dtype)) =
+            crate::engine::read_ctx_input_raw(ort_api, kctx, input.ctx_index)
+        {
+            if !key.is_empty() {
+                key.push(';');
+            }
+            key.push_str(&format!("{}:{dtype:?}:{shape:?}", input.ctx_index));
+        }
     }
+    key
 }
 
 unsafe extern "C" fn release_node_compute_infos(

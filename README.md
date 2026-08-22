@@ -147,6 +147,14 @@ Feed-forward encoders (audio / CNN / vision) are the EP's sweet spot: the whole 
 single MLX closure that is traced + `mlx_compile`d once and replayed, so a static-shape model runs
 end-to-end on the GPU with one dispatch (e.g. Perch: 725/725 nodes claimed, 1 fused subgraph).
 
+Supported control flow stays inside that compiled boundary. `Scan` bodies are shape-specialized and
+unrolled at trace time (including dynamic sequence dimensions), with per-input/per-output axes and
+forward/reverse directions; carried-state `Loop` bodies are also unrolled. Host-readable `If`
+branches and `Loop` trip counts are specialized and cached per decision (capped at 16 variants per
+session; additional variants run eager), so surrounding tensor ops and the selected body replay as
+one MLX closure. Data-dependent conditions, early-exit loops, and loop scan outputs remain on ORT
+CPU.
+
 Eligible BF16 INT4/INT8 prefill matmuls (block size 32/64/128, at least 32 rows) explicitly use stock
 MLX's FP16 compute path by default. Set `ONNXRUNTIME_EP_MLX_BF16_QMM_FP16=0` to disable it.
 

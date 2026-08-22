@@ -649,20 +649,55 @@ fn slice_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
     let mut start = vec![0i32; rank];
     let mut stop = shape.clone();
     let mut stride = vec![1i32; rank];
+    let mut reverse_axes: Vec<(usize, i64, i64, i64)> = Vec::new();
     for i in 0..starts.len() {
         let ax = norm_axis(axes[i], rank as i32) as usize;
         let dim = shape[ax] as i64;
-        let s = if starts[i] < 0 {
-            starts[i] + dim
+        let step = steps[i];
+        if step == 0 {
+            return Err("MLX Slice: step must not be zero".to_string());
+        }
+        let step_i32 = i32::try_from(step)
+            .map_err(|_| format!("MLX Slice: step {step} exceeds the MLX int32 index range"))?;
+        let (s, e) = if step > 0 {
+            let s = if starts[i] < 0 {
+                starts[i].saturating_add(dim)
+            } else {
+                starts[i]
+            };
+            let e = if ends[i] < 0 {
+                ends[i].saturating_add(dim)
+            } else {
+                ends[i]
+            };
+            (clamp_i64(s, 0, dim), clamp_i64(e, 0, dim))
         } else {
-            starts[i]
+            let s = if starts[i] < 0 {
+                starts[i].saturating_add(dim)
+            } else {
+                starts[i]
+            };
+            let e = if ends[i] < 0 {
+                ends[i].saturating_add(dim)
+            } else {
+                ends[i]
+            };
+            (clamp_i64(s, 0, dim - 1), clamp_i64(e, -1, dim - 1))
         };
-        let e = if ends[i] < 0 { ends[i] + dim } else { ends[i] };
-        start[ax] = clamp_i64(s, 0, dim) as i32;
-        stop[ax] = clamp_i64(e, 0, dim) as i32;
-        stride[ax] = steps[i] as i32;
+        start[ax] = s as i32;
+        stop[ax] = e as i32;
+        if step > 0 {
+            stride[ax] = step_i32;
+        } else {
+            // MLX's slice wrapper re-normalizes a stop of -1, so it cannot represent ONNX's
+            // reverse sentinel directly. Apply all forward axes as one view, then gather an
+            // explicit descending index vector for each reverse axis.
+            start[ax] = 0;
+            stop[ax] = shape[ax];
+            reverse_axes.push((ax, s, e, step));
+        }
     }
-    let r = ctx.emit(|res, s| unsafe {
+    let mut r = ctx.emit(|res, s| unsafe {
         mlx::mlx_slice(
             res,
             data,
@@ -675,7 +710,14 @@ fn slice_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
             s,
         )
     })?;
-    // Slice is a zero-copy strided view; contiguous is deferred to the output boundary.
+    for (axis, s, e, step) in reverse_axes {
+        let indices = ctx.arange(s as f64, e as f64, step as f64, mlx::mlx_dtype__MLX_INT32)?;
+        r = ctx.emit(|res, stream| unsafe {
+            mlx::mlx_take_axis(res, r, indices, axis as i32, stream)
+        })?;
+    }
+    // Forward Slice is a zero-copy strided view; reverse axes use explicit gathers above.
+    // Contiguous materialization is otherwise deferred to the output boundary.
     ctx.bind(&n.outputs[0], r);
     Ok(())
 }
@@ -1775,8 +1817,12 @@ fn slice_claim(node: &NodeView) -> ClaimResult {
         match node.read_const_int64(4) {
             Some(steps) => {
                 require!(
-                    steps.iter().all(|&st| st >= 1),
-                    "Slice: negative/zero `steps` (reverse or strided slicing) are unsupported — left to CPU"
+                    steps.iter().all(|&st| st != 0),
+                    "Slice: `steps` values must not be zero"
+                );
+                require!(
+                    steps.iter().all(|&st| i32::try_from(st).is_ok()),
+                    "Slice: `steps` values must fit in int32 for MLX"
                 );
             }
             None => deny!(
