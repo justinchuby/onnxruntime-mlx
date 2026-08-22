@@ -182,7 +182,7 @@ _EXCLUDE = [
     r"^test_top_k_uint64_cpu$",
     # ImageDecoder(20): ORT 1.27 CPU has no kernel (NOT_IMPLEMENTED); needs image codec libs.
     r"^test_image_decoder_",
-    # Range: the reference models are stamped opset 27 (ai.onnx official support in ORT 1.27 is
+    # Range: the reference models are stamped opset 27 (ai.onnx official support in ORT 1.29 is
     # opset 26), so ORT refuses to load them regardless of element type.
     r"^test_range_.*_type_.*_delta(_expanded)?_cpu$",
     # Legacy opset-6 Add with Caffe2 broadcast attrs (pytorch-converted): ORT removed the

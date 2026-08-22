@@ -26,7 +26,7 @@ jobs:
     name: onnx-tests vs MLX EP (macOS arm64)
     runs-on: macos-14
     env:
-      ORT_VERSION: "1.27.0"
+      ORT_VERSION: "1.29.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -59,12 +59,12 @@ jobs:
           curl -fsSL https://pixi.sh/install.sh | bash
           echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
 
-      - name: Clone + install onnx-tests (sibling), pin onnxruntime 1.27
+      - name: Clone + install onnx-tests (sibling), pin onnxruntime 1.29
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/cbourjau/onnx-tests ../onnx-tests
           (cd ../onnx-tests && pixi run postinstall)
-          # The EP needs ORT_API_VERSION 27; the pixi env ships an older ort.
+          # The EP needs ORT_API_VERSION 29; the pixi env ships an older ort.
           (cd ../onnx-tests && pixi run python -m pip install "onnxruntime==${ORT_VERSION}")
 
       - name: Run bounded conformance subset (pytest-driven)

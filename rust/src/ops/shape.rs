@@ -9,6 +9,8 @@
 //! contiguous before the shared CopyOut memcpy. Zero-size results (Pad/Expand) are re-materialised as
 //! clean zeros arrays rather than rejected to CPU.
 
+use half::{bf16, f16};
+
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext, dim_i32, mlx_dtype_from_onnx};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
@@ -822,7 +824,42 @@ fn range_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
     let limit = read_range_scalar(ctx, n, 1)?;
     let delta = read_range_scalar(ctx, n, 2)?;
     let dt = mlx_dtype_from_onnx(n.outputs[0].otype);
-    let r = ctx.emit(|res, s| unsafe { mlx::mlx_arange(res, start, limit, delta, dt, s) })?;
+    let double_stash = (dt == mlx::mlx_dtype__MLX_FLOAT16 || dt == mlx::mlx_dtype__MLX_BFLOAT16)
+        && n.ints.get("stash_type").copied().unwrap_or(1) == 11;
+    if double_stash {
+        let count = ((limit - start) / delta).ceil().max(0.0) as usize;
+        let values: Vec<u16> = (0..count)
+            .map(|i| {
+                let value = start + i as f64 * delta;
+                if dt == mlx::mlx_dtype__MLX_FLOAT16 {
+                    f16::from_f64(value).to_bits()
+                } else {
+                    bf16::from_f64(value).to_bits()
+                }
+            })
+            .collect();
+        let array = Array::from_data(
+            values.as_ptr() as *const std::os::raw::c_void,
+            &[count as i32],
+            dt,
+        );
+        array.eval();
+        let out = ctx.keep(array);
+        ctx.bind(&n.outputs[0], out);
+        return Ok(());
+    }
+    let compute_dt = if dt == mlx::mlx_dtype__MLX_FLOAT16 || dt == mlx::mlx_dtype__MLX_BFLOAT16 {
+        mlx::mlx_dtype__MLX_FLOAT32
+    } else {
+        dt
+    };
+    let r =
+        ctx.emit(|res, s| unsafe { mlx::mlx_arange(res, start, limit, delta, compute_dt, s) })?;
+    let r = if compute_dt == dt {
+        r
+    } else {
+        ctx.astype(r, dt)?
+    };
     ctx.bind(&n.outputs[0], r);
     Ok(())
 }
@@ -852,6 +889,15 @@ fn read_range_scalar(
         }
         t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => {
             Ok(unsafe { *(h.data as *const i64) } as f64)
+        }
+        t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => {
+            Ok(unsafe { *(h.data as *const f32) } as f64)
+        }
+        t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => {
+            Ok(f16::from_bits(unsafe { *(h.data as *const u16) }).to_f64())
+        }
+        t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16 => {
+            Ok(bf16::from_bits(unsafe { *(h.data as *const u16) }).to_f64())
         }
         _ => Err("Range initializer dtype is not supported".to_string()),
     }
@@ -1920,7 +1966,7 @@ fn range_claim(node: &NodeView) -> ClaimResult {
     let ty = match node.input_info(0) {
         Some(i) if is_range_type(i.dtype) => i.dtype,
         Some(i) => deny!(
-            "Range: start dtype {} unsupported (only int32/int64/fp32 range types are claimed)",
+            "Range: start dtype {} unsupported",
             crate::registry::ort_dtype_name(i.dtype)
         ),
         None => deny!("missing `start` tensor type/shape info"),
@@ -1950,6 +1996,18 @@ fn range_claim(node: &NodeView) -> ClaimResult {
         ),
     };
     require!(delta != 0.0, "Range: `delta` must be non-zero");
+    if node.since_version() >= 27
+        && (ty == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16
+            || ty == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16)
+    {
+        let stash = node.int_attr("stash_type", 1);
+        require!(
+            stash == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT as i64
+                || stash
+                    == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE as i64,
+            "Range-27 fp16/bf16 stash_type must be FLOAT or DOUBLE"
+        );
+    }
     let count = ((limit - start) / delta).ceil().max(0.0);
     require!(
         count.is_finite() && count <= i32::MAX as f64,

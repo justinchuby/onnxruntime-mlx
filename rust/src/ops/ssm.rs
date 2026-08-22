@@ -6,7 +6,7 @@
 //!     GQA) via static-length unrolling over the time axis T.
 //!     Only statically translatable, MLX-supported forms are claimed; the rest fall to ORT CPU.
 
-use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
+use crate::engine::{MlxError, NodeDesc, Src, TranslationContext, mlx_dtype_from_onnx};
 use crate::registry::{
     ClaimPredicate, ClaimResult, K_ANY_OPSET, NodeView, OpHandler, OpRegistration, OpRegistry,
     is_mlx_float,
@@ -569,12 +569,19 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
         .ints
         .get("kv_num_heads")
         .ok_or("MLX LinearAttention: kv_num_heads missing")? as i32;
-    let gqa = h / hq;
 
     let query = ctx.resolve(&n.inputs[0])?; // (B, T, Hq*d_k)
-    let key = ctx.resolve(&n.inputs[1])?; // (B, T, Hq*d_k)
+    let key = ctx.resolve(&n.inputs[1])?; // (B, T, Hk*d_k)
     let value = ctx.resolve(&n.inputs[2])?; // (B, T, H*d_v)
     let dt = ctx.dtype_of(query);
+    let state_dt = if present(n, 3) {
+        let past = ctx.resolve(&n.inputs[3])?;
+        ctx.dtype_of(past)
+    } else if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
+        mlx_dtype_from_onnx(n.outputs[1].otype)
+    } else {
+        dt
+    };
 
     let qsh = ctx.shape_of(query);
     let vsh = ctx.shape_of(value);
@@ -592,6 +599,11 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     }
     let d_k = qsh[2] / hq;
     let d_v = vsh[2] / h;
+    let n_k_heads = ctx.shape_of(key)[2] / d_k;
+    if n_k_heads <= 0 || h % n_k_heads != 0 {
+        return Err("MLX LinearAttention: kv_num_heads must be divisible by key heads".to_string());
+    }
+    let output_heads = hq.max(h);
 
     let scale_attr = n.floats.get("scale").copied().unwrap_or(0.0);
     let scale = if scale_attr != 0.0 {
@@ -604,13 +616,13 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     let mut state = if has_past {
         ctx.resolve(&n.inputs[3])?
     } else {
-        ctx.zeros(&[b, h, d_k, d_v], dt)?
+        ctx.zeros(&[b, h, d_k, d_v], state_dt)?
     };
 
     // Zero-length time axis: no steps run. output empty; present_state == state.
     if t_len == 0 {
         if !n.outputs.is_empty() && !n.outputs[0].name.is_empty() {
-            let z = ctx.zeros(&[b, 0, h * d_v], dt)?;
+            let z = ctx.zeros(&[b, 0, output_heads * d_v], dt)?;
             ctx.bind(&n.outputs[0], z);
         }
         if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
@@ -629,12 +641,19 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
         let r = ctx.reshape(a, &[b, t_len, heads, last])?;
         ctx.transpose(r, &[0, 2, 1, 3])
     };
+    let query = ctx.astype(query, state_dt)?;
+    let key = ctx.astype(key, state_dt)?;
+    let value = ctx.astype(value, state_dt)?;
     let q_heads = to_heads(ctx, query, hq, d_k)?;
-    let q4 = repeat_axis(ctx, q_heads, gqa, 1)?; // (B, H, T, d_k)
-    let k_heads = to_heads(ctx, key, hq, d_k)?;
-    let k4 = repeat_axis(ctx, k_heads, gqa, 1)?; // (B, H, T, d_k)
+    let q4 = if hq < h {
+        repeat_axis(ctx, q_heads, h / hq, 1)? // inverse GQA: one Q head serves multiple KV states
+    } else {
+        q_heads
+    };
+    let k_heads = to_heads(ctx, key, n_k_heads, d_k)?;
+    let k4 = repeat_axis(ctx, k_heads, h / n_k_heads, 1)?; // each K head serves one or more KV states
     let v4 = to_heads(ctx, value, h, d_v)?; // (B, H, T, d_v)
-    let scale_s = la_scalar(ctx, scale, dt)?;
+    let scale_s = la_scalar(ctx, scale, state_dt)?;
     let q4 = ctx.mul(q4, scale_s)?; // scaled query
 
     // Decay may be per-head-per-key-dim `[B,T,H*d_k]` (the op-test / ORT reference form) OR a
@@ -650,14 +669,22 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     } else if decay_per_head_scalar {
         // [B,T,H] -> [B,H,T]
         let d = ctx.resolve(&n.inputs[4])?;
+        let d = ctx.astype(d, state_dt)?;
         Some(ctx.transpose(d, &[0, 2, 1])?)
     } else {
         let d = ctx.resolve(&n.inputs[4])?;
+        let d = ctx.astype(d, state_dt)?;
         Some(to_heads(ctx, d, h, d_k)?)
     };
     let beta3 = if uses_beta {
         let bta = ctx.resolve(&n.inputs[5])?;
-        Some(ctx.transpose(bta, &[0, 2, 1])?)
+        let bta = ctx.astype(bta, state_dt)?;
+        let beta = ctx.transpose(bta, &[0, 2, 1])?;
+        Some(if ctx.shape_of(beta)[1] == 1 && h > 1 {
+            repeat_axis(ctx, beta, h, 1)?
+        } else {
+            beta
+        })
     } else {
         None
     };
@@ -670,7 +697,12 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     // diverges from ORT CPU (verified: ~1e-1..1e1 abs error at T>=128), so it stays on the stable
     // recurrent path — as do `linear` / `gated` (no delta correction) and the per-key-dim decay
     // layout. Decode / small T (t_len <= chunk_size) also stay recurrent (best for T == 1).
-    let use_chunked = rule == "gated_delta" && decay_per_head_scalar && t_len > CHUNK_SIZE;
+    let use_chunked = rule == "gated_delta"
+        && decay_per_head_scalar
+        && t_len > CHUNK_SIZE
+        && hq == h
+        && n_k_heads == h
+        && state_dt == dt;
     if use_chunked {
         let g_bht = decay4.expect("gated_delta carries decay"); // [B,H,T] scalar decay
         let beta_bht = beta3.expect("gated_delta carries beta"); // [B,H,T]
@@ -715,21 +747,27 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
         let outer = ctx.matmul(k_col, delta_row)?;
         state = ctx.add(state, outer)?;
 
-        let q_t = time_slab(ctx, q4, t, b, h, d_k)?; // (B, H, d_k)
+        let readout_state = if hq > h {
+            repeat_axis(ctx, state, hq / h, 1)?
+        } else {
+            state
+        };
+        let q_t = time_slab(ctx, q4, t, b, output_heads, d_k)?;
         let q_row = ctx.expand_dims(q_t, 2)?; // (B,H,1,d_k)
-        let out_m = ctx.matmul(q_row, state)?; // (B,H,1,d_v)
+        let out_m = ctx.matmul(q_row, readout_state)?; // (B,Hout,1,d_v)
         let out_t = ctx.squeeze(out_m, 2)?; // (B,H,d_v)
         outs.push(out_t);
     }
 
     if !n.outputs.is_empty() && !n.outputs[0].name.is_empty() {
         // Assemble output (B, T, H*d_v): each step's (B, H, d_v) reshapes to (B, 1, H*d_v).
-        let mut out = ctx.reshape(outs[0], &[b, 1, h * d_v])?;
+        let mut out = ctx.reshape(outs[0], &[b, 1, output_heads * d_v])?;
         for &step_out in outs.iter().skip(1) {
-            let slab = ctx.reshape(step_out, &[b, 1, h * d_v])?;
+            let slab = ctx.reshape(step_out, &[b, 1, output_heads * d_v])?;
             out = ctx.concat2(out, slab, 1)?;
         }
         let out = ctx.contiguous(out)?;
+        let out = ctx.astype(out, dt)?;
         ctx.bind(&n.outputs[0], out);
     }
     if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
@@ -739,7 +777,7 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     Ok(())
 }
 
-fn linear_attention_claim(node: &NodeView) -> ClaimResult {
+fn linear_attention_common_claim(node: &NodeView, allow_mixed_state: bool) -> ClaimResult {
     require!(
         node.num_inputs() >= 3 && node.num_outputs() >= 1,
         "expects at least 3 inputs and 1 output, got {}in/{}out",
@@ -751,8 +789,8 @@ fn linear_attention_claim(node: &NodeView) -> ClaimResult {
     let hq = node.int_attr("q_num_heads", 0);
     let h = node.int_attr("kv_num_heads", 0);
     require!(
-        hq > 0 && h > 0 && h % hq == 0,
-        "q_num_heads and kv_num_heads must be positive with kv divisible by q, got q={hq}, kv={h}"
+        hq > 0 && h > 0 && (hq % h == 0 || h % hq == 0),
+        "q_num_heads and kv_num_heads must be positive and one must divide the other, got q={hq}, kv={h}"
     );
     let (q, k, v) = match (node.input_info(0), node.input_info(1), node.input_info(2)) {
         (Some(a), Some(b), Some(c)) => (a, b, c),
@@ -770,6 +808,22 @@ fn linear_attention_claim(node: &NodeView) -> ClaimResult {
         "query must be rank 3, got shape {:?}",
         q.shape
     );
+    require!(
+        q.shape[2] > 0 && q.shape[2] % hq == 0,
+        "query hidden size must be a positive multiple of q_num_heads"
+    );
+    let d_k = q.shape[2] / hq;
+    require!(
+        k.shape.len() == 3
+            && k.shape[2] > 0
+            && k.shape[2] % d_k == 0
+            && h % (k.shape[2] / d_k) == 0,
+        "key heads inferred from key hidden size must divide kv_num_heads"
+    );
+    require!(
+        v.shape.len() == 3 && v.shape[2] > 0 && v.shape[2] % h == 0,
+        "value hidden size must be a positive multiple of kv_num_heads"
+    );
     // The time dimension may be DYNAMIC (symbolic `[-1]`, as in real Qwen3.5/Qwen3-Next decoder
     // exports): the shape-keyed general trace resolves the concrete extent at trace time, and the
     // handler unrolls over it (with a guard that falls back to eager if it is ever traced shapeless).
@@ -779,11 +833,20 @@ fn linear_attention_claim(node: &NodeView) -> ClaimResult {
         }
         matches!(node.input_info(i), Some(info) if info.dtype == q.dtype)
     };
-    require!(
-        float_ok(3),
-        "past_state dtype must match query dtype {}",
-        crate::registry::ort_dtype_name(q.dtype)
-    );
+    if allow_mixed_state {
+        if node.input_present(3) {
+            require!(
+                matches!(node.input_info(3), Some(info) if is_mlx_float(info.dtype)),
+                "past_state must have an MLX float dtype"
+            );
+        }
+    } else {
+        require!(
+            float_ok(3),
+            "past_state dtype must match query dtype {}",
+            crate::registry::ort_dtype_name(q.dtype)
+        );
+    }
     require!(
         float_ok(4),
         "decay dtype must match query dtype {}",
@@ -801,6 +864,256 @@ fn linear_attention_claim(node: &NodeView) -> ClaimResult {
     require!(
         !rule_uses_beta(&rule) || node.input_present(5),
         "update_rule {rule:?} requires the beta input"
+    );
+    if node.input_present(5) {
+        let beta = node.input_info(5).unwrap();
+        require!(
+            beta.shape.len() == 3
+                && beta.shape[0] == q.shape[0]
+                && beta.shape[1] == q.shape[1]
+                && (beta.shape[2] == 1 || beta.shape[2] == h),
+            "beta must have shape [B,T,1] or [B,T,kv_num_heads]"
+        );
+    }
+    Ok(())
+}
+
+fn linear_attention_claim(node: &NodeView) -> ClaimResult {
+    linear_attention_common_claim(node, false)
+}
+
+fn linear_attention_standard_claim(node: &NodeView) -> ClaimResult {
+    linear_attention_common_claim(node, true)?;
+    let q = node.input_info(0).unwrap();
+    let k = node.input_info(1).unwrap();
+    let v = node.input_info(2).unwrap();
+    let out = node.output_info(0).unwrap();
+    let hq = node.int_attr("q_num_heads", 0);
+    let h = node.int_attr("kv_num_heads", 0);
+    require!(
+        hq % h == 0,
+        "ai.onnx LinearAttention requires q_num_heads divisible by kv_num_heads"
+    );
+    let d_k = q.shape[2] / hq;
+    let d_v = v.shape[2] / h;
+    require!(
+        k.shape[2] == h * d_k,
+        "ai.onnx LinearAttention key must use kv_num_heads heads"
+    );
+    require!(
+        out.shape.len() == 3 && out.shape[2] == hq * d_v,
+        "ai.onnx LinearAttention output must have hidden size q_num_heads*d_v"
+    );
+    if let Some(state_out) = node.output_info(1) {
+        require!(
+            is_mlx_float(state_out.dtype),
+            "ai.onnx LinearAttention present_state must have an MLX float dtype"
+        );
+        if let Some(state_in) = node.input_info(3) {
+            require!(
+                state_out.dtype == state_in.dtype,
+                "present_state dtype must match past_state dtype"
+            );
+        }
+    }
+    Ok(())
+}
+
+// ---- ORT 1.29 fused gates ----------------------------------------------------------------------
+
+fn gated_add_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let y = ctx.resolve(&n.inputs[1])?;
+    let gate = ctx.resolve(&n.inputs[2])?;
+    let scaled = ctx.mul(y, gate)?;
+    let out = ctx.add(x, scaled)?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+fn gated_add_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 3 && node.num_outputs() == 1,
+        "GatedAdd expects 3 inputs and 1 output"
+    );
+    let (x, y, gate, out) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.output_info(0),
+    ) {
+        (Some(x), Some(y), Some(gate), Some(out)) => (x, y, gate, out),
+        _ => deny!("GatedAdd requires typed input/output tensors"),
+    };
+    require!(
+        is_mlx_float(x.dtype)
+            && y.dtype == x.dtype
+            && gate.dtype == x.dtype
+            && out.dtype == x.dtype,
+        "X, Y, gate, and output must share one MLX float dtype"
+    );
+    require!(
+        !x.shape.is_empty() && x.shape.last().is_some_and(|&d| d > 0),
+        "X must have rank >= 1 and a positive static last dimension"
+    );
+    require!(
+        y.shape == x.shape && out.shape == x.shape,
+        "Y and output must have the same shape as X"
+    );
+    let mut gate_shape = x.shape.clone();
+    *gate_shape.last_mut().unwrap() = 1;
+    require!(
+        gate.shape == gate_shape,
+        "gate shape must equal X shape with the last dimension replaced by 1"
+    );
+    Ok(())
+}
+
+fn linear_attention_gate_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let a = ctx.resolve(&n.inputs[0])?;
+    let out_dt = ctx.dtype_of(a);
+    let a32 = ctx.astype(a, mlx::mlx_dtype__MLX_FLOAT32)?;
+    let bias = ctx.resolve(&n.inputs[1])?;
+    let shifted = ctx.add(a32, bias)?;
+    let zero = ctx.zeros_like(shifted)?;
+    let softplus = ctx.binary(mlx::mlx_logaddexp, zero, shifted)?;
+    let scale = ctx.resolve(&n.inputs[2])?;
+    let decay32 = ctx.mul(softplus, scale)?;
+    let decay = ctx.astype(decay32, out_dt)?;
+    ctx.bind(&n.outputs[0], decay);
+
+    if n.outputs.len() > 1 && !n.outputs[1].name.is_empty() {
+        let b = ctx.resolve(&n.inputs[3])?;
+        let b32 = ctx.astype(b, mlx::mlx_dtype__MLX_FLOAT32)?;
+        let beta32 = ctx.unary(mlx::mlx_sigmoid, b32)?;
+        let beta = ctx.astype(beta32, out_dt)?;
+        ctx.bind(&n.outputs[1], beta);
+    }
+    Ok(())
+}
+
+fn linear_attention_gate_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 4 && (1..=2).contains(&node.num_outputs()),
+        "LinearAttentionGate expects 4 input slots and 1-2 outputs"
+    );
+    let a = match node.input_info(0) {
+        Some(a) if is_mlx_float(a.dtype) => a,
+        Some(_) => deny!("a must have an MLX float dtype"),
+        None => deny!("a lacks tensor type/shape info"),
+    };
+    require!(
+        a.shape.len() == 3 && a.shape.iter().all(|&d| d >= 0),
+        "a must be a static rank-3 [B,T,H] tensor"
+    );
+    for idx in [1usize, 2] {
+        let param = match node.input_info(idx) {
+            Some(param) => param,
+            None => deny!("parameter input {idx} lacks tensor type/shape info"),
+        };
+        require!(
+            param.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
+                && param.shape == [a.shape[2]],
+            "dt_bias and decay_scale must be float32 [H]"
+        );
+    }
+    let decay = match node.output_info(0) {
+        Some(decay) => decay,
+        None => deny!("decay output lacks tensor type/shape info"),
+    };
+    require!(
+        decay.dtype == a.dtype && decay.shape == a.shape,
+        "decay output must match a"
+    );
+    if node.output_present(1) {
+        require!(
+            node.input_present(3),
+            "b is required when beta output is requested"
+        );
+        let b = match node.input_info(3) {
+            Some(b) => b,
+            None => deny!("b lacks tensor type/shape info"),
+        };
+        let beta = match node.output_info(1) {
+            Some(beta) => beta,
+            None => deny!("beta output lacks tensor type/shape info"),
+        };
+        require!(
+            b.dtype == a.dtype
+                && b.shape == a.shape
+                && beta.dtype == a.dtype
+                && beta.shape == a.shape,
+            "b and beta must match a"
+        );
+    }
+    Ok(())
+}
+
+fn gated_rms_norm_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let scale = ctx.resolve(&n.inputs[1])?;
+    let gate = ctx.resolve(&n.inputs[2])?;
+    let out_dt = ctx.dtype_of(x);
+    let x_shape = ctx.shape_of(x);
+    let c = ctx.dim(scale, 0);
+    let rows = ctx.size_of(x) as i32 / c;
+
+    let x32 = ctx.astype(x, mlx::mlx_dtype__MLX_FLOAT32)?;
+    let x2 = ctx.reshape(x32, &[rows, c])?;
+    let squared = ctx.mul(x2, x2)?;
+    let mean = ctx.emit(|res, s| unsafe { mlx::mlx_mean_axis(res, squared, 1, true, s) })?;
+    let eps = ctx.scalar_f32(n.floats.get("epsilon").copied().unwrap_or(1e-5));
+    let denom = ctx.add(mean, eps)?;
+    let inv = ctx.unary(mlx::mlx_rsqrt, denom)?;
+    let normalized = ctx.mul(x2, inv)?;
+    let scale32 = ctx.astype(scale, mlx::mlx_dtype__MLX_FLOAT32)?;
+    let normalized = ctx.mul(normalized, scale32)?;
+
+    let gate32 = ctx.astype(gate, mlx::mlx_dtype__MLX_FLOAT32)?;
+    let gate2 = ctx.reshape(gate32, &[rows, c])?;
+    let sigmoid = ctx.unary(mlx::mlx_sigmoid, gate2)?;
+    let silu = ctx.mul(gate2, sigmoid)?;
+    let out32 = ctx.mul(normalized, silu)?;
+    let out = ctx.astype(out32, out_dt)?;
+    let out = ctx.reshape(out, &x_shape)?;
+    ctx.bind(&n.outputs[0], out);
+    Ok(())
+}
+
+fn gated_rms_norm_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 3 && node.num_outputs() == 1,
+        "GatedRMSNorm expects 3 inputs and 1 output"
+    );
+    let (x, scale, gate, out) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.output_info(0),
+    ) {
+        (Some(x), Some(scale), Some(gate), Some(out)) => (x, scale, gate, out),
+        _ => deny!("GatedRMSNorm requires typed input/output tensors"),
+    };
+    require!(
+        is_mlx_float(x.dtype)
+            && scale.dtype == x.dtype
+            && gate.dtype == x.dtype
+            && out.dtype == x.dtype,
+        "X, scale, gate, and Y must share one MLX float dtype"
+    );
+    require!(
+        !x.shape.is_empty() && x.shape.iter().all(|&d| d > 0),
+        "X must have a static positive shape"
+    );
+    require!(
+        gate.shape == x.shape && out.shape == x.shape,
+        "gate and Y must have the same shape as X"
+    );
+    require!(
+        scale.shape.len() == 1
+            && scale.shape[0] > 0
+            && x.shape.last().unwrap() % scale.shape[0] == 0,
+        "scale must be [C] and X's last dimension must be a multiple of C"
     );
     Ok(())
 }
@@ -825,6 +1138,14 @@ pub fn register(registry: &mut OpRegistry) {
         claim: causal_conv_claim as ClaimPredicate,
     });
     registry.register(OpRegistration {
+        domain: "",
+        op_type: "CausalConvWithState",
+        min_opset: 27,
+        max_opset: K_ANY_OPSET,
+        handler: causal_conv_op as OpHandler,
+        claim: causal_conv_claim as ClaimPredicate,
+    });
+    registry.register(OpRegistration {
         domain: "com.microsoft",
         op_type: "LinearAttention",
         min_opset: K_ANY_OPSET,
@@ -832,4 +1153,38 @@ pub fn register(registry: &mut OpRegistry) {
         handler: linear_attention_op as OpHandler,
         claim: linear_attention_claim as ClaimPredicate,
     });
+    registry.register(OpRegistration {
+        domain: "",
+        op_type: "LinearAttention",
+        min_opset: 27,
+        max_opset: K_ANY_OPSET,
+        handler: linear_attention_op as OpHandler,
+        claim: linear_attention_standard_claim as ClaimPredicate,
+    });
+    for (op_type, handler, claim) in [
+        (
+            "GatedAdd",
+            gated_add_op as OpHandler,
+            gated_add_claim as ClaimPredicate,
+        ),
+        (
+            "LinearAttentionGate",
+            linear_attention_gate_op as OpHandler,
+            linear_attention_gate_claim as ClaimPredicate,
+        ),
+        (
+            "GatedRMSNorm",
+            gated_rms_norm_op as OpHandler,
+            gated_rms_norm_claim as ClaimPredicate,
+        ),
+    ] {
+        registry.register(OpRegistration {
+            domain: "com.microsoft",
+            op_type,
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        });
+    }
 }

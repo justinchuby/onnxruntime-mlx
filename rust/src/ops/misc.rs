@@ -149,15 +149,9 @@ fn tfidf_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
                 indexes.len()
             ));
         }
-        if indexes
-            .iter()
-            .any(|&index| index < 0 || index as usize >= w.len())
-        {
-            return Err(
-                "MLX TfIdfVectorizer: weighted ngram_indexes must index the weights array"
-                    .to_string(),
-            );
-        }
+    }
+    if indexes.iter().any(|&index| index < 0) {
+        return Err("MLX TfIdfVectorizer: ngram_indexes must be non-negative".to_string());
     }
     let grams = tfidf_pool(n)?;
     let output_size = indexes.iter().copied().max().unwrap() as usize + 1;
@@ -216,7 +210,7 @@ fn tfidf_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
                         let matches = matches.unwrap();
                         let out_idx = indexes[pool_idx] as usize;
                         let slot = row_output_start + out_idx;
-                        let weight = weights.map_or(1.0, |w| w[out_idx]);
+                        let weight = weights.map_or(1.0, |w| w[pool_idx]);
                         output[slot] = match mode {
                             "TF" => {
                                 let match_f = ctx.astype(matches, F32)?;

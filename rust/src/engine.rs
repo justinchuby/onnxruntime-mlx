@@ -694,6 +694,9 @@ pub struct TranslationContext<'a> {
     /// rows at `offset` need copying back (the rest already alias correct `past` rows). Empty on the
     /// growing path so its copy-out stays a full, bit-for-bit-unchanged memcpy.
     kv_deltas: HashMap<String, DeltaWrite>,
+    /// Evaluated MLX arrays that must be copied back into mutable ORT input buffers for
+    /// side-effecting ops such as PagedAttention's in-place KV-cache update.
+    input_writebacks: Vec<(*mut c_void, mlxsys::mlx_array, usize)>,
     /// True while translating inside the GENERAL compiled-subgraph closure trace. In this mode the
     /// dynamic inputs are shapeless tracer placeholders with no host data, so any mid-graph host eval
     /// (`contiguous_eval` — the host-computed Det/NonZero/Unique ops) is illegal and must fail the
@@ -735,6 +738,7 @@ impl<'a> TranslationContext<'a> {
             compiled_shape_keyed: false,
             compiled_valid_past: 0,
             kv_deltas: HashMap::new(),
+            input_writebacks: Vec::new(),
             in_general_trace: false,
             compiled_kv_present: Vec::new(),
             shape_keyed_compile: false,
@@ -803,6 +807,32 @@ impl<'a> TranslationContext<'a> {
     /// Bind a node output name to a produced MLX array (visible to downstream nodes and CopyOut).
     pub fn bind(&mut self, o: &OutRef, a: mlxsys::mlx_array) {
         self.env.insert(o.name.clone(), a);
+    }
+
+    pub fn write_back_input(
+        &mut self,
+        input: &TensorRef,
+        a: mlxsys::mlx_array,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
+        let a = self.contiguous(a)?;
+        self.env.insert(input.name.clone(), a);
+        match input.source {
+            Src::CtxInput => {
+                let (data, shape, _) = self.read_ctx_input(input.ctx_index)?;
+                let arr = std::mem::ManuallyDrop::new(Array::from_raw(a));
+                let count = shape.iter().try_fold(1usize, |count, &dim| {
+                    usize::try_from(dim)
+                        .ok()
+                        .and_then(|dim| count.checked_mul(dim))
+                        .ok_or_else(|| "MLX: input writeback shape overflow".to_string())
+                })?;
+                self.input_writebacks
+                    .push((data as *mut c_void, a, count * arr.itemsize()));
+            }
+            Src::Intermediate => {}
+            _ => return Err("MLX: cannot write back an immutable input".to_string()),
+        }
+        Ok(a)
     }
 
     /// Emit the per-op trace detail for the node just translated (only when tracing is on).
@@ -1861,6 +1891,9 @@ impl<'a> TranslationContext<'a> {
                     outs.append(casted);
                     ext.push((o.clone(), casted));
                 }
+                for &(_, a, _) in &self.input_writebacks {
+                    outs.append(a);
+                }
             }
         }
         // The single synchronous `mlx_eval` boundary: with tracing on this is wrapped
@@ -1888,6 +1921,12 @@ impl<'a> TranslationContext<'a> {
         tr.sample_gpu_counters();
         for (o, a) in &ext {
             self.copy_out(o, *a)?;
+        }
+        for &(dst, a, bytes) in &self.input_writebacks {
+            let arr = std::mem::ManuallyDrop::new(Array::from_raw(a));
+            unsafe {
+                std::ptr::copy_nonoverlapping(arr.data_bytes(), dst as *mut u8, bytes);
+            }
         }
         Ok(())
     }

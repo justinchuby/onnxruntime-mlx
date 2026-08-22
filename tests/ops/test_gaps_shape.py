@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+
+import ml_dtypes
 import numpy as np
 import onnx_ir as ir
 import onnxruntime as ort
@@ -35,13 +39,14 @@ def _model(
     outputs: list[ir.Value],
     *,
     initializers: list[ir.Value] | None = None,
+    opset: int = 24,
 ) -> bytes:
     graph = ir.Graph(
         inputs,
         outputs,
         nodes=nodes,
         initializers=initializers or [],
-        opset_imports={"": 24},
+        opset_imports={"": opset},
         name="mlx_shape_gaps",
     )
     return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
@@ -54,10 +59,11 @@ def _single(
     *,
     attributes: list[ir.Attr] | None = None,
     initializers: list[ir.Value] | None = None,
+    opset: int = 24,
 ) -> bytes:
     node = ir.node(op_type, inputs, attributes={a.name: a for a in (attributes or [])}, outputs=[output])
     graph_inputs = [value for value in inputs if value.const_value is None]
-    return _model([node], graph_inputs, [output], initializers=initializers)
+    return _model([node], graph_inputs, [output], initializers=initializers, opset=opset)
 
 
 def _assert_matches_cpu_noopt(model: bytes, feeds: dict[str, np.ndarray]) -> None:
@@ -86,6 +92,90 @@ def test_range_constant_integer_inputs(dtype, start, limit, delta):
     output = m.tensor("out", _IR_OF[np.dtype(dtype)], [3])
     model = _single("Range", values, output, initializers=values)
     _assert_matches_cpu_noopt(model, {})
+
+
+@pytest.mark.parametrize(
+    ("dtype", "ir_dtype", "start", "limit", "delta", "stash_type"),
+    [
+        (np.float32, DT.FLOAT, 0.1, 1.0, 0.2, 1),
+        (np.float16, DT.FLOAT16, -0.5, 0.6, 0.25, 1),
+        (ml_dtypes.bfloat16, DT.BFLOAT16, -0.5, 0.6, 0.25, 1),
+        (np.float16, DT.FLOAT16, -0.5, 0.6, 0.25, 11),
+    ],
+)
+def test_range_opset27_float_stash(
+    monkeypatch: pytest.MonkeyPatch,
+    dtype,
+    ir_dtype: ir.DataType,
+    start: float,
+    limit: float,
+    delta: float,
+    stash_type: int,
+):
+    monkeypatch.setenv("ALLOW_RELEASED_ONNX_OPSET_ONLY", "0")
+    values = [
+        _initializer("start", np.array(start, dtype=dtype)),
+        _initializer("limit", np.array(limit, dtype=dtype)),
+        _initializer("delta", np.array(delta, dtype=dtype)),
+    ]
+    count = int(np.ceil((limit - start) / delta))
+    range_out = m.tensor("range_out", ir_dtype, [count])
+    range_node = ir.node(
+        "Range",
+        values,
+        attributes={"stash_type": stash_type},
+        outputs=[range_out],
+    )
+    if ir_dtype == DT.BFLOAT16:
+        output = m.tensor("out", DT.FLOAT, [count])
+        nodes = [
+            range_node,
+            ir.node("Cast", [range_out], attributes={"to": int(DT.FLOAT)}, outputs=[output]),
+        ]
+    else:
+        output = range_out
+        nodes = [range_node]
+    model = _model(nodes, [], [output], initializers=values, opset=27)
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+    options.enable_profiling = True
+    options.profile_file_prefix = "mlx_range27_probe"
+    session = ort.InferenceSession(model, options, providers=m.EP_PROVIDERS)
+    actual = session.run(None, {})[0]
+    profile_path = session.end_profiling()
+    try:
+        with open(profile_path) as profile:
+            events = json.load(profile)
+    finally:
+        os.remove(profile_path)
+    providers = {
+        event.get("args", {}).get("provider")
+        for event in events
+        if event.get("cat") == "Node" and event.get("args", {}).get("provider")
+    }
+    assert "MLXExecutionProvider" in providers
+    if ir_dtype == DT.FLOAT:
+        cpu_options = ort.SessionOptions()
+        cpu_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+        expected = ort.InferenceSession(
+            model, cpu_options, providers=["CPUExecutionProvider"]
+        ).run(None, {})[0]
+    else:
+        compute_dtype = np.float64 if stash_type == 11 else np.float32
+        start_value = np.array(start, dtype=dtype).astype(compute_dtype).item()
+        delta_value = np.array(delta, dtype=dtype).astype(compute_dtype).item()
+        expected = np.array(
+            [start_value + i * delta_value for i in range(count)], dtype=compute_dtype
+        ).astype(dtype)
+        if ir_dtype == DT.BFLOAT16:
+            expected = expected.astype(np.float32)
+    np.testing.assert_allclose(
+        actual,
+        expected,
+        rtol=0,
+        atol=2 * np.finfo(actual.dtype).eps,
+    )
 
 
 @pytest.mark.parametrize("axis", [0, 1])

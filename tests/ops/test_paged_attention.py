@@ -47,7 +47,28 @@ def _apply_rope(x, cos, sin, pos, interleaved):
     return x * c[:, None, :] + _rotate_half(x, interleaved) * s[:, None, :]
 
 
-def _paged_ref(q, k, v, kc, vc, cum, past, bt, H, KV, d, cos=None, sin=None, interleaved=0):
+def _paged_ref(
+    q,
+    k,
+    v,
+    kc,
+    vc,
+    cum,
+    past,
+    bt,
+    H,
+    KV,
+    d,
+    cos=None,
+    sin=None,
+    interleaved=0,
+    slot_mapping=None,
+    head_sink=None,
+    q_norm=None,
+    k_norm=None,
+    norm_eps=1e-6,
+    return_cache=False,
+):
     batch = len(cum) - 1
     scale = 1.0 / math.sqrt(d)
     out = np.zeros((q.shape[0], H * d), np.float32)
@@ -64,31 +85,49 @@ def _paged_ref(q, k, v, kc, vc, cum, past, bt, H, KV, d, cos=None, sin=None, int
         qb = q[s0:s1].reshape(nq, H, d).astype(np.float32)
         kb = k[s0:s1].reshape(nq, KV, d).astype(np.float32)
         vb = v[s0:s1].reshape(nq, KV, d).astype(np.float32)
+        if q_norm is not None:
+            qb = qb / np.sqrt(np.mean(qb * qb, axis=-1, keepdims=True) + norm_eps) * q_norm
+            kb = kb / np.sqrt(np.mean(kb * kb, axis=-1, keepdims=True) + norm_eps) * k_norm
         if cos is not None:
             pos = np.arange(pastb, total)
             qb = _apply_rope(qb, cos, sin, pos, interleaved)
             kb = _apply_rope(kb, cos, sin, pos, interleaved)
         for i in range(nq):
             p = pastb + i
-            phys, off = int(bt[b, p // block_size]), p % block_size
+            if slot_mapping is None:
+                phys, off = int(bt[b, p // block_size]), p % block_size
+            else:
+                slot = int(slot_mapping[s0 + i])
+                if slot < 0:
+                    continue
+                phys, off = divmod(slot, block_size)
             kc[phys, off], vc[phys, off] = kb[i], vb[i]
         keys = np.zeros((total, KV, d), np.float32)
         vals = np.zeros((total, KV, d), np.float32)
         for p in range(total):
-            phys, off = int(bt[b, p // block_size]), p % block_size
-            keys[p], vals[p] = kc[phys, off], vc[phys, off]
+            if p < pastb:
+                phys, off = int(bt[b, p // block_size]), p % block_size
+                keys[p], vals[p] = kc[phys, off], vc[phys, off]
+            else:
+                keys[p], vals[p] = kb[p - pastb], vb[p - pastb]
         keys, vals = np.repeat(keys, g, 1), np.repeat(vals, g, 1)
         qh, kh, vh = qb.transpose(1, 0, 2), keys.transpose(1, 0, 2), vals.transpose(1, 0, 2)
         scores = np.einsum("hqd,hkd->hqk", qh, kh) * scale
         col = np.arange(total)[None, :]
         row = (pastb + np.arange(nq))[:, None]
         scores = np.where((col > row)[None], -np.inf, scores)
-        scores -= scores.max(-1, keepdims=True)
-        e = np.exp(scores)
-        attn = e / e.sum(-1, keepdims=True)
+        if head_sink is None:
+            scores -= scores.max(-1, keepdims=True)
+            e = np.exp(scores)
+            attn = e / e.sum(-1, keepdims=True)
+        else:
+            max_score = np.maximum(scores.max(-1, keepdims=True), head_sink[:, None, None])
+            e = np.exp(scores - max_score)
+            sink_e = np.exp(head_sink[:, None, None] - max_score)
+            attn = e / (e.sum(-1, keepdims=True) + sink_e)
         ob = np.einsum("hqk,hkd->hqd", attn, vh).transpose(1, 0, 2).reshape(nq, H * d)
         out[s0:s1] = ob
-    return out
+    return (out, kc, vc) if return_cache else out
 
 
 # ---------------- model + feeds ----------------
@@ -187,3 +226,127 @@ def test_paged_attention_multiblock(blk):
 @pytest.mark.parametrize("H,KV,d", [(4, 2, 16), (2, 1, 64)], ids=["gqa-d16", "mqa-d64"])
 def test_paged_attention_rotary(interleaved, H, KV, d):
     _check(H, KV, d, nb=8 * 2, blk=4, batch=2, do_rotary=1, interleaved=interleaved, seed=H + d + interleaved)
+
+
+def test_paged_attention_ort129_optional_inputs_and_cache_outputs():
+    h, kv, d, nb, blk, batch = 4, 2, 8, 4, 4, 1
+    hidden, kv_hidden = h * d, kv * d
+    rng = np.random.default_rng(129)
+    past = np.array([3], dtype=np.int32)
+    cum = np.array([0, 2], dtype=np.int32)
+    q = rng.standard_normal((2, hidden)).astype(np.float16)
+    k = rng.standard_normal((2, kv_hidden)).astype(np.float16)
+    v = rng.standard_normal((2, kv_hidden)).astype(np.float16)
+    kc = rng.standard_normal((nb, blk, kv, d)).astype(np.float16)
+    vc = rng.standard_normal((nb, blk, kv, d)).astype(np.float16)
+    bt = np.array([[2, 0, 1, 3]], dtype=np.int32)
+    slots = np.array([3, 9], dtype=np.int32)
+    sink = np.array([-0.5, 0.25, 1.0, -1.0], dtype=np.float16)
+    qw = np.linspace(0.75, 1.25, d).astype(np.float16)
+    kw = np.linspace(1.25, 0.75, d).astype(np.float16)
+    metadata = np.array([4, 16], dtype=np.int32)
+    absent = lambda: m.tensor("", DT.FLOAT, [])
+    inputs = [
+        m.tensor("query", DT.FLOAT16, [2, hidden]),
+        m.tensor("key", DT.FLOAT16, [2, kv_hidden]),
+        m.tensor("value", DT.FLOAT16, [2, kv_hidden]),
+        m.tensor("key_cache", DT.FLOAT16, [nb, blk, kv, d]),
+        m.tensor("value_cache", DT.FLOAT16, [nb, blk, kv, d]),
+        m.tensor("cum", DT.INT32, [2]),
+        m.tensor("past", DT.INT32, [1]),
+        m.tensor("block_table", DT.INT32, [1, 4]),
+        absent(),
+        absent(),
+        m.tensor("slot_mapping", DT.INT32, [2]),
+        m.tensor("head_sink", DT.FLOAT16, [h]),
+        m.tensor("q_norm_weight", DT.FLOAT16, [d]),
+        m.tensor("k_norm_weight", DT.FLOAT16, [d]),
+        absent(),
+        absent(),
+        m.tensor("attention_metadata", DT.INT32, [2]),
+    ]
+    outputs = [
+        m.tensor("output", DT.FLOAT16, [2, hidden]),
+        m.tensor("key_cache_out", DT.FLOAT16, [nb, blk, kv, d]),
+        m.tensor("value_cache_out", DT.FLOAT16, [nb, blk, kv, d]),
+    ]
+    model = m.make_model(
+        "PagedAttention",
+        inputs,
+        outputs,
+        domain="com.microsoft",
+        attributes={"num_heads": h, "kv_num_heads": kv, "qk_norm_epsilon": 1e-5},
+    )
+    feeds = {
+        "query": q,
+        "key": k,
+        "value": v,
+        "key_cache": kc,
+        "value_cache": vc,
+        "cum": cum,
+        "past": past,
+        "block_table": bt,
+        "slot_mapping": slots,
+        "head_sink": sink,
+        "q_norm_weight": qw,
+        "k_norm_weight": kw,
+        "attention_metadata": metadata,
+    }
+    expected = _paged_ref(
+        q,
+        k,
+        v,
+        kc,
+        vc,
+        cum,
+        past,
+        bt,
+        h,
+        kv,
+        d,
+        slot_mapping=slots,
+        head_sink=sink.astype(np.float32),
+        q_norm=qw.astype(np.float32),
+        k_norm=kw.astype(np.float32),
+        norm_eps=1e-5,
+        return_cache=True,
+    )
+    m.assert_mlx_claims(model, feeds)
+    actual = m.run_mlx(model, feeds)
+    for got, want in zip(actual, expected, strict=True):
+        np.testing.assert_allclose(got, want.astype(np.float16), rtol=2e-2, atol=2e-2)
+
+    one_output_inputs = [
+        m.tensor("query", DT.FLOAT16, [2, hidden]),
+        m.tensor("key", DT.FLOAT16, [2, kv_hidden]),
+        m.tensor("value", DT.FLOAT16, [2, kv_hidden]),
+        m.tensor("key_cache", DT.FLOAT16, [nb, blk, kv, d]),
+        m.tensor("value_cache", DT.FLOAT16, [nb, blk, kv, d]),
+        m.tensor("cum", DT.INT32, [2]),
+        m.tensor("past", DT.INT32, [1]),
+        m.tensor("block_table", DT.INT32, [1, 4]),
+        absent(),
+        absent(),
+        m.tensor("slot_mapping", DT.INT32, [2]),
+        m.tensor("head_sink", DT.FLOAT16, [h]),
+        m.tensor("q_norm_weight", DT.FLOAT16, [d]),
+        m.tensor("k_norm_weight", DT.FLOAT16, [d]),
+        absent(),
+        absent(),
+        m.tensor("attention_metadata", DT.INT32, [2]),
+    ]
+    one_output_model = m.make_model(
+        "PagedAttention",
+        one_output_inputs,
+        [m.tensor("output", DT.FLOAT16, [2, hidden])],
+        domain="com.microsoft",
+        attributes={"num_heads": h, "kv_num_heads": kv, "qk_norm_epsilon": 1e-5},
+    )
+    one_output_feeds = {name: value.copy() for name, value in feeds.items()}
+    m.assert_mlx_claims(
+        one_output_model,
+        {name: value.copy() for name, value in one_output_feeds.items()},
+    )
+    m.run_mlx(one_output_model, one_output_feeds)
+    np.testing.assert_allclose(one_output_feeds["key_cache"], expected[1], rtol=2e-3, atol=2e-3)
+    np.testing.assert_allclose(one_output_feeds["value_cache"], expected[2], rtol=2e-3, atol=2e-3)

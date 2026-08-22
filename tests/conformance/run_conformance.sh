@@ -16,8 +16,8 @@
 # Prereqs (see README.md in this directory):
 #   * Built EP dylib:   <repo>/rust/target/release/libonnxruntime_mlx_ep.dylib
 #   * onnx-tests clone: sibling checkout with `pixi run postinstall` done
-#   * onnxruntime 1.27 python in the pixi env (matches EP ORT_API_VERSION 27):
-#       cd <onnx-tests>; pixi run python -m pip install "onnxruntime==1.27.0"
+#   * onnxruntime 1.29 python in the pixi env (matches EP ORT_API_VERSION 29):
+#       cd <onnx-tests>; pixi run python -m pip install "onnxruntime==1.29.0"
 #
 # Usage:
 #   ./run_conformance.sh                 # correctness pass, bounded, per-op
@@ -28,7 +28,7 @@
 # Env overrides:
 #   ONNX_TESTS_DIR   path to the onnx-tests clone (default: sibling of repo root)
 #   MLX_EP_LIB       path to libonnxruntime_mlx_ep.dylib (default: <repo>/rust/target/release/..)
-#   ORT_LIB_DIR      dir holding libonnxruntime.1.27.0.dylib (for DYLD_LIBRARY_PATH)
+#   ORT_LIB_DIR      dir holding libonnxruntime.1.29.0.dylib (for DYLD_LIBRARY_PATH)
 #   PIXI             pixi binary (default: ~/.pixi/bin/pixi)
 #   MAX_EXAMPLES     Hypothesis max_examples per test (default: 20)
 #   SEED             Hypothesis seed (default: 0)
@@ -47,7 +47,7 @@ SEED="${SEED:-0}"
 PROFILE="${PROFILE:-0}"
 
 if [[ -z "${ORT_LIB_DIR:-}" ]]; then
-  ORT_LIB_DIR="$(dirname "$(find "$REPO_ROOT/.."/onnx-genai/target -path '*ort-prebuilt/lib/libonnxruntime.1.27.0.dylib' 2>/dev/null | head -n1)")"
+  ORT_LIB_DIR="$(dirname "$(find "$REPO_ROOT/.."/onnx-genai/target -path '*ort-prebuilt/lib/libonnxruntime.1.29.0.dylib' 2>/dev/null | head -n1)")"
 fi
 
 if [[ ! -f "$MLX_EP_LIB" ]]; then
