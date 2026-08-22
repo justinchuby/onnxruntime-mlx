@@ -248,6 +248,78 @@ def test_gqa_shared_buffer(name: str, geom: dict[str, int]) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "name,geom",
+    [
+        (
+            "sliding-decode",
+            dict(
+                batch=1,
+                num_heads=4,
+                kv_heads=2,
+                head=16,
+                seq=1,
+                past=8,
+                cap=5,
+                do_rotary=0,
+                sliding_window=1,
+                local_window=3,
+            ),
+        ),
+        (
+            "sliding-chunk-staging",
+            dict(
+                batch=1,
+                num_heads=4,
+                kv_heads=2,
+                head=16,
+                seq=3,
+                past=5,
+                cap=5,
+                do_rotary=0,
+                sliding_window=1,
+                local_window=4,
+            ),
+        ),
+        (
+            "sliding-batched-rope",
+            dict(
+                batch=2,
+                num_heads=4,
+                kv_heads=2,
+                head=16,
+                seq=1,
+                past=7,
+                cap=6,
+                do_rotary=1,
+                sliding_window=1,
+                local_window=4,
+            ),
+        ),
+    ],
+)
+def test_gqa_sliding_window_cache(name: str, geom: dict[str, int]) -> None:
+    model, feeds = m.gqa_shared_buffer_model(name, **geom)
+    expected = m.run_cpu(model, feeds)
+    m.assert_mlx_claims(model, feeds)
+    actual = m.run_mlx(model, feeds)
+    np.testing.assert_allclose(actual[0], expected[0], rtol=3e-3, atol=3e-3)
+    gap = geom["cap"] - geom["local_window"] + 1
+    total = geom["past"] + geom["seq"]
+    end = (
+        total
+        if total <= geom["cap"]
+        else total - gap * ((total - geom["cap"] + gap - 1) // gap)
+    )
+    for index in (1, 2):
+        np.testing.assert_allclose(
+            actual[index][:, :, :end],
+            expected[index][:, :, :end],
+            rtol=3e-3,
+            atol=3e-3,
+        )
+
+
 def test_gqa_bf16() -> None:
     model, reference, feeds = m.bf16_gqa_model(
         "bf16-decode-h64",

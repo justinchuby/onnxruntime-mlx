@@ -47,6 +47,19 @@ def _apply_rope(x, cos, sin, pos, interleaved):
     return x * c[:, None, :] + _rotate_half(x, interleaved) * s[:, None, :]
 
 
+def _apply_rope_offset(x, cos, sin, pos, interleaved, offset):
+    out = x.copy()
+    width = cos.shape[-1] * 2
+    out[..., offset : offset + width] = _apply_rope(
+        x[..., offset : offset + width],
+        cos,
+        sin,
+        pos,
+        interleaved,
+    )
+    return out
+
+
 def _paged_ref(
     q,
     k,
@@ -226,6 +239,98 @@ def test_paged_attention_multiblock(blk):
 @pytest.mark.parametrize("H,KV,d", [(4, 2, 16), (2, 1, 64)], ids=["gqa-d16", "mqa-d64"])
 def test_paged_attention_rotary(interleaved, H, KV, d):
     _check(H, KV, d, nb=8 * 2, blk=4, batch=2, do_rotary=1, interleaved=interleaved, seed=H + d + interleaved)
+
+
+def test_paged_attention_latent_layout_and_rotary_offset():
+    h, kv, d, vd, rot, nb, blk = 2, 1, 16, 8, 8, 3, 4
+    nt, past_len, offset, scale = 2, 3, 8, 0.2
+    rng = np.random.default_rng(291)
+    q = (rng.standard_normal((nt, h * d)) * 0.2).astype(np.float16)
+    k = (rng.standard_normal((nt, d)) * 0.2).astype(np.float16)
+    kc = (rng.standard_normal((nb, blk, kv, d)) * 0.2).astype(np.float16)
+    cum = np.array([0, nt], dtype=np.int32)
+    past = np.array([past_len], dtype=np.int32)
+    bt = np.array([[1, 0, 2]], dtype=np.int32)
+    half = rot // 2
+    inv = 1.0 / (10000.0 ** (np.arange(half) / half))
+    angles = np.arange(nb * blk)[:, None] * inv[None, :]
+    cos = np.cos(angles).astype(np.float16)
+    sin = np.sin(angles).astype(np.float16)
+
+    qh = q.reshape(nt, h, d).astype(np.float32)
+    kh_new = k.reshape(nt, kv, d).astype(np.float32)
+    positions = np.arange(past_len, past_len + nt)
+    qh = _apply_rope_offset(qh, cos.astype(np.float32), sin.astype(np.float32), positions, 0, offset)
+    kh_new = _apply_rope_offset(
+        kh_new,
+        cos.astype(np.float32),
+        sin.astype(np.float32),
+        positions,
+        0,
+        offset,
+    )
+    expected_cache = kc.copy()
+    for i in range(nt):
+        logical = past_len + i
+        expected_cache[bt[0, logical // blk], logical % blk, 0] = kh_new[i, 0].astype(np.float16)
+    keys = np.empty((past_len + nt, d), dtype=np.float32)
+    for logical in range(past_len):
+        keys[logical] = kc[bt[0, logical // blk], logical % blk, 0]
+    keys[past_len:] = kh_new[:, 0]
+    scores = np.einsum("thd,kd->htk", qh, keys) * scale
+    cols = np.arange(past_len + nt)[None, :]
+    rows = (past_len + np.arange(nt))[:, None]
+    scores = np.where((cols > rows)[None], -np.inf, scores)
+    probs = np.exp(scores - scores.max(-1, keepdims=True))
+    probs /= probs.sum(-1, keepdims=True)
+    expected = np.einsum("htk,kv->thv", probs, keys[:, :vd]).reshape(nt, h * vd)
+
+    absent = lambda: m.tensor("", DT.FLOAT, [])
+    inputs = [
+        m.tensor("query", DT.FLOAT16, [nt, h * d]),
+        m.tensor("key", DT.FLOAT16, [nt, d]),
+        absent(),
+        m.tensor("key_cache", DT.FLOAT16, [nb, blk, kv, d]),
+        absent(),
+        m.tensor("cum", DT.INT32, [2]),
+        m.tensor("past", DT.INT32, [1]),
+        m.tensor("block_table", DT.INT32, [1, 3]),
+        m.tensor("cos", DT.FLOAT16, [nb * blk, half]),
+        m.tensor("sin", DT.FLOAT16, [nb * blk, half]),
+    ]
+    outputs = [
+        m.tensor("output", DT.FLOAT16, [nt, h * vd]),
+        m.tensor("key_cache_out", DT.FLOAT16, [nb, blk, kv, d]),
+    ]
+    model = m.make_model(
+        "PagedAttention",
+        inputs,
+        outputs,
+        domain="com.microsoft",
+        attributes={
+            "num_heads": h,
+            "kv_num_heads": kv,
+            "v_head_size": vd,
+            "kv_cache_layout": "LATENT",
+            "do_rotary": 1,
+            "rotary_offset": offset,
+            "scale": scale,
+        },
+    )
+    feeds = {
+        "query": q,
+        "key": k,
+        "key_cache": kc,
+        "cum": cum,
+        "past": past,
+        "block_table": bt,
+        "cos": cos,
+        "sin": sin,
+    }
+    m.assert_mlx_claims(model, feeds)
+    actual, actual_cache = m.run_mlx(model, feeds)
+    np.testing.assert_allclose(actual, expected.astype(np.float16), rtol=2e-2, atol=2e-2)
+    np.testing.assert_allclose(actual_cache, expected_cache, rtol=2e-3, atol=2e-3)
 
 
 def test_paged_attention_ort129_optional_inputs_and_cache_outputs():

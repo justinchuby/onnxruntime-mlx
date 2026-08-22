@@ -437,3 +437,37 @@ def test_mrotary_embedding(
     if not _cpu_can_run(model, feeds):
         pytest.skip("ORT CPU cannot run com.microsoft.MRotaryEmbedding")
     check(model, feeds, rtol=3e-3, atol=3e-3)
+
+
+def test_mrotary_embedding_packed_batching():
+    rng = np.random.default_rng(9129)
+    b, s, nh, hd, max_seq = 1, 7, 2, 12, 3
+    shape = [b, s, nh * hd]
+    sections = [2, 2, 2]
+    inputs = [
+        m.tensor("input", DT.FLOAT, shape),
+        m.tensor("position_ids", DT.INT64, [3, b, s]),
+        m.tensor("cos", DT.FLOAT, [max_seq, hd // 2]),
+        m.tensor("sin", DT.FLOAT, [max_seq, hd // 2]),
+    ]
+    model = m.make_model(
+        "MRotaryEmbedding",
+        inputs,
+        [m.tensor("Y", DT.FLOAT, shape)],
+        domain="com.microsoft",
+        attributes={
+            "num_heads": nh,
+            "mrope_section": sections,
+            "is_packed_batching": 1,
+        },
+    )
+    feeds = {
+        "input": rng.standard_normal(shape).astype(np.float32),
+        "position_ids": np.array(
+            [[[0, 1, 2, 0, 1, 0, 1]], [[0, 1, 2, 0, 1, 0, 1]], [[0, 1, 2, 0, 1, 0, 1]]],
+            dtype=np.int64,
+        ),
+        "cos": rng.standard_normal((max_seq, hd // 2)).astype(np.float32),
+        "sin": rng.standard_normal((max_seq, hd // 2)).astype(np.float32),
+    }
+    check(model, feeds, rtol=3e-4, atol=3e-4)

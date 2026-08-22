@@ -151,7 +151,9 @@ fn causal_conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
     let dt = ctx.dtype_of(x);
     let b = ctx.dim(x, 0);
     let c = ctx.dim(x, 1);
+    let l = ctx.dim(x, 2);
     let k = ctx.dim(weight, 2);
+    let state_window = *n.ints.get("state_window").unwrap_or(&0) as i32;
 
     let has_bias = present(n, 2);
     let has_state = present(n, 3);
@@ -160,7 +162,17 @@ fn causal_conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
     let mut x_pad = x;
     if k > 1 {
         let state = if has_state {
-            ctx.resolve(&n.inputs[3])?
+            let state = ctx.resolve(&n.inputs[3])?;
+            if state_window > 0 {
+                let state = ctx.slice(
+                    state,
+                    &[state_window - 1, 0, 0, 0],
+                    &[state_window, b, c, k - 1],
+                )?;
+                ctx.reshape(state, &[b, c, k - 1])?
+            } else {
+                state
+            }
         } else {
             ctx.zeros(&[b, c, k - 1], dt)?
         };
@@ -169,7 +181,36 @@ fn causal_conv_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxE
 
     // present_state = last k-1 columns of x_pad (boundary output -> contiguous).
     if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
-        if k > 1 {
+        if state_window > 0 {
+            if k > 1 && l > 0 {
+                let kept = l.min(state_window);
+                let leading = state_window - kept;
+                let mut window = if leading > 0 {
+                    Some(ctx.zeros(&[leading, b, c, k - 1], dt)?)
+                } else {
+                    None
+                };
+                for token in (l - kept)..l {
+                    let carry = ctx.slice(x_pad, &[0, 0, token + 1], &[b, c, token + k])?;
+                    let carry = ctx.expand_dims(carry, 0)?;
+                    window = Some(match window {
+                        Some(previous) => ctx.concat2(previous, carry, 0)?,
+                        None => carry,
+                    });
+                }
+                let ps = window
+                    .ok_or_else(|| "MLX CausalConv state_window produced no states".to_string())?;
+                let ps = ctx.contiguous(ps)?;
+                ctx.bind(&n.outputs[1], ps);
+            } else if has_state && l == 0 {
+                let ps = ctx.resolve(&n.inputs[3])?;
+                let ps = ctx.contiguous(ps)?;
+                ctx.bind(&n.outputs[1], ps);
+            } else {
+                let z = ctx.zeros(&[state_window, b, c, k - 1], dt)?;
+                ctx.bind(&n.outputs[1], z);
+            }
+        } else if k > 1 {
             let padded = ctx.dim(x_pad, 2);
             let ps = ctx.slice(x_pad, &[0, 0, padded - (k - 1)], &[b, c, padded])?;
             let ps = ctx.contiguous(ps)?;
@@ -229,6 +270,21 @@ fn causal_conv_claim(node: &NodeView) -> ClaimResult {
         input.shape.len(),
         weight.shape.len()
     );
+    let state_window = node.int_attr("state_window", 0);
+    require!(
+        (0..=8).contains(&state_window),
+        "state_window must be in [0,8], got {state_window}"
+    );
+    let expected_state_shape = if state_window > 0 {
+        vec![
+            state_window,
+            input.shape[0],
+            input.shape[1],
+            weight.shape[2] - 1,
+        ]
+    } else {
+        vec![input.shape[0], input.shape[1], weight.shape[2] - 1]
+    };
     if node.input_present(2) {
         match node.input_info(2) {
             Some(b) if b.dtype == input.dtype => {}
@@ -242,14 +298,23 @@ fn causal_conv_claim(node: &NodeView) -> ClaimResult {
     }
     if node.input_present(3) {
         match node.input_info(3) {
-            Some(p) if p.dtype == input.dtype => {}
+            Some(p) if p.dtype == input.dtype && p.shape == expected_state_shape => {}
             Some(p) => deny!(
-                "past_state dtype must match input dtype {}, got {}",
+                "past_state must have dtype {} and shape {:?}, got {} {:?}",
                 crate::registry::ort_dtype_name(input.dtype),
-                crate::registry::ort_dtype_name(p.dtype)
+                expected_state_shape,
+                crate::registry::ort_dtype_name(p.dtype),
+                p.shape
             ),
             None => deny!("missing tensor type/shape info on past_state"),
         }
+    }
+    if let Some(present) = node.output_info(1) {
+        require!(
+            present.dtype == input.dtype && present.shape == expected_state_shape,
+            "present_state must have input dtype and shape {:?}",
+            expected_state_shape
+        );
     }
     let activation = node.string_attr("activation", "none");
     require!(
@@ -569,6 +634,7 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
         .ints
         .get("kv_num_heads")
         .ok_or("MLX LinearAttention: kv_num_heads missing")? as i32;
+    let state_window = *n.ints.get("state_window").unwrap_or(&0) as i32;
 
     let query = ctx.resolve(&n.inputs[0])?; // (B, T, Hq*d_k)
     let key = ctx.resolve(&n.inputs[1])?; // (B, T, Hk*d_k)
@@ -614,7 +680,17 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
 
     let has_past = present(n, 3);
     let mut state = if has_past {
-        ctx.resolve(&n.inputs[3])?
+        let past = ctx.resolve(&n.inputs[3])?;
+        if state_window > 0 {
+            let past = ctx.slice(
+                past,
+                &[state_window - 1, 0, 0, 0, 0],
+                &[state_window, b, h, d_k, d_v],
+            )?;
+            ctx.reshape(past, &[b, h, d_k, d_v])?
+        } else {
+            past
+        }
     } else {
         ctx.zeros(&[b, h, d_k, d_v], state_dt)?
     };
@@ -626,7 +702,16 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
             ctx.bind(&n.outputs[0], z);
         }
         if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
-            let ps = ctx.contiguous(state)?;
+            let ps = if state_window > 0 {
+                if has_past {
+                    ctx.resolve(&n.inputs[3])?
+                } else {
+                    ctx.zeros(&[state_window, b, h, d_k, d_v], state_dt)?
+                }
+            } else {
+                state
+            };
+            let ps = ctx.contiguous(ps)?;
             ctx.bind(&n.outputs[1], ps);
         }
         return Ok(());
@@ -702,7 +787,8 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
         && t_len > CHUNK_SIZE
         && hq == h
         && n_k_heads == h
-        && state_dt == dt;
+        && state_dt == dt
+        && state_window == 0;
     if use_chunked {
         let g_bht = decay4.expect("gated_delta carries decay"); // [B,H,T] scalar decay
         let beta_bht = beta3.expect("gated_delta carries beta"); // [B,H,T]
@@ -712,6 +798,11 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     }
 
     let mut outs: Vec<mlx::mlx_array> = Vec::with_capacity(t_len as usize);
+    let mut state_history: Vec<mlx::mlx_array> = if state_window > 0 {
+        Vec::with_capacity(state_window as usize)
+    } else {
+        Vec::new()
+    };
     for t in 0..t_len {
         if let Some(decay4) = decay4 {
             let g = if decay_per_head_scalar {
@@ -746,6 +837,12 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
         let delta_row = ctx.expand_dims(delta, 2)?;
         let outer = ctx.matmul(k_col, delta_row)?;
         state = ctx.add(state, outer)?;
+        if state_window > 0 {
+            if state_history.len() == state_window as usize {
+                state_history.remove(0);
+            }
+            state_history.push(state);
+        }
 
         let readout_state = if hq > h {
             repeat_axis(ctx, state, hq / h, 1)?
@@ -771,7 +868,27 @@ fn linear_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
         ctx.bind(&n.outputs[0], out);
     }
     if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
-        let ps = ctx.contiguous(state)?;
+        let ps = if state_window > 0 {
+            let kept = t_len.min(state_window);
+            let leading = state_window - kept;
+            let mut window = if leading > 0 {
+                Some(ctx.zeros(&[leading, b, h, d_k, d_v], state_dt)?)
+            } else {
+                None
+            };
+            for &step_state in &state_history {
+                let slot = ctx.expand_dims(step_state, 0)?;
+                window = Some(match window {
+                    Some(previous) => ctx.concat2(previous, slot, 0)?,
+                    None => slot,
+                });
+            }
+            window
+                .ok_or_else(|| "MLX LinearAttention state_window produced no states".to_string())?
+        } else {
+            state
+        };
+        let ps = ctx.contiguous(ps)?;
         ctx.bind(&n.outputs[1], ps);
     }
     Ok(())
@@ -784,9 +901,10 @@ fn linear_attention_common_claim(node: &NodeView, allow_mixed_state: bool) -> Cl
         node.num_inputs(),
         node.num_outputs()
     );
+    let state_window = node.int_attr("state_window", 0);
     require!(
-        node.int_attr("state_window", 0) == 0,
-        "state_window != 0 (5D speculative-decode state) is unsupported"
+        (0..=8).contains(&state_window),
+        "state_window must be in [0,8], got {state_window}"
     );
     let rule = node.string_attr("update_rule", "gated_delta");
     require!(is_known_rule(&rule), "unsupported update_rule {rule:?}");
@@ -828,6 +946,28 @@ fn linear_attention_common_claim(node: &NodeView, allow_mixed_state: bool) -> Cl
         v.shape.len() == 3 && v.shape[2] > 0 && v.shape[2] % h == 0,
         "value hidden size must be a positive multiple of kv_num_heads"
     );
+    let d_v = v.shape[2] / h;
+    let expected_state_shape = if state_window > 0 {
+        vec![state_window, q.shape[0], h, d_k, d_v]
+    } else {
+        vec![q.shape[0], h, d_k, d_v]
+    };
+    if let Some(past) = node.input_info(3) {
+        require!(
+            past.shape == expected_state_shape,
+            "past_state shape {:?} must be {:?}",
+            past.shape,
+            expected_state_shape
+        );
+    }
+    if let Some(present_state) = node.output_info(1) {
+        require!(
+            present_state.shape == expected_state_shape,
+            "present_state shape {:?} must be {:?}",
+            present_state.shape,
+            expected_state_shape
+        );
+    }
     // The time dimension may be DYNAMIC (symbolic `[-1]`, as in real Qwen3.5/Qwen3-Next decoder
     // exports): the shape-keyed general trace resolves the concrete extent at trace time, and the
     // handler unrolls over it (with a guard that falls back to eager if it is ever traced shapeless).

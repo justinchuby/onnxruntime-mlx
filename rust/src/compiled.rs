@@ -133,7 +133,10 @@ pub fn prefill_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     {
         return false;
     }
-    nodes.iter().any(|n| n.op_type == "GroupQueryAttention")
+    nodes.iter().any(|n| {
+        n.op_type == "GroupQueryAttention"
+            && n.ints.get("sliding_window_cache").copied().unwrap_or(0) == 0
+    })
 }
 
 /// Query sequence length S = trailing dim of the `input_ids` dynamic ctx input (decode => 1, prefill
@@ -665,6 +668,12 @@ fn build_closure(
     kctx: *mut ort::OrtKernelContext,
     stream: mlxsys::mlx_stream,
 ) -> bool {
+    if unsafe { &*plan_ptr }.nodes.iter().any(|n| {
+        n.op_type == "GroupQueryAttention"
+            && n.ints.get("sliding_window_cache").copied().unwrap_or(0) != 0
+    }) {
+        return true;
+    }
     let cfg = slot.get(unsafe { &*plan_ptr }).config;
 
     let mut dyn_inputs: Vec<DynInput> = Vec::new();
