@@ -5,8 +5,8 @@ Covers the ops the MLX EP registers in ``RegisterControlFlowOps``:
 * ``If`` — runtime ``cond`` selecting one of two no-input branch subgraphs. The EP reads ``cond``
   host-side each forward and translates the taken branch only (both branches must be MLX-translatable
   at claim time).
-* ``Scan`` — static trip count (scan axis length known from the input shape), forward direction over
-  axis 0. The body is unrolled, carried state threaded, and scan outputs stacked along axis 0.
+* ``Scan`` — shape-specialized trip count (including dynamic ONNX dimensions), arbitrary per-input
+  and per-output axes/directions. The body is unrolled and carried state is threaded.
 * ``Loop`` — constant trip count ``M`` with a pass-through ``cond`` (``for i in range(M)`` idiom).
   Carried-state-only bodies are unrolled ``M`` times.
 
@@ -26,6 +26,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import onnx_ir as ir
@@ -36,6 +39,7 @@ from onnx_ir import DataType as DT
 import _models as m
 
 FLOAT = np.float32
+_COMPILE_CHILD = "ONNXRUNTIME_EP_MLX_CONTROL_FLOW_COMPILE_CHILD"
 
 
 def _t(name: str, dt: DT, shape: list[int]) -> ir.Value:
@@ -155,6 +159,128 @@ def scan_model() -> bytes:
     )
 
 
+def scan_dynamic_trip_model() -> bytes:
+    """The scan axis is dynamic in ONNX metadata and specialized from each runtime shape."""
+    init = _t("init", DT.FLOAT, [2])
+    X = _t("X", DT.FLOAT, [-1, 2])
+    final = _t("final", DT.FLOAT, [2])
+    Yseq = _t("Yseq", DT.FLOAT, [-1, 2])
+
+    b_acc = _t("b_acc", DT.FLOAT, [2])
+    b_x = _t("b_x", DT.FLOAT, [2])
+    b_sum = _t("b_sum", DT.FLOAT, [2])
+    b_sum2 = _t("b_sum2", DT.FLOAT, [2])
+    body = ir.Graph(
+        [b_acc, b_x],
+        [b_sum, b_sum2],
+        nodes=[
+            ir.node("Add", [b_acc, b_x], outputs=[b_sum]),
+            ir.node("Identity", [b_sum], outputs=[b_sum2]),
+        ],
+        name="scan_dynamic_body",
+        opset_imports={"": 18},
+    )
+    scan = ir.node(
+        "Scan",
+        [init, X],
+        outputs=[final, Yseq],
+        attributes={"num_scan_inputs": 1, "body": body},
+    )
+    return _model(
+        ir.Graph(
+            [init, X],
+            [final, Yseq],
+            nodes=[scan],
+            name="scan_dynamic",
+            opset_imports={"": 18},
+        )
+    )
+
+
+def scan_axes_directions_model() -> bytes:
+    """Two inputs with distinct axes/directions and a reverse, negative-axis output."""
+    X = _t("X", DT.FLOAT, [2, 4, 3])
+    Z = _t("Z", DT.FLOAT, [4, 2, 3])
+    Y = _t("Y", DT.FLOAT, [2, 4, 3])
+
+    b_x = _t("b_x", DT.FLOAT, [2, 3])
+    b_z = _t("b_z", DT.FLOAT, [2, 3])
+    b_y = _t("b_y", DT.FLOAT, [2, 3])
+    body = ir.Graph(
+        [b_x, b_z],
+        [b_y],
+        nodes=[ir.node("Add", [b_x, b_z], outputs=[b_y])],
+        name="scan_axes_body",
+        opset_imports={"": 18},
+    )
+    scan = ir.node(
+        "Scan",
+        [X, Z],
+        outputs=[Y],
+        attributes={
+            "num_scan_inputs": 2,
+            "body": body,
+            "scan_input_axes": [1, -3],
+            "scan_input_directions": [1, 0],
+            "scan_output_axes": [-2],
+            "scan_output_directions": [1],
+        },
+    )
+    return _model(
+        ir.Graph([X, Z], [Y], nodes=[scan], name="scan_axes", opset_imports={"": 18})
+    )
+
+
+def scan_multi_output_model() -> bytes:
+    """Carried state plus two scan outputs using distinct output axes/directions."""
+    init = _t("init", DT.FLOAT, [2, 3])
+    X = _t("X", DT.FLOAT, [2, 4, 3])
+    Z = _t("Z", DT.FLOAT, [4, 2, 3])
+    final = _t("final", DT.FLOAT, [2, 3])
+    Y1 = _t("Y1", DT.FLOAT, [2, 4, 3])
+    Y2 = _t("Y2", DT.FLOAT, [4, 2, 3])
+
+    b_state = _t("b_state", DT.FLOAT, [2, 3])
+    b_x = _t("b_x", DT.FLOAT, [2, 3])
+    b_z = _t("b_z", DT.FLOAT, [2, 3])
+    b_next = _t("b_next", DT.FLOAT, [2, 3])
+    b_y1 = _t("b_y1", DT.FLOAT, [2, 3])
+    b_y2 = _t("b_y2", DT.FLOAT, [2, 3])
+    body = ir.Graph(
+        [b_state, b_x, b_z],
+        [b_next, b_y1, b_y2],
+        nodes=[
+            ir.node("Add", [b_state, b_x], outputs=[b_next]),
+            ir.node("Add", [b_next, b_z], outputs=[b_y1]),
+            ir.node("Sub", [b_x, b_z], outputs=[b_y2]),
+        ],
+        name="scan_multi_body",
+        opset_imports={"": 18},
+    )
+    scan = ir.node(
+        "Scan",
+        [init, X, Z],
+        outputs=[final, Y1, Y2],
+        attributes={
+            "num_scan_inputs": 2,
+            "body": body,
+            "scan_input_axes": [1, 0],
+            "scan_input_directions": [1, 0],
+            "scan_output_axes": [1, 0],
+            "scan_output_directions": [0, 1],
+        },
+    )
+    return _model(
+        ir.Graph(
+            [init, X, Z],
+            [final, Y1, Y2],
+            nodes=[scan],
+            name="scan_multi",
+            opset_imports={"": 18},
+        )
+    )
+
+
 def loop_model() -> bytes:
     """Const trip M with pass-through cond. body: (i, cond, acc) -> (cond, acc+1)."""
     M = _t("M", DT.INT64, [])
@@ -271,6 +397,41 @@ def test_scan_static_trip() -> None:
                   {"init": np.zeros(2, FLOAT), "X": np.arange(8, dtype=FLOAT).reshape(4, 2)}, "Scan")
 
 
+@pytest.mark.parametrize("trip", [1, 4, 7])
+def test_scan_dynamic_trip(trip: int) -> None:
+    check_claimed(
+        scan_dynamic_trip_model(),
+        {
+            "init": np.zeros(2, FLOAT),
+            "X": np.arange(trip * 2, dtype=FLOAT).reshape(trip, 2),
+        },
+        "Scan",
+    )
+
+
+def test_scan_general_axes_and_directions() -> None:
+    X = np.arange(24, dtype=FLOAT).reshape(2, 4, 3)
+    Z = (100 + np.arange(24, dtype=FLOAT)).reshape(4, 2, 3)
+    model = scan_axes_directions_model()
+    feeds = {"X": X, "Z": Z}
+    check_claimed(model, feeds, "Scan")
+
+    expected = np.empty_like(X)
+    for j in range(4):
+        expected[:, j, :] = X[:, j, :] + Z[3 - j]
+    actual = m.run_mlx(model, feeds)[0]
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_scan_general_axes_multiple_outputs_and_state() -> None:
+    feeds = {
+        "init": np.zeros((2, 3), FLOAT),
+        "X": np.arange(24, dtype=FLOAT).reshape(2, 4, 3),
+        "Z": (100 + np.arange(24, dtype=FLOAT)).reshape(4, 2, 3),
+    }
+    check_claimed(scan_multi_output_model(), feeds, "Scan")
+
+
 @pytest.mark.parametrize("trip", [0, 1, 3, 5], ids=lambda v: f"M{v}")
 def test_loop_const_trip(trip: int) -> None:
     check_claimed(loop_model(),
@@ -290,3 +451,101 @@ def test_loop_datadependent_left_on_cpu() -> None:
     feeds = {"M": np.array(1000, np.int64), "condin": np.array(True), "acc0": np.zeros(1, FLOAT)}
     assert_mlx_declines(loop_datadependent_model(), feeds, "Loop")
     m.assert_matches_cpu(loop_datadependent_model(), feeds, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.skipif(
+    os.environ.get(_COMPILE_CHILD) != "1",
+    reason="run by test_static_control_flow_uses_general_compile",
+)
+def test_static_control_flow_compile_child() -> None:
+    """Exercise repeated shapes and changing host control values in one session per op."""
+    scan_feeds = {
+        "init": np.zeros(2, FLOAT),
+        "X": np.arange(8, dtype=FLOAT).reshape(4, 2),
+    }
+    scan = ort.InferenceSession(scan_model(), providers=m.EP_PROVIDERS)
+    for _ in range(2):
+        scan.run(None, scan_feeds)
+
+    dynamic_scan = ort.InferenceSession(scan_dynamic_trip_model(), providers=m.EP_PROVIDERS)
+    for trip in [4, 4, 7, 7, 4]:
+        inputs = np.arange(trip * 2, dtype=FLOAT).reshape(trip, 2)
+        final, sequence = dynamic_scan.run(
+            None,
+            {
+                "init": np.zeros(2, FLOAT),
+                "X": inputs,
+            },
+        )
+        np.testing.assert_allclose(sequence, np.cumsum(inputs, axis=0))
+        np.testing.assert_allclose(final, sequence[-1])
+
+    axes_feeds = {
+        "X": np.arange(24, dtype=FLOAT).reshape(2, 4, 3),
+        "Z": (100 + np.arange(24, dtype=FLOAT)).reshape(4, 2, 3),
+    }
+    axes_scan = ort.InferenceSession(scan_axes_directions_model(), providers=m.EP_PROVIDERS)
+    for _ in range(2):
+        axes_scan.run(None, axes_feeds)
+
+    loop = ort.InferenceSession(loop_model(), providers=m.EP_PROVIDERS)
+    for trip in [3, 3, 5, 5, 3]:
+        actual = loop.run(
+            None,
+            {
+                "M": np.array(trip, np.int64),
+                "condin": np.array(True),
+                "acc0": np.zeros(2, FLOAT),
+            },
+        )[0]
+        np.testing.assert_array_equal(actual, np.full(2, trip, FLOAT))
+
+    x = np.array([1, 2, 3], FLOAT)
+    branch = ort.InferenceSession(if_model(), providers=m.EP_PROVIDERS)
+    for cond in [True, True, False, False, True]:
+        actual = branch.run(None, {"x": x, "cond": np.array(cond)})[0]
+        np.testing.assert_array_equal(actual, x + (1 if cond else -1))
+
+
+@pytest.mark.skipif(
+    os.environ.get(_COMPILE_CHILD) == "1",
+    reason="child process executes the traced workload",
+)
+def test_static_control_flow_uses_general_compile(tmp_path: Path) -> None:
+    """Scan/Loop/If are captured by mlx_compile and cache each static specialization."""
+    trace = tmp_path / "control_flow_compile.json"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            f"{Path(__file__).name}::test_static_control_flow_compile_child",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ],
+        check=True,
+        cwd=str(Path(__file__).parent),
+        env={
+            **os.environ,
+            "ONNXRUNTIME_EP_MLX_TRACE": str(trace),
+            _COMPILE_CHILD: "1",
+        },
+        timeout=300,
+    )
+
+    events = json.loads(trace.read_text())
+    paths = [
+        event["args"]
+        for event in events
+        if event.get("cat") == "ep.path" and event.get("name") == "mlx.compute[general]"
+    ]
+    assert len(paths) == 19
+    assert all(path["path"] == "general" for path in paths)
+    assert [path["cache"] for path in paths] == [
+        "MISS", "HIT",  # Scan: shape-specialized static unroll.
+        "MISS", "HIT", "RETRACE", "HIT", "HIT",  # Dynamic Scan: T=4, T=7, T=4.
+        "MISS", "HIT",  # Scan: arbitrary axes/directions stay compiled.
+        "MISS", "HIT", "RETRACE", "HIT", "HIT",  # Loop: M=3, M=5, M=3.
+        "MISS", "HIT", "RETRACE", "HIT", "HIT",  # If: then, else, then.
+    ]

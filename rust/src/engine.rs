@@ -1,9 +1,6 @@
 //! Engine core: the plan description (`NodeDesc`/`TensorRef`/`OutRef`) and the `TranslationContext`
-//! a handler uses to Resolve inputs, Bind outputs, and emit MLX ops.
-//!
-//! This is a faithful port of the C++ `mlx_engine.h` / `mlx_backend.cc` translation core, restricted
-//! to the wave-1 (eager, single-`mlx_eval` boundary) path: no compiled-decode fast-path, no
-//! control-flow subgraphs. Those are called out as next-wave work in the README.
+//! a handler uses to Resolve inputs, Bind outputs, and emit MLX ops. It supports eager translation,
+//! compiled decode/prefill/general closures, and recursively inlined control-flow subgraphs.
 
 use std::collections::HashMap;
 use std::os::raw::c_void;
@@ -328,12 +325,23 @@ impl CompiledConfig {
 pub struct CompiledSubgraph {
     /// Static mode + opt-in features (see [`CompiledConfig`]).
     pub config: CompiledConfig,
-    /// Kill-switch off AND no control-flow node AND (for general) no attention/host-eval op → allowed.
+    /// Kill-switch off and no route-specific compile barrier.
     pub enabled: bool,
     /// Have we tried to build the compiled closure yet? (one-shot; failure => eager forever).
     pub attempted: bool,
     /// Is `closure` usable?
     pub valid: bool,
+    /// Host control-flow decisions baked into the current general trace. `If` branches and static
+    /// `Loop` trip counts are specialized explicitly because MLX's shape-keyed compile cache does
+    /// not retrace when scalar input data changes.
+    pub control_flow_key: Option<String>,
+    /// Whether this general plan contains static control flow and therefore needs a host-decision
+    /// specialization key. False for ordinary graphs, avoiding a full node walk on every call.
+    pub control_flow_specialization_enabled: bool,
+    /// Stable synthetic shape token per control-flow specialization. The token is appended as an
+    /// unused closure input so MLX's native shape-keyed cache retains every visited branch/trip
+    /// combination and can replay it when execution returns to that decision.
+    pub control_flow_specializations: HashMap<String, i32>,
     /// The compiled closure.
     pub closure: Option<crate::mlx::Closure>,
     /// Ordered, de-duplicated dynamic ctx inputs = closure inputs `[0..n)`.
@@ -375,6 +383,9 @@ impl CompiledSubgraph {
             enabled: false,
             attempted: false,
             valid: false,
+            control_flow_key: None,
+            control_flow_specialization_enabled: false,
+            control_flow_specializations: HashMap::new(),
             closure: None,
             dyn_inputs: Vec::new(),
             ext_outputs: Vec::new(),
@@ -946,13 +957,21 @@ impl<'a> TranslationContext<'a> {
                 }
             }
             Src::Initializer => {
-                if let Some(a) = self.plan.cache.get(&r.name) {
-                    return Ok(a.as_raw());
-                }
                 let init = r
                     .init
                     .as_ref()
                     .ok_or_else(|| format!("MLX: initializer {} has no data", r.name))?;
+                // Body-local initializers may legally shadow an outer/other-branch name. Qualify
+                // copied body constants by their stable owned allocation so branch specialization
+                // cannot reuse a same-named constant from another scope.
+                let cache_key = if init.owned.is_some() {
+                    format!("{}\0{:p}", r.name, init.data)
+                } else {
+                    r.name.clone()
+                };
+                if let Some(a) = self.plan.cache.get(&cache_key) {
+                    return Ok(a.as_raw());
+                }
                 let ishape: Vec<i32> = init
                     .shape
                     .iter()
@@ -963,7 +982,7 @@ impl<'a> TranslationContext<'a> {
                 let arr =
                     Array::from_data_managed(init.data, &ishape, mlx_dtype_from_onnx(init.dtype));
                 let raw = arr.as_raw();
-                self.plan.cache.insert(r.name.clone(), arr);
+                self.plan.cache.insert(cache_key, arr);
                 Ok(raw)
             }
             Src::Absent => Err("MLX: absent input".to_string()),

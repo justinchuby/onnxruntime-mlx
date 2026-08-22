@@ -40,9 +40,9 @@ use crate::mlx::{self, Array, Closure, VectorArray};
 use crate::sys::mlx as mlxsys;
 use crate::sys::ort;
 
-/// Decide whether any compiled fast path is allowed for this plan. Disabled by the
-/// `ONNXRUNTIME_EP_MLX_NO_COMPILE` kill-switch (forces eager for debugging / numerical A-B) or when the
-/// subgraph contains a control-flow node (its graph structure depends on runtime data).
+/// Decide whether a compiled fast path is allowed for this plan. The caller passes whether that
+/// particular route has an unsupported graph-structure dependency. Static control flow is allowed
+/// on the general route and specialized below.
 pub fn compile_enabled(has_control_flow: bool) -> bool {
     let killed = std::env::var_os("ONNXRUNTIME_EP_MLX_NO_COMPILE")
         .map(|v| v != "0" && !v.is_empty())
@@ -72,11 +72,14 @@ fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
                 | "TfIdfVectorizer"
                 | "Unique"
         )
+        || n.subgraphs
+            .iter()
+            .any(|sg| sg.nodes.iter().any(is_general_compile_unsafe))
 }
 
 /// Decide whether the general compiled fast path is allowed for this plan. Shares the compile
-/// kill-switch (`ONNXRUNTIME_EP_MLX_NO_COMPILE`), and is additionally disabled for control-flow or any
-/// subgraph containing an op that is unsafe to trace once (see [`is_general_compile_unsafe`]). An
+/// kill-switch (`ONNXRUNTIME_EP_MLX_NO_COMPILE`), and is additionally disabled for any subgraph
+/// containing an op that is unsafe to trace (see [`is_general_compile_unsafe`]). An
 /// extra kill-switch `ONNXRUNTIME_EP_MLX_NO_GENERAL_COMPILE` forces eager for A/B numerical validation without
 /// touching the decode path.
 /// A node that would read a DATA-DEPENDENT runtime shape/scalar (a reshape/expand/slice/range target
@@ -84,6 +87,12 @@ fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
 /// shapeless `mlx_compile` trace, so such a subgraph must run eager. Shape-const runtime targets
 /// (derived from `Shape`/`Size`) are compile-safe and do NOT trip this.
 fn reads_data_dependent_shape(n: &NodeDesc) -> bool {
+    if n.subgraphs
+        .iter()
+        .any(|sg| sg.nodes.iter().any(reads_data_dependent_shape))
+    {
+        return true;
+    }
     let idx: &[usize] = match n.op_type.as_str() {
         "Reshape" | "Expand" => &[1],
         "Slice" => &[1, 2, 3, 4],
@@ -110,6 +119,126 @@ pub fn general_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     !nodes
         .iter()
         .any(|n| is_general_compile_unsafe(n) || reads_data_dependent_shape(n))
+}
+
+fn host_scalar_i64(
+    r: &crate::engine::TensorRef,
+    api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+) -> Result<i64, MlxError> {
+    let data = match r.source {
+        Src::Initializer => r
+            .init
+            .as_ref()
+            .map(|init| init.data)
+            .ok_or_else(|| format!("control-flow initializer {} has no data", r.name))?,
+        Src::CtxInput => read_ctx_input_raw(api, kctx, r.ctx_index)?.0,
+        _ => {
+            return Err(format!(
+                "control-flow input {} is not host-readable",
+                r.name
+            ));
+        }
+    };
+    if data.is_null() {
+        return Err(format!("control-flow input {} has null data", r.name));
+    }
+    Ok(unsafe { *(data as *const i64) })
+}
+
+fn host_scalar_bool(
+    r: &crate::engine::TensorRef,
+    api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+) -> Result<bool, MlxError> {
+    let data = match r.source {
+        Src::Initializer => r
+            .init
+            .as_ref()
+            .map(|init| init.data)
+            .ok_or_else(|| format!("control-flow initializer {} has no data", r.name))?,
+        Src::CtxInput => read_ctx_input_raw(api, kctx, r.ctx_index)?.0,
+        _ => {
+            return Err(format!(
+                "control-flow input {} is not host-readable",
+                r.name
+            ));
+        }
+    };
+    if data.is_null() {
+        return Err(format!("control-flow input {} has null data", r.name));
+    }
+    Ok(unsafe { *(data as *const u8) } != 0)
+}
+
+/// Values that change the graph emitted by the eager Rust translator. MLX's shape-keyed cache only
+/// observes tensor shapes/dtypes, so specialize the general closure explicitly when these scalar
+/// values change. Scan needs no data key: its unroll count is the scan input's shape and therefore
+/// already participates in MLX's native shape key.
+pub fn control_flow_specialization_key(
+    nodes: &[NodeDesc],
+    api: *const ort::OrtApi,
+    kctx: *mut ort::OrtKernelContext,
+) -> Result<String, MlxError> {
+    fn append(
+        nodes: &[NodeDesc],
+        api: *const ort::OrtApi,
+        kctx: *mut ort::OrtKernelContext,
+        out: &mut String,
+        ordinal: &mut usize,
+    ) -> Result<(), MlxError> {
+        for node in nodes {
+            match node.op_type.as_str() {
+                "If" => {
+                    let cond_ref = node
+                        .inputs
+                        .first()
+                        .ok_or_else(|| "control-flow If has no condition input".to_string())?;
+                    let cond = host_scalar_bool(cond_ref, api, kctx)?;
+                    let current = *ordinal;
+                    *ordinal += 1;
+                    out.push_str(&format!("I{current}={};", u8::from(cond)));
+                    let branch = if cond { "then_branch" } else { "else_branch" };
+                    if let Some(sg) = node.subgraphs.iter().find(|sg| sg.attr_name == branch) {
+                        append(&sg.nodes, api, kctx, out, ordinal)?;
+                    }
+                }
+                "Loop" => {
+                    let trip_ref = node
+                        .inputs
+                        .first()
+                        .ok_or_else(|| "control-flow Loop has no trip-count input".to_string())?;
+                    let cond_ref = node
+                        .inputs
+                        .get(1)
+                        .ok_or_else(|| "control-flow Loop has no condition input".to_string())?;
+                    let trip = host_scalar_i64(trip_ref, api, kctx)?;
+                    let cond = host_scalar_bool(cond_ref, api, kctx)?;
+                    let current = *ordinal;
+                    *ordinal += 1;
+                    out.push_str(&format!("L{current}={trip},{};", u8::from(cond)));
+                    if cond
+                        && trip > 0
+                        && let Some(sg) = node.subgraphs.iter().find(|sg| sg.attr_name == "body")
+                    {
+                        append(&sg.nodes, api, kctx, out, ordinal)?;
+                    }
+                }
+                "Scan" => {
+                    if let Some(sg) = node.subgraphs.iter().find(|sg| sg.attr_name == "body") {
+                        append(&sg.nodes, api, kctx, out, ordinal)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    let mut key = String::new();
+    let mut ordinal = 0;
+    append(nodes, api, kctx, &mut key, &mut ordinal)?;
+    Ok(key)
 }
 
 /// Decide whether the compiled-PREFILL fast path (Phase 2) is allowed for this plan. Prefill is the
@@ -379,6 +508,39 @@ pub fn try_compiled(
     stream: mlxsys::mlx_stream,
 ) -> Result<bool, MlxError> {
     let mut cfg = slot.get(unsafe { &*plan_ptr }).config;
+    if !slot.get(unsafe { &*plan_ptr }).enabled {
+        return Ok(false);
+    }
+    let control_flow_token = if slot == Slot::General
+        && slot
+            .get(unsafe { &*plan_ptr })
+            .control_flow_specialization_enabled
+    {
+        let key = match control_flow_specialization_key(&unsafe { &*plan_ptr }.nodes, api, kctx) {
+            Ok(key) => key,
+            Err(_) => return Ok(false),
+        };
+        if key.is_empty() {
+            None
+        } else {
+            let general = slot.get_mut(unsafe { &mut *plan_ptr });
+            if let Some(&token) = general.control_flow_specializations.get(&key) {
+                general.control_flow_key = Some(key);
+                Some(token)
+            } else if general.control_flow_specializations.len() >= 16 {
+                return Ok(false);
+            } else {
+                let token = general.control_flow_specializations.len() as i32 + 1;
+                general
+                    .control_flow_specializations
+                    .insert(key.clone(), token);
+                general.control_flow_key = Some(key);
+                Some(token)
+            }
+        }
+    } else {
+        None
+    };
     {
         let plan = unsafe { &*plan_ptr };
         let has_gqa = plan
@@ -406,9 +568,6 @@ pub fn try_compiled(
             cfg.contiguous_outputs = true;
             slot.get_mut(unsafe { &mut *plan_ptr }).config = cfg;
         }
-    }
-    if !slot.get(unsafe { &*plan_ptr }).enabled {
-        return Ok(false);
     }
     // One-time discovery + compile. `build_closure` returns `false` for a TRANSIENT decline (the
     // constant cos/sin cache is not resident yet — it is only populated during the first eager
@@ -487,6 +646,16 @@ pub fn try_compiled(
             // memcpy dominated decode. (ORT KV buffers are 16 KB page-aligned, so Metal takes the
             // true no-copy path; small unaligned inputs fall back to MLX's internal copy.)
             let arr = Array::from_data_managed(data, &ishape, mlx_dtype_from_onnx(dtype));
+            input.append(arr.as_raw());
+            arena.push(arr);
+        }
+        if let Some(token) = control_flow_token {
+            let zeros = vec![0u8; token as usize];
+            let arr = Array::from_data(
+                zeros.as_ptr() as *const std::os::raw::c_void,
+                &[token],
+                mlxsys::mlx_dtype__MLX_UINT8,
+            );
             input.append(arr.as_raw());
             arena.push(arr);
         }
@@ -684,6 +853,28 @@ fn build_closure(
         let plan = unsafe { &*plan_ptr };
         // Ordered, de-duplicated dynamic (non-constant) ctx inputs = the closure input vector.
         let mut seen: HashSet<String> = HashSet::new();
+        fn collect_body_inputs(
+            nodes: &[NodeDesc],
+            seen: &mut HashSet<String>,
+            dyn_inputs: &mut Vec<DynInput>,
+        ) {
+            for node in nodes {
+                for inp in &node.inputs {
+                    if inp.source == Src::CtxInput && !inp.constant && seen.insert(inp.name.clone())
+                    {
+                        dyn_inputs.push(DynInput {
+                            name: inp.name.clone(),
+                            ctx_index: inp.ctx_index,
+                        });
+                    }
+                }
+                if matches!(node.op_type.as_str(), "If" | "Loop" | "Scan") {
+                    for sg in &node.subgraphs {
+                        collect_body_inputs(&sg.nodes, seen, dyn_inputs);
+                    }
+                }
+            }
+        }
         for node in &plan.nodes {
             for inp in &node.inputs {
                 if inp.source == Src::CtxInput && !inp.constant && seen.insert(inp.name.clone()) {
@@ -691,7 +882,6 @@ fn build_closure(
                         name: inp.name.clone(),
                         ctx_index: inp.ctx_index,
                     });
-                    // Read the RoPE start (past length) from a past-KV key input's sequence axis.
                     if (cfg.rope_as_data || cfg.kv_alias)
                         && rope_past < 0
                         && inp.name.contains(".key")
@@ -709,6 +899,11 @@ fn build_closure(
                     .filter(|inp| inp.source == Src::CtxInput && !inp.constant)
                     .map(|inp| inp.ctx_index as i32)
                     .unwrap_or(-1);
+            }
+            if slot == Slot::General && matches!(node.op_type.as_str(), "If" | "Loop" | "Scan") {
+                for sg in &node.subgraphs {
+                    collect_body_inputs(&sg.nodes, &mut seen, &mut dyn_inputs);
+                }
             }
         }
         // External boundary outputs, in stable node/output order.
