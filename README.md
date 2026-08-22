@@ -27,7 +27,8 @@ fragmentation.
 ## Requirements
 
 - macOS on Apple Silicon, ORT 1.29 prebuilt (`ORT_API_VERSION >= 29`)
-- **`mlx-c` (and `mlx`) — a HARD build dependency**: `brew install mlx-c`
+- **`mlx-c` (and `mlx`) — a HARD build dependency**: `brew update && brew install mlx-c`
+  (tested with MLX 0.32.1 and mlx-c 0.6.0_4; wheels bundle these runtime libraries)
 - A **Rust toolchain** (`rustup`) to build the EP from source
 
 ## Versioning (ORT compatibility)
@@ -47,7 +48,7 @@ The EP is a Rust `cdylib` crate under [`rust/`](rust/). Point it at an ONNX Runt
 include directory and `cargo build`:
 
 ```sh
-brew install mlx-c                                  # HARD dependency (mlx-c + mlx)
+brew update && brew install mlx-c                   # HARD dependency (mlx-c + mlx)
 cd rust
 # Either point ORT_INCLUDE_DIR at the ORT headers directly, or set ORT_HOME to an
 # ONNX Runtime release root (build.rs will look in $ORT_HOME/include):
