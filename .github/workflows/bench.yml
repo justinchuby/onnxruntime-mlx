@@ -27,13 +27,19 @@ jobs:
     runs-on: macos-14
     env:
       ORT_VERSION: "1.29.0"
+      MLX_VERSION: "0.32.1"
+      MLXC_VERSION: "0.6.0_4"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # need the base commit to build the comparison dylib
 
       - name: Install mlx-c (hard dependency)
-        run: brew install mlx-c
+        run: |
+          brew update
+          brew install mlx-c
+          test "$(brew list --versions mlx | awk '{print $2}')" = "$MLX_VERSION"
+          test "$(brew list --versions mlx-c | awk '{print $2}')" = "$MLXC_VERSION"
 
       - name: Install Rust toolchain (rustup — no third-party action, supply-chain hardening)
         run: |
