@@ -198,6 +198,8 @@ def gqa_shared_buffer_model(
     head: int,
     do_rotary: int,
     interleaved: int = 0,
+    sliding_window: int = 0,
+    local_window: int = -1,
 ) -> tuple[bytes, dict[str, np.ndarray]]:
     """GroupQueryAttention driven with a fixed-capacity SHARED KV buffer.
 
@@ -208,7 +210,10 @@ def gqa_shared_buffer_model(
     it — the shared-buffer path. ``present`` is emitted at the full ``cap`` capacity with the new
     K/V written in place at rows ``[past, past+seq)``. ORT's CPU GQA computes the reference.
     """
-    assert cap >= past + seq, "capacity must hold the valid keys"
+    if not sliding_window:
+        assert cap >= past + seq, "capacity must hold the valid keys"
+    else:
+        assert 0 < local_window <= cap
     valid = past + seq
     max_seq = cap + 4
     scale = 1.0 / np.sqrt(head)
@@ -220,8 +225,17 @@ def gqa_shared_buffer_model(
     # slack (filled with a recognizable sentinel so a mis-offset write is visible).
     past_k = np.zeros((batch, kv_heads, cap, head), dtype=np.float32)
     past_v = np.zeros((batch, kv_heads, cap, head), dtype=np.float32)
-    past_k[:, :, :past, :] = rng.standard_normal((batch, kv_heads, past, head)).astype(np.float32)
-    past_v[:, :, :past, :] = rng.standard_normal((batch, kv_heads, past, head)).astype(np.float32)
+    if sliding_window:
+        gap = cap - local_window + 1
+        resident = past if past <= cap else past - gap * ((past - cap + gap - 1) // gap)
+    else:
+        resident = past
+    past_k[:, :, :resident, :] = rng.standard_normal(
+        (batch, kv_heads, resident, head)
+    ).astype(np.float32)
+    past_v[:, :, :resident, :] = rng.standard_normal(
+        (batch, kv_heads, resident, head)
+    ).astype(np.float32)
     seqlens_k = np.full((batch,), valid - 1, dtype=np.int32)
     total = np.array([valid], dtype=np.int32)
     cos, sin = rotary_caches(max_seq, head)
@@ -253,6 +267,14 @@ def gqa_shared_buffer_model(
             "scale": float(scale),
             "do_rotary": do_rotary,
             "rotary_interleaved": interleaved,
+            **(
+                {
+                    "sliding_window_cache": 1,
+                    "local_window_size": local_window,
+                }
+                if sliding_window
+                else {}
+            ),
         },
     )
     feeds = {

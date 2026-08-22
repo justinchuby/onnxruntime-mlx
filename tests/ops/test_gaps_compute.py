@@ -364,3 +364,110 @@ def test_rotary_embedding_ms_infer_heads(case: tuple) -> None:
     if not _cpu_can_run(model, feeds):
         pytest.skip("ORT CPU cannot run this com.microsoft RotaryEmbedding form")
     check(model, feeds)
+
+
+@pytest.mark.parametrize(
+    ("layout", "rank", "interleaved", "rot_dim", "ir_dtype", "np_dtype", "scale"),
+    [
+        (0, 3, 0, 0, DT.FLOAT, np.float32, 0.75),
+        (0, 4, 1, 8, DT.FLOAT, np.float32, 0.75),
+        (1, 3, 0, 0, DT.FLOAT, np.float32, 0.75),
+        (1, 4, 1, 8, DT.FLOAT, np.float32, 0.75),
+        (0, 3, 0, 0, DT.FLOAT16, np.float16, 1.0003),
+    ],
+    ids=[
+        "sectioned-3d",
+        "sectioned-4d-partial",
+        "interleaved-3d",
+        "interleaved-4d-partial",
+        "sectioned-3d-fp16-scale",
+    ],
+)
+def test_mrotary_embedding(
+    layout: int,
+    rank: int,
+    interleaved: int,
+    rot_dim: int,
+    ir_dtype,
+    np_dtype,
+    scale: float,
+) -> None:
+    rng = np.random.default_rng(9100 + layout * 100 + rank * 10 + interleaved)
+    b, s, nh, hd, max_seq = 2, 3, 2, 12, 17
+    rot = rot_dim or hd
+    half = rot // 2
+    sections = [2, 2, half - 4]
+    if rank == 3:
+        shape = [b, s, nh * hd]
+        attrs = {"num_heads": nh}
+    else:
+        shape = [b, nh, s, hd]
+        attrs = {}
+    attrs.update(
+        {
+            "interleaved": interleaved,
+            "mrope_layout": layout,
+            "mrope_section": sections,
+            "scale": scale,
+        }
+    )
+    if rot_dim:
+        attrs["rotary_embedding_dim"] = rot_dim
+        attrs["num_heads"] = nh
+    inputs = [
+        m.tensor("input", ir_dtype, shape),
+        m.tensor("position_ids", DT.INT64, [3, b, s]),
+        m.tensor("cos", ir_dtype, [max_seq, half]),
+        m.tensor("sin", ir_dtype, [max_seq, half]),
+    ]
+    model = m.make_model(
+        "MRotaryEmbedding",
+        inputs,
+        [m.tensor("Y", ir_dtype, shape)],
+        domain="com.microsoft",
+        attributes=attrs,
+    )
+    positions = rng.integers(0, max_seq, size=(3, b, s), dtype=np.int64)
+    feeds = {
+        "input": rng.standard_normal(shape).astype(np_dtype),
+        "position_ids": positions,
+        "cos": rng.standard_normal((max_seq, half)).astype(np_dtype),
+        "sin": rng.standard_normal((max_seq, half)).astype(np_dtype),
+    }
+    if not _cpu_can_run(model, feeds):
+        pytest.skip("ORT CPU cannot run com.microsoft.MRotaryEmbedding")
+    check(model, feeds, rtol=3e-3, atol=3e-3)
+
+
+def test_mrotary_embedding_packed_batching():
+    rng = np.random.default_rng(9129)
+    b, s, nh, hd, max_seq = 1, 7, 2, 12, 3
+    shape = [b, s, nh * hd]
+    sections = [2, 2, 2]
+    inputs = [
+        m.tensor("input", DT.FLOAT, shape),
+        m.tensor("position_ids", DT.INT64, [3, b, s]),
+        m.tensor("cos", DT.FLOAT, [max_seq, hd // 2]),
+        m.tensor("sin", DT.FLOAT, [max_seq, hd // 2]),
+    ]
+    model = m.make_model(
+        "MRotaryEmbedding",
+        inputs,
+        [m.tensor("Y", DT.FLOAT, shape)],
+        domain="com.microsoft",
+        attributes={
+            "num_heads": nh,
+            "mrope_section": sections,
+            "is_packed_batching": 1,
+        },
+    )
+    feeds = {
+        "input": rng.standard_normal(shape).astype(np.float32),
+        "position_ids": np.array(
+            [[[0, 1, 2, 0, 1, 0, 1]], [[0, 1, 2, 0, 1, 0, 1]], [[0, 1, 2, 0, 1, 0, 1]]],
+            dtype=np.int64,
+        ),
+        "cos": rng.standard_normal((max_seq, hd // 2)).astype(np.float32),
+        "sin": rng.standard_normal((max_seq, hd // 2)).astype(np.float32),
+    }
+    check(model, feeds, rtol=3e-4, atol=3e-4)

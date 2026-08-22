@@ -49,6 +49,88 @@ def _build_11(
     return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
 
 
+def test_group_query_attention_qk_norm_inputs_ort129():
+    b, s, past, nh, kvh, head = 1, 3, 2, 4, 2, 8
+    total = past + s
+    rng = np.random.default_rng(129)
+    q = rng.standard_normal((b, s, nh * head)).astype(np.float32)
+    k = rng.standard_normal((b, s, kvh * head)).astype(np.float32)
+    v = rng.standard_normal((b, s, kvh * head)).astype(np.float32)
+    pk = rng.standard_normal((b, kvh, past, head)).astype(np.float32)
+    pv = rng.standard_normal((b, kvh, past, head)).astype(np.float32)
+    qw = np.linspace(0.75, 1.25, head).astype(np.float32)
+    kw = np.linspace(1.25, 0.75, head).astype(np.float32)
+    eps = 1e-5
+    absent = lambda: m.tensor("", DT.FLOAT, [])
+    inputs = [
+        m.tensor("q", DT.FLOAT, [b, s, nh * head]),
+        m.tensor("k", DT.FLOAT, [b, s, kvh * head]),
+        m.tensor("v", DT.FLOAT, [b, s, kvh * head]),
+        m.tensor("pk", DT.FLOAT, [b, kvh, past, head]),
+        m.tensor("pv", DT.FLOAT, [b, kvh, past, head]),
+        m.tensor("seqlens", DT.INT32, [b]),
+        m.tensor("total", DT.INT32, [1]),
+        absent(),
+        absent(),
+        absent(),
+        absent(),
+        absent(),
+        absent(),
+        absent(),
+        m.tensor("qw", DT.FLOAT, [head]),
+        m.tensor("kw", DT.FLOAT, [head]),
+    ]
+    outputs = [
+        m.tensor("out", DT.FLOAT, [b, s, nh * head]),
+        m.tensor("present_k", DT.FLOAT, [b, kvh, total, head]),
+        m.tensor("present_v", DT.FLOAT, [b, kvh, total, head]),
+    ]
+    model = _build_11(
+        inputs,
+        outputs,
+        {
+            "num_heads": nh,
+            "kv_num_heads": kvh,
+            "do_rotary": 0,
+            "qk_norm_epsilon": eps,
+        },
+    )
+    qh = q.reshape(b, s, nh, head).transpose(0, 2, 1, 3)
+    kh = k.reshape(b, s, kvh, head).transpose(0, 2, 1, 3)
+    vh = v.reshape(b, s, kvh, head).transpose(0, 2, 1, 3)
+    qh = qh / np.sqrt(np.mean(qh * qh, axis=-1, keepdims=True) + eps) * qw
+    kh = kh / np.sqrt(np.mean(kh * kh, axis=-1, keepdims=True) + eps) * kw
+    present_k = np.concatenate([pk, kh], axis=2)
+    present_v = np.concatenate([pv, vh], axis=2)
+    keys = np.repeat(present_k, nh // kvh, axis=1)
+    vals = np.repeat(present_v, nh // kvh, axis=1)
+    scores = np.matmul(qh, keys.transpose(0, 1, 3, 2)) / np.sqrt(head)
+    causal = np.arange(total)[None, :] <= (past + np.arange(s))[:, None]
+    scores = np.where(causal[None, None], scores, -np.inf)
+    probs = np.exp(scores - scores.max(axis=-1, keepdims=True))
+    probs /= probs.sum(axis=-1, keepdims=True)
+    expected_out = np.matmul(probs, vals).transpose(0, 2, 1, 3).reshape(b, s, nh * head)
+    feeds = {
+        "q": q,
+        "k": k,
+        "v": v,
+        "pk": pk,
+        "pv": pv,
+        "seqlens": np.array([total - 1], dtype=np.int32),
+        "total": np.array([total], dtype=np.int32),
+        "qw": qw,
+        "kw": kw,
+    }
+    m.assert_mlx_claims(model, feeds)
+    m.assert_matches_ref(
+        model,
+        feeds,
+        [expected_out, present_k, present_v],
+        rtol=3e-3,
+        atol=3e-3,
+    )
+
+
 def _attention_bias(batch: int, seq: int, past: int, total: int, window: int) -> np.ndarray:
     """[B,1,S,total] additive mask: finite bias on causal-allowed in-window keys, large-negative on
     out-of-window keys; future keys left at 0 (masked by the op's own causal masking)."""

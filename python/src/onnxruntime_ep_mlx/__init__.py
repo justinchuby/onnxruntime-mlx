@@ -12,9 +12,9 @@ provider and a thin registration helper. Typical usage::
         providers=["MLXExecutionProvider", "CPUExecutionProvider"],
     )
 
-The plugin targets the ONNX Runtime plugin-EP C ABI (ORT_API_VERSION >= 27,
-i.e. onnxruntime >= 1.22 with the plugin-EP API). ``onnxruntime`` must expose
-``register_execution_provider_library`` (available in onnxruntime >= 1.22).
+The plugin targets the ONNX Runtime plugin-EP C ABI (ORT_API_VERSION >= 29,
+i.e. onnxruntime >= 1.29). ``onnxruntime`` must expose
+``register_execution_provider_library``.
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ def _import_onnxruntime() -> "ort":
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "onnxruntime is required to register the MLX execution provider. "
-            "Install it with `pip install 'onnxruntime>=1.22'`."
+            "Install it with `pip install 'onnxruntime>=1.29'`."
         ) from exc
     return ort
 
@@ -125,7 +125,7 @@ def register_execution_provider_library(name: str = EP_NAME) -> str:
         raise RuntimeError(
             "The installed onnxruntime does not expose "
             "register_execution_provider_library (plugin-EP C API). "
-            "Upgrade to onnxruntime>=1.22."
+            "Upgrade to onnxruntime>=1.29."
         )
     lib = library_path()
     ort.register_execution_provider_library(name, lib)

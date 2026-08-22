@@ -7,6 +7,8 @@ use std::borrow::Cow;
 use std::os::raw::c_char;
 use std::sync::LazyLock;
 
+use half::{bf16, f16};
+
 use crate::engine::{MlxError, NodeDesc, TranslationContext};
 use crate::sys::ort;
 
@@ -992,9 +994,7 @@ impl NodeView {
         }
     }
 
-    /// Read a scalar (count-1) constant-initializer integer input `i` as f64 at CLAIM time, honoring
-    /// int16/int32/int64 element types (the Range element dtypes). Returns None when the input is not
-    /// a readable scalar integer constant initializer.
+    /// Read a scalar constant initializer as f64 for Range claim-time shape validation.
     pub fn read_const_scalar_f64(&self, i: usize) -> Option<f64> {
         if !self.is_constant_initializer(i) {
             return None;
@@ -1035,6 +1035,15 @@ impl NodeView {
                 }
                 t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => {
                     Some(*(data as *const i64) as f64)
+                }
+                t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => {
+                    Some(*(data as *const f32) as f64)
+                }
+                t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => {
+                    Some(f16::from_bits(*(data as *const u16)).to_f64())
+                }
+                t if t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16 => {
+                    Some(bf16::from_bits(*(data as *const u16)).to_f64())
                 }
                 _ => None,
             }
@@ -1197,11 +1206,14 @@ pub fn is_int_index(t: ort::ONNXTensorElementDataType) -> bool {
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
 }
 
-/// int16/int32/int64 — the Range element dtype.
+/// MLX-compatible Range element dtypes.
 pub fn is_range_type(t: ort::ONNXTensorElementDataType) -> bool {
     t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16
+        || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16
 }
 
 /// Strict elementwise-or-trailing-suffix broadcast (rejects mismatched non-suffix shapes). A scalar

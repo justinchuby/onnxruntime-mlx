@@ -15,7 +15,7 @@ include in any ``pytest`` invocation:
   * ``ONNX_TESTS_DIR`` — a cbourjau/onnx-tests clone (defaults to a sibling
     checkout ``../onnx-tests``).
   * ``pixi`` — the onnx-tests python env (``pixi run postinstall`` done, with
-    onnxruntime 1.27 installed to match the EP's ORT_API_VERSION).
+    onnxruntime 1.29 installed to match the EP's ORT_API_VERSION).
 
 Env knobs: ``MAX_EXAMPLES`` (20), ``SEED`` (0), ``OPS`` (space-separated
 subset override), ``MLX_EP_NAME``, ``ORT_LIB_DIR``, ``PIXI``.
@@ -60,7 +60,7 @@ def _ort_lib_dir() -> str:
         return explicit
     hits = sorted(
         (REPO_ROOT.parent / "onnx-genai" / "target").glob(
-            "*/build/onnx-genai-ort-sys-*/out/ort-prebuilt/lib/libonnxruntime.1.27.0.dylib"
+            "*/build/onnx-genai-ort-sys-*/out/ort-prebuilt/lib/libonnxruntime.1.29.0.dylib"
         )
     )
     return str(hits[-1].parent) if hits else ""

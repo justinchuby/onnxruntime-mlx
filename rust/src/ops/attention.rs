@@ -188,6 +188,36 @@ fn causal_mask_topleft(
     ctx.where_(allow, zero, neg)
 }
 
+fn causal_window_mask(
+    ctx: &mut TranslationContext,
+    q_len: i32,
+    k_len: i32,
+    past_seq: i32,
+    window: i32,
+    dt: mlx::mlx_dtype,
+) -> Result<mlx::mlx_array, MlxError> {
+    let i32t = mlx::mlx_dtype__MLX_INT32;
+    let key_pos = ctx.arange(0.0, k_len as f64, 1.0, i32t)?;
+    let key_pos = ctx.reshape(key_pos, &[1, k_len])?;
+    let q_pos = ctx.arange(past_seq as f64, (past_seq + q_len) as f64, 1.0, i32t)?;
+    let q_pos = ctx.reshape(q_pos, &[q_len, 1])?;
+    let upper = ctx.less_equal(key_pos, q_pos)?;
+    let lower_pos = ctx.arange(
+        (past_seq - window + 1) as f64,
+        (past_seq + q_len - window + 1) as f64,
+        1.0,
+        i32t,
+    )?;
+    let lower_pos = ctx.reshape(lower_pos, &[q_len, 1])?;
+    let lower = ctx.less_equal(lower_pos, key_pos)?;
+    let allow = ctx.binary(mlx::mlx_logical_and, upper, lower)?;
+    let zero = ctx.scalar_f32(0.0);
+    let zero = ctx.astype(zero, dt)?;
+    let neg = ctx.scalar_f32(f32::NEG_INFINITY);
+    let neg = ctx.astype(neg, dt)?;
+    ctx.where_(allow, zero, neg)
+}
+
 /// The ONNX causal mask, with any supplied `attn_mask` folded into it.
 ///
 /// ONNX `Attention` applies `is_causal` *and* `attn_mask` when both are given,
@@ -528,6 +558,8 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     let kv_heads = attr_int(n, "kv_num_heads", 0) as i32;
     let interleaved = attr_int(n, "rotary_interleaved", 0) != 0;
     let do_rotary = !n.ints.contains_key("do_rotary") || attr_int(n, "do_rotary", 1) != 0;
+    let sliding = attr_int(n, "sliding_window_cache", 0) != 0;
+    let local_window = attr_int(n, "local_window_size", -1) as i32;
 
     let packed_qkv = n.inputs[1].source == Src::Absent && n.inputs[2].source == Src::Absent;
     let (q, k, v) = if packed_qkv {
@@ -594,7 +626,9 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     // Shared-buffer mode is exactly `cap > valid_past` (past_k is a max-length buffer). The compiled
     // decode trace cannot eval mid-graph, so it takes the mode from the once-detected plan flag
     // (`ctx.shared_kv()`) and drives the in-place write with a DATA offset instead (see below).
-    let (shared_buffer, valid_past) = if ctx.rope_dynamic() {
+    let (shared_buffer, valid_past) = if sliding {
+        (true, 0)
+    } else if ctx.rope_dynamic() {
         // valid_past (int) is unused on the shapeless compiled DECODE path: RoPE uses the pre-sliced
         // synth rows and the KV write/mask use a data offset derived from total_sequence_length. On
         // the shape-keyed compiled PREFILL path valid_past IS static (known per shape key), so use it
@@ -626,7 +660,15 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     let mut kh = split_heads(ctx, k, b, s, kv_heads, head)?;
     let vh = split_heads(ctx, v, b, s, kv_heads, head)?;
 
-    if do_rotary {
+    if present(n, 14) {
+        let q_weight = ctx.resolve(&n.inputs[14])?;
+        let k_weight = ctx.resolve(&n.inputs[15])?;
+        let eps = n.floats.get("qk_norm_epsilon").copied().unwrap_or(1e-6);
+        qh = ctx.emit(|res, st| unsafe { mlx::mlx_fast_rms_norm(res, qh, q_weight, eps, st) })?;
+        kh = ctx.emit(|res, st| unsafe { mlx::mlx_fast_rms_norm(res, kh, k_weight, eps, st) })?;
+    }
+
+    if do_rotary && !sliding {
         let cos = ctx.resolve(&n.inputs[7])?; // [max_seq, rot/2]
         let sin = ctx.resolve(&n.inputs[8])?;
         let half = ctx.shape_of(cos)[1]; // rot/2
@@ -680,35 +722,190 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     //     additive mask over the whole cap buffer (the tail beyond valid_past+S masked to -inf).
     //     Keeping every op statically shaped lets the shapeless compiled closure express it.
     //   * Growing: concat past+new along the sequence axis (unchanged legacy behavior).
-    let (present_k, present_v, attn) =
-        if shared_buffer && ctx.rope_dynamic() && ctx.compiled_shape_keyed() {
-            let start = [0, 0, valid_past, 0];
-            let stop = [b, kv_heads, valid_past + s, head];
-            let pk = ctx.slice_update(past_k, kh, &start, &stop)?;
-            let pv = ctx.slice_update(past_v, vh, &start, &stop)?;
-            let vp1 = valid_past + s;
-            let ak = slice(ctx, pk, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
-            let av = slice(ctx, pv, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
-            let attn = sdpa(ctx, qh, ak, av, scale, b"causal\0", empty_array())?;
-            (pk, pv, attn)
-        } else if shared_buffer && ctx.rope_dynamic() {
-            gqa_shared_compiled(ctx, n, past_k, past_v, kh, vh, qh, s, cap, scale)?
-        } else if shared_buffer {
-            let start = [0, 0, valid_past, 0];
-            let stop = [b, kv_heads, valid_past + s, head];
-            let pk = ctx.slice_update(past_k, kh, &start, &stop)?;
-            let pv = ctx.slice_update(past_v, vh, &start, &stop)?;
-            let vp1 = valid_past + s;
-            let ak = slice(ctx, pk, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
-            let av = slice(ctx, pv, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
-            let attn = gqa_eager_sdpa(ctx, n, qh, ak, av, scale, s, valid_past, vp1)?;
-            (pk, pv, attn)
-        } else {
-            let pk = concat2(ctx, past_k, kh, 2)?;
-            let pv = concat2(ctx, past_v, vh, 2)?;
-            let attn = gqa_eager_sdpa(ctx, n, qh, pk, pv, scale, s, valid_past, valid_past + s)?;
-            (pk, pv, attn)
+    let (present_k, present_v, attn) = if sliding {
+        let seqlens = read_int_input(ctx, &n.inputs[5])?;
+        if seqlens.len() != b as usize {
+            return Err("GroupQueryAttention: seqlens_k must have one value per batch".to_string());
+        }
+        if local_window <= 0 || cap < local_window {
+            return Err(
+                "GroupQueryAttention: sliding cache requires 0 < local_window_size <= capacity"
+                    .to_string(),
+            );
+        }
+        let gap = cap - local_window + 1;
+        let cache_end = |length: i64| -> i32 {
+            if length <= cap as i64 {
+                length as i32
+            } else {
+                let overflow = length - cap as i64;
+                let reclaimed = gap as i64 * ((overflow + gap as i64 - 1) / gap as i64);
+                (length - reclaimed) as i32
+            }
         };
+        let mut geometry = Vec::with_capacity(b as usize);
+        let mut use_staging = false;
+        for &seqlen in &seqlens {
+            let p = (seqlen + 1 - s as i64).max(0);
+            let before = cache_end(p);
+            let after = cache_end(p + s as i64);
+            let kept = after - s;
+            let required = p.min((local_window - 1) as i64) as i32;
+            use_staging |= kept < required;
+            geometry.push((p as i32, before, after, before - kept));
+        }
+
+        let rope_data = if do_rotary {
+            let cos = ctx.resolve(&n.inputs[7])?;
+            let sin = ctx.resolve(&n.inputs[8])?;
+            let half = ctx.shape_of(cos)[1];
+            let freqs = if is_fp32(ctx, cos) {
+                Some(rope_freqs_from_cache(ctx, cos, sin, half)?)
+            } else {
+                None
+            };
+            Some((cos, sin, half, freqs))
+        } else {
+            None
+        };
+
+        let mut present_keys = VectorArray::new();
+        let mut present_values = VectorArray::new();
+        let mut attn_batches = VectorArray::new();
+        for batch_index in 0..b {
+            let (absolute_past, end_before, end_after, seed_offset) =
+                geometry[batch_index as usize];
+            let mut qb = slice(
+                ctx,
+                qh,
+                &[batch_index, 0, 0, 0],
+                &[batch_index + 1, num_heads, s, head],
+            )?;
+            let mut kb = slice(
+                ctx,
+                kh,
+                &[batch_index, 0, 0, 0],
+                &[batch_index + 1, kv_heads, s, head],
+            )?;
+            let vb = slice(
+                ctx,
+                vh,
+                &[batch_index, 0, 0, 0],
+                &[batch_index + 1, kv_heads, s, head],
+            )?;
+            if let Some((cos, sin, half, freqs)) = rope_data {
+                if let Some(freqs) = freqs {
+                    qb = fast_rope_static(ctx, qb, 2 * half, interleaved, absolute_past, freqs)?;
+                    kb = fast_rope_static(ctx, kb, 2 * half, interleaved, absolute_past, freqs)?;
+                } else {
+                    let cr = cos_sin_row(ctx, cos, absolute_past, s, half)?;
+                    let sr = cos_sin_row(ctx, sin, absolute_past, s, half)?;
+                    qb = gqa_rope(ctx, qb, cr, sr, half, interleaved)?;
+                    kb = gqa_rope(ctx, kb, cr, sr, half, interleaved)?;
+                }
+            }
+
+            let past_kb = slice(
+                ctx,
+                past_k,
+                &[batch_index, 0, 0, 0],
+                &[batch_index + 1, kv_heads, cap, head],
+            )?;
+            let past_vb = slice(
+                ctx,
+                past_v,
+                &[batch_index, 0, 0, 0],
+                &[batch_index + 1, kv_heads, cap, head],
+            )?;
+            let seed_start = if use_staging { 0 } else { seed_offset };
+            let seed_k = slice(
+                ctx,
+                past_kb,
+                &[0, 0, seed_start, 0],
+                &[1, kv_heads, end_before, head],
+            )?;
+            let seed_v = slice(
+                ctx,
+                past_vb,
+                &[0, 0, seed_start, 0],
+                &[1, kv_heads, end_before, head],
+            )?;
+            let work_k = concat2(ctx, seed_k, kb, 2)?;
+            let work_v = concat2(ctx, seed_v, vb, 2)?;
+            let seed_rows = end_before - seed_start;
+            let k_len = seed_rows + s;
+            let mask =
+                causal_window_mask(ctx, s, k_len, seed_rows, local_window, ctx.dtype_of(qb))?;
+            let mask = ctx.reshape(mask, &[1, 1, s, k_len])?;
+            let ab = sdpa(ctx, qb, work_k, work_v, scale, b"array\0", mask)?;
+
+            let write_start = if use_staging { seed_offset } else { 0 };
+            let write_k = slice(
+                ctx,
+                work_k,
+                &[0, 0, write_start, 0],
+                &[1, kv_heads, k_len, head],
+            )?;
+            let write_v = slice(
+                ctx,
+                work_v,
+                &[0, 0, write_start, 0],
+                &[1, kv_heads, k_len, head],
+            )?;
+            let (pk, pv) = if end_after < cap {
+                let kdt = ctx.dtype_of(past_kb);
+                let vdt = ctx.dtype_of(past_vb);
+                let tail_k = ctx.zeros(&[1, kv_heads, cap - end_after, head], kdt)?;
+                let tail_v = ctx.zeros(&[1, kv_heads, cap - end_after, head], vdt)?;
+                (
+                    concat2(ctx, write_k, tail_k, 2)?,
+                    concat2(ctx, write_v, tail_v, 2)?,
+                )
+            } else {
+                (write_k, write_v)
+            };
+            present_keys.append(pk);
+            present_values.append(pv);
+            attn_batches.append(ab);
+        }
+        let pk = ctx.emit(|res, st| unsafe {
+            mlx::mlx_concatenate_axis(res, present_keys.as_raw(), 0, st)
+        })?;
+        let pv = ctx.emit(|res, st| unsafe {
+            mlx::mlx_concatenate_axis(res, present_values.as_raw(), 0, st)
+        })?;
+        let a = ctx.emit(|res, st| unsafe {
+            mlx::mlx_concatenate_axis(res, attn_batches.as_raw(), 0, st)
+        })?;
+        (pk, pv, a)
+    } else if shared_buffer && ctx.rope_dynamic() && ctx.compiled_shape_keyed() {
+        let start = [0, 0, valid_past, 0];
+        let stop = [b, kv_heads, valid_past + s, head];
+        let pk = ctx.slice_update(past_k, kh, &start, &stop)?;
+        let pv = ctx.slice_update(past_v, vh, &start, &stop)?;
+        let vp1 = valid_past + s;
+        let ak = slice(ctx, pk, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
+        let av = slice(ctx, pv, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
+        let attn = sdpa(ctx, qh, ak, av, scale, b"causal\0", empty_array())?;
+        (pk, pv, attn)
+    } else if shared_buffer && ctx.rope_dynamic() {
+        gqa_shared_compiled(ctx, n, past_k, past_v, kh, vh, qh, s, cap, scale)?
+    } else if shared_buffer {
+        let start = [0, 0, valid_past, 0];
+        let stop = [b, kv_heads, valid_past + s, head];
+        let pk = ctx.slice_update(past_k, kh, &start, &stop)?;
+        let pv = ctx.slice_update(past_v, vh, &start, &stop)?;
+        let vp1 = valid_past + s;
+        let ak = slice(ctx, pk, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
+        let av = slice(ctx, pv, &[0, 0, 0, 0], &[b, kv_heads, vp1, head])?;
+        let attn = gqa_eager_sdpa(ctx, n, qh, ak, av, scale, s, valid_past, vp1)?;
+        (pk, pv, attn)
+    } else {
+        let pk = concat2(ctx, past_k, kh, 2)?;
+        let pv = concat2(ctx, past_v, vh, 2)?;
+        let attn = gqa_eager_sdpa(ctx, n, qh, pk, pv, scale, s, valid_past, valid_past + s)?;
+        (pk, pv, attn)
+    };
 
     // [B,H,S,hd] -> [B,S,H*hd].
     let t = ctx.transpose(attn, &[0, 2, 1, 3])?;
@@ -733,7 +930,7 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     // written this step at axis-2 offset `valid_past`. Register the delta so the boundary copy-out
     // is O(new-tokens) instead of O(capacity). (No-op for the growing path, which never sets
     // `shared_buffer`, keeping its full copy-out bit-for-bit unchanged.)
-    if shared_buffer {
+    if shared_buffer && !sliding {
         if n.outputs.len() >= 2 {
             ctx.record_kv_present(
                 &n.outputs[1].name,
@@ -1213,6 +1410,103 @@ fn rotary_embedding_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(),
     Ok(())
 }
 
+fn mrotary_embedding_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let pos = ctx.resolve(&n.inputs[1])?;
+    let cos_cache = ctx.resolve(&n.inputs[2])?;
+    let sin_cache = ctx.resolve(&n.inputs[3])?;
+    let xs = ctx.shape_of(x);
+    let rank = xs.len();
+    let (b, nh, s, hd, x4) = if rank == 4 {
+        (xs[0], xs[1], xs[2], xs[3], x)
+    } else {
+        let nh = attr_int(n, "num_heads", 0) as i32;
+        let hd = xs[2] / nh;
+        let reshaped = ctx.reshape(x, &[xs[0], xs[1], nh, hd])?;
+        (
+            xs[0],
+            nh,
+            xs[1],
+            hd,
+            ctx.transpose(reshaped, &[0, 2, 1, 3])?,
+        )
+    };
+    let half = ctx.shape_of(cos_cache)[1];
+    let sections = n
+        .int_arrays
+        .get("mrope_section")
+        .ok_or("MRotaryEmbedding: mrope_section is required")?;
+    let layout = attr_int(n, "mrope_layout", 0);
+
+    let mut cos_streams = Vec::with_capacity(3);
+    let mut sin_streams = Vec::with_capacity(3);
+    for stream in 0..3 {
+        let ids = slice(ctx, pos, &[stream, 0, 0], &[stream + 1, b, s])?;
+        let ids = ctx.squeeze(ids, 0)?;
+        let ids = ctx.astype(ids, mlx::mlx_dtype__MLX_INT32)?;
+        cos_streams
+            .push(ctx.emit(|res, st| unsafe { mlx::mlx_take_axis(res, cos_cache, ids, 0, st) })?);
+        sin_streams
+            .push(ctx.emit(|res, st| unsafe { mlx::mlx_take_axis(res, sin_cache, ids, 0, st) })?);
+    }
+
+    let mut assignment = vec![0usize; half as usize];
+    if layout == 0 {
+        let mut col = 0usize;
+        for (stream, &width) in sections.iter().enumerate() {
+            for _ in 0..width {
+                assignment[col] = stream;
+                col += 1;
+            }
+        }
+    } else {
+        for stream in 1..3 {
+            let stop = sections[stream] * 3;
+            let mut col = stream as i64;
+            while col < stop && col < half as i64 {
+                assignment[col as usize] = stream;
+                col += 3;
+            }
+        }
+    }
+
+    let combine = |ctx: &mut TranslationContext,
+                   streams: &[mlx::mlx_array]|
+     -> Result<mlx::mlx_array, MlxError> {
+        let mut out = slice(ctx, streams[assignment[0]], &[0, 0, 0], &[b, s, 1])?;
+        for col in 1..half {
+            let selected = slice(
+                ctx,
+                streams[assignment[col as usize]],
+                &[0, 0, col],
+                &[b, s, col + 1],
+            )?;
+            out = concat2(ctx, out, selected, 2)?;
+        }
+        let scale = n.floats.get("scale").copied().unwrap_or(1.0);
+        if scale != 1.0 {
+            let dtype = ctx.dtype_of(out);
+            out = ctx.astype(out, mlx::mlx_dtype__MLX_FLOAT32)?;
+            let scalar = ctx.scalar_f32(scale);
+            out = ctx.mul(out, scalar)?;
+            out = ctx.astype(out, dtype)?;
+        }
+        ctx.reshape(out, &[b, 1, s, half])
+    };
+    let cos4 = combine(ctx, &cos_streams)?;
+    let sin4 = combine(ctx, &sin_streams)?;
+    let interleaved = attr_int(n, "interleaved", 0) != 0;
+    let out4 = rope_apply(ctx, x4, cos4, sin4, half, interleaved)?;
+    if rank == 4 {
+        ctx.bind(&n.outputs[0], out4);
+    } else {
+        let out = ctx.transpose(out4, &[0, 2, 1, 3])?;
+        let out = ctx.reshape(out, &[b, s, nh * hd])?;
+        ctx.bind(&n.outputs[0], out);
+    }
+    Ok(())
+}
+
 // ---- claim predicates --------------------------------------------------------------------------
 
 fn dtype_of(node: &NodeView, i: usize) -> Option<ort::ONNXTensorElementDataType> {
@@ -1232,6 +1526,7 @@ fn is_int32(t: ort::ONNXTensorElementDataType) -> bool {
 ///     All floating inputs/outputs share one dtype; seqlens_k / total_sequence_length are int32.
 fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
     require!(node.num_outputs() > 0, "requires at least 1 output");
+    let sliding = node.int_attr("sliding_window_cache", 0) != 0;
     let out_type = match node.output_info(0) {
         Some(o) if is_mlx_float(o.dtype) => o.dtype,
         Some(o) => deny!(
@@ -1242,44 +1537,66 @@ fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
     };
     let ninputs = node.num_inputs();
     require!(
-        ninputs == 7 || ninputs == 9 || ninputs == 11,
-        "expects 7 inputs (q, k, v, past_k, past_v, seqlens_k, total_seq), 9 inputs \
-         (…, cos, sin), or 11 inputs (…, position_ids, attention_bias), got {}",
+        (7..=16).contains(&ninputs),
+        "expects 7 required inputs plus optional rotary/bias/QK-norm inputs, got {}",
         ninputs
     );
     // The 11-input Gemma3n variant only maps to MLX when rotary is external (do_rotary=0): cos/sin at
     // 7,8 are absent, so we must not require their dtype and must not resolve them in the handler.
-    let has_bias = ninputs == 11;
+    let has_bias = node.input_present(10);
     let do_rotary = node.int_attr("do_rotary", 1) != 0;
     require!(
         ninputs != 7 || !do_rotary,
         "7-input GroupQueryAttention requires do_rotary=0 because cos/sin caches are absent"
     );
+    if sliding {
+        require!(
+            node.int_attr("local_window_size", -1) > 0,
+            "sliding_window_cache=1 requires local_window_size > 0"
+        );
+        require!(
+            !has_bias,
+            "sliding_window_cache is incompatible with attention_bias"
+        );
+        require!(
+            node.output_present(1) && node.output_present(2),
+            "sliding_window_cache requires present key/value outputs"
+        );
+        let window = node.int_attr("local_window_size", -1);
+        require!(
+            node.input_info(3)
+                .is_some_and(|v| v.shape.len() == 4 && v.shape[2] >= window),
+            "sliding-window key cache capacity must be at least local_window_size"
+        );
+        require!(
+            node.input_info(4)
+                .is_some_and(|v| v.shape.len() == 4 && v.shape[2] >= window),
+            "sliding-window value cache capacity must be at least local_window_size"
+        );
+    }
     let packed_qkv = node.input_present(0) && !node.input_present(1) && !node.input_present(2);
     require!(
         packed_qkv || (node.input_present(0) && node.input_present(1) && node.input_present(2)),
         "Q/K/V must be either all separate or packed in input 0 with inputs 1 and 2 absent"
     );
-    if has_bias {
-        require!(
-            !do_rotary,
-            "11-input GroupQueryAttention is only supported with do_rotary=0 (external rotary); \
-             got do_rotary=1"
-        );
-    }
     // Float inputs that must match the output dtype. cos/sin (7,8) exist only in the 9-input form
     // WITH in-op rotary (do_rotary=1); with external rotary (do_rotary=0) they are absent, as is the
     // whole 11-input Gemma3n variant.
-    let float_idx: &[usize] = if packed_qkv && (has_bias || !do_rotary) {
-        &[0usize, 3, 4]
-    } else if packed_qkv {
-        &[0usize, 3, 4, 7, 8]
-    } else if has_bias || !do_rotary {
-        &[0usize, 1, 2, 3, 4]
+    let mut float_idx = if packed_qkv {
+        vec![0usize, 3, 4]
     } else {
-        &[0usize, 1, 2, 3, 4, 7, 8]
+        vec![0usize, 1, 2, 3, 4]
     };
-    for &idx in float_idx {
+    if do_rotary {
+        float_idx.extend([7, 8]);
+    }
+    if has_bias {
+        float_idx.push(10);
+    }
+    if node.input_present(14) {
+        float_idx.extend([14, 15]);
+    }
+    for idx in float_idx {
         let dtype = match dtype_of(node, idx) {
             Some(dtype) => dtype,
             None => deny!("input {} lacks tensor type/shape info", idx),
@@ -1321,10 +1638,6 @@ fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
     // SDPA scores. Require it present, sharing the output float dtype, and rank 4. position_ids
     // (input 9) is ignored when do_rotary=0, so it may be present or absent.
     if has_bias {
-        require!(
-            node.input_present(10),
-            "11-input GroupQueryAttention requires attention_bias (input 10)"
-        );
         let bias = match node.input_info(10) {
             Some(info) => info,
             None => deny!("attention_bias (input 10) lacks tensor type/shape info"),
@@ -1367,6 +1680,47 @@ fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
             hidden,
             total_heads
         );
+    }
+    require!(
+        !node.input_present(9) || !do_rotary,
+        "custom position_ids with in-op rotary are unsupported"
+    );
+    require!(
+        !node.input_present(11),
+        "head_sink/smooth softmax is unsupported"
+    );
+    require!(
+        !node.input_present(12) && !node.input_present(13),
+        "quantized KV cache scales are unsupported"
+    );
+    require!(
+        node.string_attr("k_quant_type", "NONE") == "NONE"
+            && node.string_attr("v_quant_type", "NONE") == "NONE",
+        "quantized KV cache is unsupported"
+    );
+    require!(
+        node.input_present(14) == node.input_present(15),
+        "q_norm_weight and k_norm_weight must be provided together"
+    );
+    if node.input_present(14) {
+        let q = node.input_info(0).unwrap();
+        let head = if packed_qkv {
+            q.shape[2] / (nh + 2 * kvh)
+        } else {
+            require!(
+                q.shape.len() == 3 && q.shape[2] > 0 && q.shape[2] % nh == 0,
+                "query hidden size must be divisible by num_heads"
+            );
+            q.shape[2] / nh
+        };
+        for idx in [14usize, 15] {
+            let weight = node.input_info(idx).unwrap();
+            require!(
+                weight.shape == [head],
+                "Q/K norm weight {} must have shape [head_size={head}]",
+                idx
+            );
+        }
     }
     require!(
         node.int_attr("smooth_softmax", 0) != 1,
@@ -1909,6 +2263,81 @@ fn rotary_embedding_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+fn mrotary_embedding_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 4 && node.num_outputs() == 1,
+        "MRotaryEmbedding expects 4 inputs and 1 output"
+    );
+    let (x, pos, cos, sin, out) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.input_info(3),
+        node.output_info(0),
+    ) {
+        (Some(x), Some(pos), Some(cos), Some(sin), Some(out)) => (x, pos, cos, sin, out),
+        _ => deny!("MRotaryEmbedding requires typed input/output tensors"),
+    };
+    require!(
+        is_mlx_float(x.dtype)
+            && cos.dtype == x.dtype
+            && sin.dtype == x.dtype
+            && out.dtype == x.dtype,
+        "input, caches, and output must share one MLX float dtype"
+    );
+    require!(
+        (x.shape.len() == 3 || x.shape.len() == 4)
+            && x.shape.iter().all(|&d| d > 0)
+            && out.shape == x.shape,
+        "input/output must have equal static positive rank-3/rank-4 shapes"
+    );
+    let (b, s, hd) = if x.shape.len() == 4 {
+        (x.shape[0], x.shape[2], x.shape[3])
+    } else {
+        let nh = node.int_attr("num_heads", 0);
+        require!(
+            nh > 0 && x.shape[2] % nh == 0,
+            "rank-3 input requires positive num_heads dividing hidden_size"
+        );
+        (x.shape[0], x.shape[1], x.shape[2] / nh)
+    };
+    require!(
+        pos.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+            && pos.shape == [3, b, s],
+        "position_ids must be int64 [3,B,S]"
+    );
+    require!(
+        cos.shape.len() == 2 && sin.shape == cos.shape && cos.shape[1] > 0,
+        "cos/sin caches must have equal static rank-2 shapes"
+    );
+    let rot = node.int_attr("rotary_embedding_dim", 0);
+    require!(
+        rot == 0 || node.int_attr("num_heads", 0) > 0,
+        "num_heads must be positive when rotary_embedding_dim is specified"
+    );
+    let effective_rot = if rot == 0 { hd } else { rot };
+    require!(
+        effective_rot > 0
+            && effective_rot % 2 == 0
+            && effective_rot <= hd
+            && cos.shape[1] == effective_rot / 2,
+        "rotary dimension and cache width are inconsistent with head_size"
+    );
+    let (present, sections) = node.ints_attr("mrope_section");
+    require!(
+        present
+            && sections.len() == 3
+            && sections.iter().all(|&v| v >= 0)
+            && sections.iter().sum::<i64>() == effective_rot / 2,
+        "mrope_section must contain 3 non-negative values summing to rotary_dim/2"
+    );
+    require!(
+        matches!(node.int_attr("mrope_layout", 0), 0 | 1),
+        "mrope_layout must be 0 or 1"
+    );
+    Ok(())
+}
+
 fn reg(
     registry: &mut OpRegistry,
     domain: &'static str,
@@ -1991,11 +2420,89 @@ fn gqa_repeat_heads(
     ctx.reshape(b, &[1, kv * g, s, hd])
 }
 
+fn paged_sdpa(
+    ctx: &mut TranslationContext,
+    q: mlx::mlx_array,
+    k: mlx::mlx_array,
+    v: mlx::mlx_array,
+    scale: f32,
+    mask: mlx::mlx_array,
+    head_sink: Option<mlx::mlx_array>,
+) -> Result<mlx::mlx_array, MlxError> {
+    let Some(sink) = head_sink else {
+        return sdpa(ctx, q, k, v, scale, b"array\0", mask);
+    };
+    let kt = ctx.transpose(k, &[0, 1, 3, 2])?;
+    let mut scores = ctx.binary(mlx::mlx_matmul, q, kt)?;
+    let scale = ctx.scalar_f32(scale);
+    scores = ctx.mul(scores, scale)?;
+    scores = ctx.add(scores, mask)?;
+    let heads = ctx.shape_of(q)[1];
+    let sink = ctx.reshape(sink, &[1, heads, 1, 1])?;
+    let target = [1, heads, ctx.shape_of(q)[2], 1];
+    let sink = ctx.emit(|res, st| unsafe {
+        mlx::mlx_broadcast_to(res, sink, target.as_ptr(), target.len(), st)
+    })?;
+    scores = concat2(ctx, scores, sink, 3)?;
+    let probs = ctx.emit(|res, st| unsafe { mlx::mlx_softmax_axis(res, scores, 3, true, st) })?;
+    let vshape = ctx.shape_of(v);
+    let zero = ctx.zeros(&[1, vshape[1], 1, vshape[3]], ctx.dtype_of(v))?;
+    let v = concat2(ctx, v, zero, 2)?;
+    ctx.binary(mlx::mlx_matmul, probs, v)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rope_with_offset(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    head_size: i32,
+    rotary_dim: i32,
+    rotary_offset: i32,
+    interleaved: bool,
+    position_offset: i32,
+    freqs: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
+    if rotary_offset == 0 {
+        return fast_rope_static(ctx, x, rotary_dim, interleaved, position_offset, freqs);
+    }
+    let shape = ctx.shape_of(x);
+    let prefix = slice(
+        ctx,
+        x,
+        &[0, 0, 0, 0],
+        &[shape[0], shape[1], shape[2], rotary_offset],
+    )?;
+    let middle = slice(
+        ctx,
+        x,
+        &[0, 0, 0, rotary_offset],
+        &[shape[0], shape[1], shape[2], rotary_offset + rotary_dim],
+    )?;
+    let middle = fast_rope_static(ctx, middle, rotary_dim, interleaved, position_offset, freqs)?;
+    let mut out = concat2(ctx, prefix, middle, 3)?;
+    if rotary_offset + rotary_dim < head_size {
+        let suffix = slice(
+            ctx,
+            x,
+            &[0, 0, 0, rotary_offset + rotary_dim],
+            &[shape[0], shape[1], shape[2], head_size],
+        )?;
+        out = concat2(ctx, out, suffix, 3)?;
+    }
+    Ok(out)
+}
+
 fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let num_heads = attr_int(n, "num_heads", 0) as i32;
     let kv_heads = attr_int(n, "kv_num_heads", 0) as i32;
     let do_rotary = attr_int(n, "do_rotary", 0) != 0;
     let interleaved = attr_int(n, "rotary_interleaved", 0) != 0;
+    let latent = n
+        .strings
+        .get("kv_cache_layout")
+        .map(String::as_str)
+        .unwrap_or("SEPARATE")
+        == "LATENT";
     if num_heads <= 0 || kv_heads <= 0 || num_heads % kv_heads != 0 {
         return Err("PagedAttention: bad num_heads/kv_num_heads".to_string());
     }
@@ -2006,15 +2513,30 @@ fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
     let qs = ctx.shape_of(q); // [num_tokens, hidden]
     let hidden = qs[1];
     let head = hidden / num_heads;
+    let v_head = match attr_int(n, "v_head_size", 0) as i32 {
+        0 => head,
+        value => value,
+    };
     let kv_hidden = kv_heads * head;
+    let v_hidden = kv_heads * v_head;
+    let out_hidden = num_heads * v_head;
     let scale = attr_scale(n, head);
     let g = num_heads / kv_heads;
 
     let key = ctx.resolve(&n.inputs[1])?;
-    let value = ctx.resolve(&n.inputs[2])?;
-    let kcache = ctx.resolve(&n.inputs[3])?;
-    let vcache = ctx.resolve(&n.inputs[4])?;
+    let value = if latent {
+        None
+    } else {
+        Some(ctx.resolve(&n.inputs[2])?)
+    };
+    let mut kcache = ctx.resolve(&n.inputs[3])?;
+    let mut vcache = if latent {
+        None
+    } else {
+        Some(ctx.resolve(&n.inputs[4])?)
+    };
     let cshape = ctx.shape_of(kcache); // [num_blocks, block_size, kv, head]
+    let vcshape = vcache.map(|cache| ctx.shape_of(cache));
     let block_size = cshape[1];
 
     // Data-dependent control tensors, read host-side (this op is forced onto the eager path).
@@ -2028,6 +2550,26 @@ fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
     }
     let batch = cum.len() - 1;
     let max_blocks = bt.len() / batch;
+    let slot_mapping = if present(n, 10) {
+        Some(read_int_input(ctx, &n.inputs[10])?)
+    } else {
+        None
+    };
+    let head_sink = if present(n, 11) {
+        Some(ctx.resolve(&n.inputs[11])?)
+    } else {
+        None
+    };
+    let q_norm = if present(n, 12) {
+        Some((
+            ctx.resolve(&n.inputs[12])?,
+            ctx.resolve(&n.inputs[13])?,
+            n.floats.get("qk_norm_epsilon").copied().unwrap_or(1e-6),
+        ))
+    } else {
+        None
+    };
+    let mut cache_updated = false;
 
     // Recover the fused-RoPE period array from the cos/sin caches once (fp32 fast-rope path). The
     // cache is [max_seq, rotary_dim/2], so the rotary dimension = 2 * its column count.
@@ -2059,14 +2601,75 @@ fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
         let kb = slice(ctx, key, &[s0, 0], &[s1, kv_hidden])?;
         let kb = ctx.reshape(kb, &[1, nq, kv_hidden])?;
         let mut kh_new = split_heads(ctx, kb, 1, nq, kv_heads, head)?; // [1,kv,nq,head]
-        let vb = slice(ctx, value, &[s0, 0], &[s1, kv_hidden])?;
-        let vb = ctx.reshape(vb, &[1, nq, kv_hidden])?;
-        let vh_new = split_heads(ctx, vb, 1, nq, kv_heads, head)?; // [1,kv,nq,head]
+        let separate_vh_new = if let Some(value) = value {
+            let vb = slice(ctx, value, &[s0, 0], &[s1, v_hidden])?;
+            let vb = ctx.reshape(vb, &[1, nq, v_hidden])?;
+            Some(split_heads(ctx, vb, 1, nq, kv_heads, v_head)?)
+        } else {
+            None
+        };
+
+        if let Some((qw, kw, eps)) = q_norm {
+            qh = ctx.emit(|res, st| unsafe { mlx::mlx_fast_rms_norm(res, qh, qw, eps, st) })?;
+            kh_new =
+                ctx.emit(|res, st| unsafe { mlx::mlx_fast_rms_norm(res, kh_new, kw, eps, st) })?;
+        }
 
         // RoPE the new Q and K at absolute positions [past, total).
         if let Some((freqs, rot)) = rope {
-            qh = fast_rope_static(ctx, qh, rot, interleaved, pastb, freqs)?;
-            kh_new = fast_rope_static(ctx, kh_new, rot, interleaved, pastb, freqs)?;
+            let offset = attr_int(n, "rotary_offset", 0) as i32;
+            qh = rope_with_offset(ctx, qh, head, rot, offset, interleaved, pastb, freqs)?;
+            kh_new = rope_with_offset(ctx, kh_new, head, rot, offset, interleaved, pastb, freqs)?;
+        }
+        let vh_new = if latent {
+            slice(ctx, kh_new, &[0, 0, 0, 0], &[1, kv_heads, nq, v_head])?
+        } else {
+            separate_vh_new.unwrap()
+        };
+
+        let mut write_slots = Vec::with_capacity(nq as usize);
+        let mut write_rows = Vec::with_capacity(nq as usize);
+        for j in 0..nq as usize {
+            let token = s0 as usize + j;
+            let slot = if let Some(ref mapping) = slot_mapping {
+                mapping[token]
+            } else {
+                let logical = pastb as usize + j;
+                let physical_block = bt[b * max_blocks + logical / block_size as usize];
+                physical_block * block_size as i64 + (logical % block_size as usize) as i64
+            };
+            if slot >= 0 {
+                write_slots.push(slot as i32);
+                write_rows.push(j as i32);
+            }
+        }
+        if !write_slots.is_empty() {
+            let row_idx = i32_host_array(ctx, &write_rows);
+            let slot_idx = i32_host_array(ctx, &write_slots);
+            let knew = ctx.transpose(kh_new, &[0, 2, 1, 3])?;
+            let knew = ctx.reshape(knew, &[nq, kv_heads, head])?;
+            let knew =
+                ctx.emit(|res, st| unsafe { mlx::mlx_take_axis(res, knew, row_idx, 0, st) })?;
+            let knew = ctx.reshape(knew, &[write_slots.len() as i32, 1, kv_heads, head])?;
+            let flat_slots = cshape[0] * block_size;
+            let kc = ctx.reshape(kcache, &[flat_slots, kv_heads, head])?;
+            let kc = ctx.emit(|res, st| unsafe {
+                mlx::mlx_scatter_single(res, kc, slot_idx, knew, 0, st)
+            })?;
+            kcache = ctx.reshape(kc, &cshape)?;
+            if let Some(current_vcache) = vcache {
+                let vnew = ctx.transpose(vh_new, &[0, 2, 1, 3])?;
+                let vnew = ctx.reshape(vnew, &[nq, kv_heads, v_head])?;
+                let vnew =
+                    ctx.emit(|res, st| unsafe { mlx::mlx_take_axis(res, vnew, row_idx, 0, st) })?;
+                let vnew = ctx.reshape(vnew, &[write_slots.len() as i32, 1, kv_heads, v_head])?;
+                let vc = ctx.reshape(current_vcache, &[flat_slots, kv_heads, v_head])?;
+                let vc = ctx.emit(|res, st| unsafe {
+                    mlx::mlx_scatter_single(res, vc, slot_idx, vnew, 0, st)
+                })?;
+                vcache = Some(ctx.reshape(vc, vcshape.as_ref().unwrap())?);
+            }
+            cache_updated = true;
         }
 
         // Gather the cached prefix [0, past) from the physical blocks and append the new K/V.
@@ -2079,11 +2682,16 @@ fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
             let gk = ctx.reshape(gk, &[1, (nblk as i32) * block_size, kv_hidden])?;
             let gk = split_heads(ctx, gk, 1, (nblk as i32) * block_size, kv_heads, head)?; // [1,kv,N,head]
             let gk = slice(ctx, gk, &[0, 0, 0, 0], &[1, kv_heads, pastb, head])?;
-            let gv =
-                ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, vcache, idx_arr, 0, s) })?;
-            let gv = ctx.reshape(gv, &[1, (nblk as i32) * block_size, kv_hidden])?;
-            let gv = split_heads(ctx, gv, 1, (nblk as i32) * block_size, kv_heads, head)?;
-            let gv = slice(ctx, gv, &[0, 0, 0, 0], &[1, kv_heads, pastb, head])?;
+            let gv = if latent {
+                slice(ctx, gk, &[0, 0, 0, 0], &[1, kv_heads, pastb, v_head])?
+            } else {
+                let gv = ctx.emit(|res, s| unsafe {
+                    mlx::mlx_take_axis(res, vcache.unwrap(), idx_arr, 0, s)
+                })?;
+                let gv = ctx.reshape(gv, &[1, (nblk as i32) * block_size, v_hidden])?;
+                let gv = split_heads(ctx, gv, 1, (nblk as i32) * block_size, kv_heads, v_head)?;
+                slice(ctx, gv, &[0, 0, 0, 0], &[1, kv_heads, pastb, v_head])?
+            };
             (concat2(ctx, gk, kh_new, 2)?, concat2(ctx, gv, vh_new, 2)?) // [1,kv,total,head]
         } else {
             (kh_new, vh_new)
@@ -2091,23 +2699,22 @@ fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
 
         // GQA broadcast to full head count, then causal SDPA (query i attends keys [0, past+i]).
         let kh = gqa_repeat_heads(ctx, kh, kv_heads, g, total, head)?; // [1,H,total,head]
-        let vh = gqa_repeat_heads(ctx, vh, kv_heads, g, total, head)?;
+        let vh = gqa_repeat_heads(ctx, vh, kv_heads, g, total, v_head)?;
         let qh = ctx.astype(qh, f32t)?;
         let kh = ctx.astype(kh, f32t)?;
         let vh = ctx.astype(vh, f32t)?;
         let mask = causal_mask_topleft(ctx, nq, total, pastb, f32t)?; // [nq,total]
         let mask = ctx.reshape(mask, &[1, 1, nq, total])?;
-        let o = sdpa(ctx, qh, kh, vh, scale, b"array\0", mask)?; // [1,H,nq,head]
+        let o = paged_sdpa(ctx, qh, kh, vh, scale, mask, head_sink)?; // [1,H,nq,head]
         let o = ctx.transpose(o, &[0, 2, 1, 3])?; // [1,nq,H,head]
-        let o = ctx.reshape(o, &[nq, hidden])?;
+        let o = ctx.reshape(o, &[nq, out_hidden])?;
         outs.push(ctx.astype(o, out_dt)?);
     }
 
     let output = match outs.len() {
         0 => {
-            // No tokens (all sequences empty): bind an empty [0, hidden] tensor.
-            let z = ctx.reshape(q, &[qs[0], hidden])?;
-            slice(ctx, z, &[0, 0], &[0, hidden])?
+            // No tokens (all sequences empty): bind an empty output tensor.
+            ctx.zeros(&[0, out_hidden], out_dt)?
         }
         1 => outs[0],
         _ => {
@@ -2118,7 +2725,21 @@ fn paged_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), 
             ctx.emit(|res, s| unsafe { mlx::mlx_concatenate_axis(res, vec.as_raw(), 0, s) })?
         }
     };
+    if cache_updated {
+        kcache = ctx.write_back_input(&n.inputs[3], kcache)?;
+        if let Some(current_vcache) = vcache {
+            vcache = Some(ctx.write_back_input(&n.inputs[4], current_vcache)?);
+        }
+    }
     ctx.bind(&n.outputs[0], output);
+    if n.outputs.len() > 1 && !n.outputs[1].name.is_empty() {
+        ctx.bind(&n.outputs[1], kcache);
+    }
+    if n.outputs.len() > 2 && !n.outputs[2].name.is_empty() {
+        if let Some(vcache) = vcache {
+            ctx.bind(&n.outputs[2], vcache);
+        }
+    }
     Ok(())
 }
 
@@ -2127,6 +2748,21 @@ fn paged_attention_claim(node: &NodeView) -> ClaimResult {
         node.num_outputs() >= 1,
         "PagedAttention requires at least 1 output"
     );
+    require!(
+        node.int_attr("v_head_size", 0) >= 0,
+        "v_head_size must be non-negative"
+    );
+    require!(
+        node.int_attr("rotary_offset", 0) >= 0,
+        "rotary_offset must be non-negative"
+    );
+    for attr in ["k_cache_dtype", "v_cache_dtype"] {
+        let dtype = node.string_attr(attr, "");
+        require!(
+            !matches!(dtype.as_str(), "int4" | "float4e2m1"),
+            "{attr}={dtype:?} sub-byte packing is unsupported"
+        );
+    }
     // T = fp16/bf16 only; output dtype must match the query.
     let out_dt = match node.output_info(0) {
         Some(o) if is_mlx_float(o.dtype) => o.dtype,
@@ -2143,13 +2779,17 @@ fn paged_attention_claim(node: &NodeView) -> ClaimResult {
     );
     let ninputs = node.num_inputs();
     require!(
-        (8..=10).contains(&ninputs),
-        "expects 8 inputs (query, key, value, key_cache, value_cache, cumulative_sequence_length, \
-         past_seqlens, block_table) + optional cos/sin, got {}",
+        (8..=17).contains(&ninputs),
+        "expects 8 required inputs plus optional rotary, scheduling, normalization, and scale inputs, got {}",
         ninputs
     );
-    // Separate Q/K/V only (packed-QKV form declined for now): key & value must be present floats.
-    for idx in [0usize, 1, 2, 3, 4] {
+    let layout = node.string_attr("kv_cache_layout", "SEPARATE");
+    require!(
+        matches!(layout.as_str(), "SEPARATE" | "LATENT"),
+        "kv_cache_layout must be SEPARATE or LATENT"
+    );
+    let latent = layout == "LATENT";
+    for idx in [0usize, 1, 3] {
         match dtype_of(node, idx) {
             Some(dt) => require!(
                 dt == out_dt,
@@ -2160,6 +2800,19 @@ fn paged_attention_claim(node: &NodeView) -> ClaimResult {
                 "input {} (Q/K/V/cache) must be present with a float dtype",
                 idx
             ),
+        }
+    }
+    if latent {
+        require!(
+            !node.input_present(2) && !node.input_present(4),
+            "LATENT layout aliases value to key and requires absent value/value_cache"
+        );
+    } else {
+        for idx in [2usize, 4] {
+            require!(
+                dtype_of(node, idx) == Some(out_dt),
+                "input {idx} must be present and share the output float dtype"
+            );
         }
     }
     // Positional inputs are int32.
@@ -2176,6 +2829,64 @@ fn paged_attention_claim(node: &NodeView) -> ClaimResult {
         "num_heads ({num_heads}) must be a positive multiple of kv_num_heads ({kv_heads})"
     );
     require!(
+        !latent || kv_heads == 1,
+        "LATENT layout requires kv_num_heads=1"
+    );
+    let query = node.input_info(0).unwrap();
+    require!(
+        query.shape.len() == 2 && query.shape[1] > 0 && query.shape[1] % num_heads == 0,
+        "query must be [num_tokens,num_heads*head_size]"
+    );
+    let head = query.shape[1] / num_heads;
+    let v_head = match node.int_attr("v_head_size", 0) {
+        0 => head,
+        value => value,
+    };
+    require!(v_head > 0, "effective v_head_size must be positive");
+    require!(
+        node.input_info(1)
+            .is_some_and(|v| v.shape.len() == 2 && v.shape[1] == kv_heads * head),
+        "key must be [num_tokens,kv_num_heads*head_size]"
+    );
+    if !latent {
+        require!(
+            node.input_info(2)
+                .is_some_and(|v| v.shape.len() == 2 && v.shape[1] == kv_heads * v_head),
+            "value must be [num_tokens,kv_num_heads*v_head_size]"
+        );
+    } else {
+        require!(
+            v_head <= head,
+            "LATENT v_head_size must not exceed head_size"
+        );
+        if v_head != head {
+            require!(
+                node.has_attr("scale"),
+                "LATENT layout with asymmetric value heads requires an explicit scale"
+            );
+        }
+    }
+    require!(
+        node.input_info(3).is_some_and(|v| {
+            v.shape.len() == 4 && v.shape[2] == kv_heads && v.shape[3] == head
+        }),
+        "key_cache must be [num_blocks,block_size,kv_num_heads,head_size]"
+    );
+    if !latent {
+        require!(
+            node.input_info(4).is_some_and(|v| {
+                v.shape.len() == 4 && v.shape[2] == kv_heads && v.shape[3] == v_head
+            }),
+            "value_cache must be [num_blocks,block_size,kv_num_heads,v_head_size]"
+        );
+    }
+    require!(
+        node.output_info(0).is_some_and(|v| {
+            v.shape.len() == 2 && (v.shape[1] < 0 || v.shape[1] == num_heads * v_head)
+        }),
+        "output must be [num_tokens,num_heads*v_head_size]"
+    );
+    require!(
         node.int_attr("local_window_size", -1) == -1,
         "sliding-window attention (local_window_size) is not supported"
     );
@@ -2186,7 +2897,7 @@ fn paged_attention_claim(node: &NodeView) -> ClaimResult {
     // do_rotary=1 needs the cos/sin caches present (inputs 8, 9).
     if node.int_attr("do_rotary", 0) != 0 {
         require!(
-            ninputs == 10 && node.input_present(8) && node.input_present(9),
+            node.input_present(8) && node.input_present(9),
             "do_rotary=1 requires cos_cache and sin_cache inputs"
         );
         match (dtype_of(node, 8), dtype_of(node, 9)) {
@@ -2195,6 +2906,71 @@ fn paged_attention_claim(node: &NodeView) -> ClaimResult {
                 "cos_cache/sin_cache must share the output float dtype"
             ),
             _ => deny!("do_rotary=1 requires typed cos_cache/sin_cache"),
+        }
+        let rotary_dim = node.input_info(8).unwrap().shape[1] * 2;
+        require!(
+            node.int_attr("rotary_offset", 0) + rotary_dim <= head,
+            "rotary_offset + rotary_dim must not exceed head_size"
+        );
+        require!(
+            node.int_attr("rotary_offset", 0) % 8 == 0,
+            "rotary_offset must be a multiple of 8"
+        );
+    }
+    require!(
+        node.string_attr("k_quant_type", "NONE") == "NONE"
+            && node.string_attr("v_quant_type", "NONE") == "NONE"
+            && !node.input_present(14)
+            && !node.input_present(15),
+        "quantized KV cache is unsupported"
+    );
+    if node.input_present(10) {
+        require!(
+            node.input_info(10).is_some_and(
+                |v| is_int32(v.dtype) && v.shape == [node.input_info(0).unwrap().shape[0]]
+            ),
+            "slot_mapping must be int32 [num_tokens]"
+        );
+    }
+    if node.input_present(11) {
+        require!(
+            node.input_info(11)
+                .is_some_and(|v| v.dtype == out_dt && v.shape == [num_heads]),
+            "head_sink must be [num_heads] in activation dtype"
+        );
+    }
+    require!(
+        node.input_present(12) == node.input_present(13),
+        "q_norm_weight and k_norm_weight must be provided together"
+    );
+    if node.input_present(12) {
+        for idx in [12usize, 13] {
+            require!(
+                node.input_info(idx)
+                    .is_some_and(|v| v.dtype == out_dt && v.shape == [head]),
+                "Q/K norm weight {idx} must be [head_size] in activation dtype"
+            );
+        }
+    }
+    if node.input_present(16) {
+        require!(
+            node.input_info(16)
+                .is_some_and(|v| is_int32(v.dtype) && v.shape == [2]),
+            "attention_metadata must be int32 [2]"
+        );
+    }
+    if latent {
+        require!(
+            !node.output_present(2),
+            "LATENT layout has no separate value cache output"
+        );
+    }
+    for idx in 1..node.num_outputs().min(3) {
+        if node.output_present(idx) {
+            require!(
+                node.output_info(idx).is_some_and(|v| v.dtype == out_dt),
+                "cache output {idx} must share activation dtype"
+            );
         }
     }
     Ok(())
@@ -2283,5 +3059,14 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         rotary_embedding_op,
         rotary_embedding_claim,
+    );
+    reg(
+        registry,
+        "com.microsoft",
+        "MRotaryEmbedding",
+        K_ANY_OPSET,
+        K_ANY_OPSET,
+        mrotary_embedding_op,
+        mrotary_embedding_claim,
     );
 }

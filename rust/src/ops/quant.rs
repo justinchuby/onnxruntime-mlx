@@ -227,6 +227,316 @@ fn compute_float_dtype(act_dt: mlx::mlx_dtype) -> mlx::mlx_dtype {
     }
 }
 
+fn e4m3fn_to_f32(bits: u8) -> f32 {
+    let sign = if bits & 0x80 != 0 { -1.0 } else { 1.0 };
+    let exp = (bits >> 3) & 0x0f;
+    let mantissa = bits & 0x07;
+    if exp == 0 {
+        sign * (mantissa as f32) * 2.0f32.powi(-9)
+    } else if exp == 0x0f && mantissa == 0x07 {
+        f32::NAN
+    } else {
+        sign * (1.0 + (mantissa as f32) / 8.0) * 2.0f32.powi(exp as i32 - 7)
+    }
+}
+
+fn e2m1_to_f32(bits: u8) -> f32 {
+    const MAGNITUDES: [f32; 8] = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0];
+    let magnitude = MAGNITUDES[(bits & 0x07) as usize];
+    if bits & 0x08 != 0 {
+        -magnitude
+    } else {
+        magnitude
+    }
+}
+
+fn trim_block_values(
+    ctx: &mut TranslationContext,
+    values: mlx::mlx_array,
+    rows: i32,
+    columns: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    if ctx.shape_of(values)[1] == columns {
+        return Ok(values);
+    }
+    let starts = [0, 0];
+    let stops = [rows, columns];
+    let strides = [1, 1];
+    ctx.emit(|res, s| unsafe {
+        mlx::mlx_slice(
+            res,
+            values,
+            starts.as_ptr(),
+            2,
+            stops.as_ptr(),
+            2,
+            strides.as_ptr(),
+            2,
+            s,
+        )
+    })
+}
+
+fn constant_u8_as_f32(
+    ctx: &mut TranslationContext,
+    input: &crate::engine::TensorRef,
+    shape: &[i32],
+    decode: fn(u8) -> f32,
+    key_suffix: &str,
+) -> Result<mlx::mlx_array, MlxError> {
+    let key = format!("{}#{key_suffix}", input.name);
+    if let Some(cached) = ctx.cache_get(&key) {
+        return Ok(cached);
+    }
+    let host = ctx.raw_host(input)?;
+    let expected = shape.iter().map(|&d| d as usize).product::<usize>();
+    if host.count != expected {
+        return Err(format!(
+            "{key_suffix}: initializer has {} elements, expected {expected}",
+            host.count
+        ));
+    }
+    let raw = unsafe { std::slice::from_raw_parts(host.data as *const u8, host.count) };
+    let decoded: Vec<f32> = raw.iter().copied().map(decode).collect();
+    let array = Array::from_data(
+        decoded.as_ptr() as *const c_void,
+        shape,
+        mlx::mlx_dtype__MLX_FLOAT32,
+    );
+    array.eval();
+    Ok(ctx.cache_put(key, array))
+}
+
+fn block_quant_matmul(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    weight: mlx::mlx_array,
+    bias_index: usize,
+) -> Result<(), MlxError> {
+    let a = ctx.resolve(&n.inputs[0])?;
+    let act_dtype = ctx.dtype_of(a);
+    let weight = ctx.astype(weight, act_dtype)?;
+    let weight_t = ctx.transpose(weight, &[1, 0])?;
+    let mut y = ctx.binary(mlx::mlx_matmul, a, weight_t)?;
+    if present(n, bias_index) {
+        let bias = ctx.resolve(&n.inputs[bias_index])?;
+        y = add(ctx, y, bias)?;
+    }
+    ctx.bind(&n.outputs[0], y);
+    Ok(())
+}
+
+fn matmul_block_quantized_fp4_op(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+) -> Result<(), MlxError> {
+    let a = ctx.resolve(&n.inputs[0])?;
+    let k = ctx.shape_of(a).last().copied().unwrap_or(0);
+    let packed_weight = ctx.resolve(&n.inputs[1])?;
+    let nrows = ctx.shape_of(packed_weight)[0];
+    let block = n.ints.get("block_size").copied().unwrap_or(16) as i32;
+    let nblocks = (k + block - 1) / block;
+
+    let packed = ctx.raw_host(&n.inputs[1])?;
+    let raw = unsafe { std::slice::from_raw_parts(packed.data as *const u8, packed.count) };
+    let mut decoded = Vec::with_capacity((nrows * k) as usize);
+    for &byte in raw {
+        decoded.push(e2m1_to_f32(byte & 0x0f));
+        decoded.push(e2m1_to_f32(byte >> 4));
+    }
+    decoded.truncate((nrows * k) as usize);
+    let base_array = Array::from_data(
+        decoded.as_ptr() as *const c_void,
+        &[nrows, k],
+        mlx::mlx_dtype__MLX_FLOAT32,
+    );
+    base_array.eval();
+    let base = ctx.keep(base_array);
+    let scales = constant_u8_as_f32(
+        ctx,
+        &n.inputs[2],
+        &[nrows, nblocks],
+        e4m3fn_to_f32,
+        "fp4-block-scales",
+    )?;
+    let scales = broadcast_blocks(ctx, scales, nrows, nblocks, block)?;
+    let scales = trim_block_values(ctx, scales, nrows, k)?;
+    let global = ctx.resolve(&n.inputs[3])?;
+    let weight = mul(ctx, base, scales)?;
+    let weight = mul(ctx, weight, global)?;
+    block_quant_matmul(ctx, n, weight, 5)
+}
+
+fn fp8_quantize_dequantize_activation(
+    ctx: &mut TranslationContext,
+    a: mlx::mlx_array,
+    scale: mlx::mlx_array,
+) -> Result<mlx::mlx_array, MlxError> {
+    let a = ctx.astype(a, mlx::mlx_dtype__MLX_FLOAT32)?;
+    let scale = ctx.astype(scale, mlx::mlx_dtype__MLX_FLOAT32)?;
+    let zero = f32(ctx, 0.0);
+    let nonzero = ctx.binary(mlx::mlx_not_equal, scale, zero)?;
+    let one = f32(ctx, 1.0);
+    let inv = div(ctx, one, scale)?;
+    let inv = ctx.emit(|res, s| unsafe { mlx::mlx_where(res, nonzero, inv, zero, s) })?;
+    let q = mul(ctx, a, inv)?;
+    let abs = ctx.unary(mlx::mlx_abs, q)?;
+    let min_normal = f32(ctx, 2.0f32.powi(-6));
+    let subnormal = ctx.binary(mlx::mlx_less, abs, min_normal)?;
+    let exponent = ctx.unary(mlx::mlx_log2, abs)?;
+    let exponent = ctx.unary(mlx::mlx_floor, exponent)?;
+    let three = f32(ctx, 3.0);
+    let exponent = sub(ctx, exponent, three)?;
+    let two = f32(ctx, 2.0);
+    let normal_step = ctx.binary(mlx::mlx_power, two, exponent)?;
+    let subnormal_step = f32(ctx, 2.0f32.powi(-9));
+    let step = ctx
+        .emit(|res, s| unsafe { mlx::mlx_where(res, subnormal, subnormal_step, normal_step, s) })?;
+    let scaled = div(ctx, abs, step)?;
+    let rounded = round_e(ctx, scaled)?;
+    let rounded = mul(ctx, rounded, step)?;
+    let max_fp8 = f32(ctx, 448.0);
+    let rounded = clip(ctx, rounded, zero, max_fp8)?;
+    let negative = ctx.binary(mlx::mlx_less, q, zero)?;
+    let neg_rounded = ctx.unary(mlx::mlx_negative, rounded)?;
+    let q = ctx.emit(|res, s| unsafe { mlx::mlx_where(res, negative, neg_rounded, rounded, s) })?;
+    mul(ctx, q, scale)
+}
+
+fn matmul_block_quantized_fp8_op(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+) -> Result<(), MlxError> {
+    let mut a = ctx.resolve(&n.inputs[0])?;
+    let act_dtype = ctx.dtype_of(a);
+    let b_host = ctx.raw_host(&n.inputs[1])?;
+    let nrows = i32::try_from(b_host.shape[0]).map_err(|_| "FP8 weight N exceeds i32")?;
+    let k = i32::try_from(b_host.shape[1]).map_err(|_| "FP8 weight K exceeds i32")?;
+    let block = n.ints.get("block_size").copied().unwrap_or(128) as i32;
+    let nblocks = (k + block - 1) / block;
+    let base = constant_u8_as_f32(ctx, &n.inputs[1], &[nrows, k], e4m3fn_to_f32, "fp8-weight")?;
+    let scales = ctx.resolve(&n.inputs[2])?;
+    let scales = ctx.reshape(scales, &[nrows, nblocks])?;
+    let scales = broadcast_blocks(ctx, scales, nrows, nblocks, block)?;
+    let scales = trim_block_values(ctx, scales, nrows, k)?;
+    let weight = mul(ctx, base, scales)?;
+    if present(n, 3) {
+        let scale = ctx.resolve(&n.inputs[3])?;
+        a = fp8_quantize_dequantize_activation(ctx, a, scale)?;
+        a = ctx.astype(a, act_dtype)?;
+    }
+    let act_dtype = ctx.dtype_of(a);
+    let weight = ctx.astype(weight, act_dtype)?;
+    let weight_t = ctx.transpose(weight, &[1, 0])?;
+    let mut y = ctx.binary(mlx::mlx_matmul, a, weight_t)?;
+    if present(n, 4) {
+        let bias = ctx.resolve(&n.inputs[4])?;
+        y = add(ctx, y, bias)?;
+    }
+    ctx.bind(&n.outputs[0], y);
+    Ok(())
+}
+
+fn block_quant_matmul_claim(node: &NodeView, fp4: bool) -> ClaimResult {
+    let expected_inputs = if fp4 { 6 } else { 5 };
+    require!(
+        node.num_inputs() <= expected_inputs && node.num_outputs() == 1,
+        "invalid block-quantized MatMul arity"
+    );
+    let (a, b, scale, out) = match (
+        node.input_info(0),
+        node.input_info(1),
+        node.input_info(2),
+        node.output_info(0),
+    ) {
+        (Some(a), Some(b), Some(scale), Some(out)) => (a, b, scale, out),
+        _ => deny!("block-quantized MatMul requires typed tensors"),
+    };
+    let f16 = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
+    let bf16 = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16;
+    require!(
+        matches!(a.dtype, t if t == f16 || t == bf16) && out.dtype == a.dtype,
+        "activation/output must share fp16 or bf16 dtype"
+    );
+    require!(
+        a.shape.len() >= 1
+            && b.shape.len() == 2
+            && a.shape.iter().all(|&d| d > 0)
+            && b.shape.iter().all(|&d| d > 0),
+        "activation and weight require static positive shapes"
+    );
+    let block = node.int_attr("block_size", if fp4 { 16 } else { 128 });
+    require!(block > 0, "block_size must be positive");
+    let k = *a.shape.last().unwrap();
+    let logical_k = if fp4 { b.shape[1] * 2 } else { b.shape[1] };
+    require!(k == logical_k, "activation and weight K dimensions differ");
+    let nblocks = (k + block - 1) / block;
+    require!(
+        scale.shape == [b.shape[0], nblocks],
+        "block scale shape must be [N,ceil(K/block_size)]"
+    );
+    require!(
+        node.is_constant_initializer(1),
+        "quantized weight must be a constant initializer"
+    );
+    let uint8 = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
+    let float = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+    if fp4 {
+        require!(
+            b.dtype == uint8 && scale.dtype == uint8 && node.is_constant_initializer(2),
+            "FP4 weight and raw E4M3 scales must be constant uint8 initializers"
+        );
+        require!(
+            node.input_info(3)
+                .is_some_and(|v| v.dtype == float && v.shape.iter().product::<i64>() == 1),
+            "weight_scale_2 must be scalar fp32"
+        );
+        if node.input_present(4) {
+            require!(
+                node.input_info(4)
+                    .is_some_and(|v| v.dtype == float && v.shape.iter().product::<i64>() == 1),
+                "input_scale must be scalar fp32"
+            );
+        }
+        if node.input_present(5) {
+            require!(
+                node.input_info(5)
+                    .is_some_and(|v| v.dtype == a.dtype && v.shape == [b.shape[0]]),
+                "bias must be [N] in activation dtype"
+            );
+        }
+    } else {
+        let fp8 = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E4M3FN;
+        require!(
+            b.dtype == fp8 && scale.dtype == float,
+            "FP8 weight must be float8e4m3fn and b_scale fp32"
+        );
+        if node.input_present(3) {
+            require!(
+                node.input_info(3)
+                    .is_some_and(|v| v.dtype == float && v.shape.iter().product::<i64>() == 1),
+                "a_scale must be scalar fp32"
+            );
+        }
+        if node.input_present(4) {
+            require!(
+                node.input_info(4)
+                    .is_some_and(|v| v.dtype == a.dtype && v.shape == [b.shape[0]]),
+                "bias must be [N] in activation dtype"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn matmul_block_quantized_fp4_claim(node: &NodeView) -> ClaimResult {
+    block_quant_matmul_claim(node, true)
+}
+
+fn matmul_block_quantized_fp8_claim(node: &NodeView) -> ClaimResult {
+    block_quant_matmul_claim(node, false)
+}
+
 fn explicit_fp16_qmm_enabled() -> bool {
     std::env::var_os("ONNXRUNTIME_EP_MLX_BF16_QMM_FP16")
         .map(|value| value != "0" && !value.is_empty())
@@ -1988,7 +2298,6 @@ fn qmoe_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         .get("swiglu_limit")
         .copied()
         .unwrap_or(f32::INFINITY);
-
     let x = ctx.resolve(&n.inputs[QMOE_IN_INPUT])?;
     let out_dt = ctx.dtype_of(x);
     let comp_dt = compute_float_dtype(out_dt);
@@ -2135,6 +2444,10 @@ fn qmoe_claim(node: &NodeView) -> ClaimResult {
         "only quant_type='int' is supported (got {:?})",
         qt
     );
+    require!(
+        node.int_attr("weights_prepacked", -1) != 1,
+        "weights_prepacked=1 uses an EP-specific layout and is unsupported"
+    );
     let bits = node.int_attr("expert_weight_bits", 4);
     require!(
         bits == 4 || bits == 8,
@@ -2226,6 +2539,20 @@ fn reg(
 }
 
 pub fn register(registry: &mut OpRegistry) {
+    reg(
+        registry,
+        "com.microsoft",
+        "MatMulBlockQuantizedFp4Weight",
+        matmul_block_quantized_fp4_op,
+        matmul_block_quantized_fp4_claim,
+    );
+    reg(
+        registry,
+        "com.microsoft",
+        "MatMulBlockQuantizedFp8Weight",
+        matmul_block_quantized_fp8_op,
+        matmul_block_quantized_fp8_claim,
+    );
     reg(
         registry,
         "com.microsoft",

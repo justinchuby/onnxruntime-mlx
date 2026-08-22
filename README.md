@@ -3,7 +3,7 @@
 > **PyPI package: [`onnxruntime-ep-mlx`](https://pypi.org/project/onnxruntime-ep-mlx/)** — `pip install onnxruntime-ep-mlx`, `import onnxruntime_ep_mlx`. (Formerly published as `onnxruntime-mlx`, now renamed.)
 
 An **MLX-native execution provider** for ONNX Runtime on Apple Silicon, built as an out-of-tree
-**plugin EP** (ORT plugin-EP C ABI, ORT 1.27 / `ORT_API_VERSION 27`). It ships as a standalone
+**plugin EP** (ORT plugin-EP C ABI, ORT 1.29 / `ORT_API_VERSION 29`). It ships as a standalone
 `libonnxruntime_mlx_ep.dylib` loaded by a stock prebuilt `libonnxruntime.dylib` via
 `RegisterExecutionProviderLibrary` — **no ONNX Runtime fork required**.
 
@@ -26,7 +26,7 @@ fragmentation.
 
 ## Requirements
 
-- macOS on Apple Silicon, ORT 1.27 prebuilt (`ORT_API_VERSION >= 27`)
+- macOS on Apple Silicon, ORT 1.29 prebuilt (`ORT_API_VERSION >= 29`)
 - **`mlx-c` (and `mlx`) — a HARD build dependency**: `brew install mlx-c`
 - A **Rust toolchain** (`rustup`) to build the EP from source
 
@@ -37,7 +37,7 @@ A plugin EP targets one ORT C-ABI version. Package versions use
 
 | onnxruntime-ep-mlx | ONNX Runtime | `ORT_API_VERSION` |
 |---|---|---|
-| `0.27.x` | 1.27.x | 27 |
+| `0.29.x` | 1.29.x | 29 |
 
 For example, ORT 1.28 moves the EP to `0.28.x`.
 
@@ -51,7 +51,7 @@ brew install mlx-c                                  # HARD dependency (mlx-c + m
 cd rust
 # Either point ORT_INCLUDE_DIR at the ORT headers directly, or set ORT_HOME to an
 # ONNX Runtime release root (build.rs will look in $ORT_HOME/include):
-export ORT_INCLUDE_DIR=/path/to/onnxruntime/include   # or: export ORT_HOME=/path/to/onnxruntime-osx-arm64-1.27.0
+export ORT_INCLUDE_DIR=/path/to/onnxruntime/include   # or: export ORT_HOME=/path/to/onnxruntime-osx-arm64-1.29.0
 cargo build --release
 # => rust/target/release/libonnxruntime_mlx_ep.dylib  (registers the EP as "MLXExecutionProvider")
 ```

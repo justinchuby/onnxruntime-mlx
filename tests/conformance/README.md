@@ -47,12 +47,11 @@ the two with its own tolerances.
    curl -fsSL https://pixi.sh/install.sh | bash                        # -> ~/.pixi/bin/pixi
    (cd ../../onnx-tests && ~/.pixi/bin/pixi run postinstall)
    ```
-3. **Match the ORT ABI.** The EP is built against `ORT_API_VERSION 27` and
-   refuses to load on onnxruntime ≤ 1.26
-   (`MetalEP requires an ONNX Runtime built with ORT_API_VERSION >= 27`). The
-   pixi env ships 1.26, so upgrade its **python** onnxruntime to 1.27:
+3. **Match the ORT ABI.** The EP is built against `ORT_API_VERSION 29` and
+   requires onnxruntime 1.29 or newer. Upgrade the pixi env's **python**
+   onnxruntime to 1.29:
    ```sh
-   (cd ../../onnx-tests && ~/.pixi/bin/pixi run python -m pip install "onnxruntime==1.27.0")
+   (cd ../../onnx-tests && ~/.pixi/bin/pixi run python -m pip install "onnxruntime==1.29.0")
    ```
    (This touches only the onnx-tests pixi env, outside this repo.)
 
@@ -75,7 +74,7 @@ Outputs: `results.csv`, per-op `logs/<Op>.log`, and (with `PROFILE=1`)
 |---|---|---|
 | `ONNX_TESTS_DIR` | sibling `../onnx-tests` | onnx-tests clone location |
 | `MLX_EP_LIB` | `<repo>/rust/target/release/libonnxruntime_mlx_ep.dylib` | EP dylib to register |
-| `ORT_LIB_DIR` | auto-discovered from onnx-genai `ort-prebuilt` | dir with `libonnxruntime.1.27.0.dylib`, added to `DYLD_LIBRARY_PATH` |
+| `ORT_LIB_DIR` | auto-discovered from onnx-genai `ort-prebuilt` | dir with `libonnxruntime.1.29.0.dylib`, added to `DYLD_LIBRARY_PATH` |
 | `PIXI` | `~/.pixi/bin/pixi` | pixi binary |
 | `MAX_EXAMPLES` | `20` | Hypothesis `max_examples` per test (bounded fuzzing) |
 | `SEED` | `0` | Hypothesis seed (reproducible sampling) |

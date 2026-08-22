@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "onnxruntime-ep-mlx"
-version = "0.27.6"
+version = "0.29.0"
 description = "MLX-native ONNX Runtime execution provider (plugin EP) for Apple Silicon"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "onnxruntime-ep-mlx" }]
 keywords = ["onnxruntime", "mlx", "execution-provider", "apple-silicon", "metal", "coreml"]
-dependencies = ["onnxruntime>=1.22"]
+dependencies = ["onnxruntime>=1.29"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",

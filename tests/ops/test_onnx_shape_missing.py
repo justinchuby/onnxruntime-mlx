@@ -36,7 +36,7 @@ def _model(
         [output],
         nodes=[node],
         initializers=list(initializers),
-        # ORT 1.27 officially loads through opset 26; current operators' schemas are unchanged in 27.
+        # ORT 1.29 officially loads through opset 26; current operators' schemas are unchanged in 27.
         opset_imports={"": opset},
         name=f"mlx_{op_type}",
     )

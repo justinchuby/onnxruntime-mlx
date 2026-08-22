@@ -23,6 +23,7 @@ import numpy as np
 import onnx_ir as ir
 import onnxruntime as ort
 import pytest
+import ml_dtypes
 
 import _models as m
 
@@ -131,6 +132,167 @@ def test_gather_block_quantized_asymmetric():
     m.assert_matches_cpu(model, feeds, rtol=1e-5, atol=1e-6)
 
 
+def test_matmul_block_quantized_fp4_weight():
+    n, k, block = 3, 24, 16
+    a = np.arange(2 * k, dtype=np.float16).reshape(2, k) / np.float16(16)
+    nibble_rows = np.array([0x22, 0xAA, 0x44], dtype=np.uint8)
+    packed = np.repeat(nibble_rows[:, None], k // 2, axis=1)
+    scale_bytes = np.array(
+        [[0x38, 0x40], [0x40, 0x30], [0x30, 0x38]], dtype=np.uint8
+    )
+    scale_values = np.array([[1.0, 2.0], [2.0, 0.5], [0.5, 1.0]], dtype=np.float32)
+    base_weights = np.array([1.0, -1.0, 2.0], dtype=np.float32)[:, None]
+    per_element_scale = np.repeat(scale_values, block, axis=1)[:, :k]
+    dense_weight = base_weights * per_element_scale * 0.75
+    bias = np.array([0.5, -1.0, 2.0], dtype=np.float16)
+    expected = (a.astype(np.float32) @ dense_weight.T + bias).astype(np.float16)
+
+    b = initz("B", packed)
+    scales = initz("weight_scale", scale_bytes)
+    scale2 = initz("weight_scale_2", np.array([0.75], dtype=np.float32))
+    skipped = ir.Value(name="")
+    bias_init = initz("bias", bias)
+    model = build(
+        "MatMulBlockQuantizedFp4Weight",
+        [m.tensor("A", DT.FLOAT16, [2, k]), b, scales, scale2, skipped, bias_init],
+        [m.tensor("Y", DT.FLOAT16, [2, n])],
+        inits=(b, scales, scale2, bias_init),
+        attrs=[ir.AttrInt64("block_size", block)],
+        domain="com.microsoft",
+    )
+    feeds = {"A": a}
+    m.assert_mlx_claims(model, feeds)
+    m.assert_matches_ref(model, feeds, [expected], rtol=2e-3, atol=2e-3)
+
+
+@pytest.mark.parametrize("with_a_scale", [False, True], ids=["w8a16", "w8a8"])
+def test_matmul_block_quantized_fp8_weight(with_a_scale: bool):
+    n, k, block = 3, 24, 16
+    a = (np.arange(2 * k, dtype=np.float32).reshape(2, k) - 20.0).astype(np.float16) / 8
+    weight_f32 = np.stack(
+        [
+            np.linspace(-2.0, 2.0, k),
+            np.tile(np.array([0.5, -1.0, 3.0], dtype=np.float32), k // 3),
+            np.ones(k, dtype=np.float32) * 1.5,
+        ]
+    )
+    weight_fp8 = weight_f32.astype(ml_dtypes.float8_e4m3fn)
+    scales = np.array([[1.0, 0.5], [2.0, 1.0], [0.25, 2.0]], dtype=np.float32)
+    dense_weight = weight_fp8.astype(np.float32) * np.repeat(scales, block, axis=1)[:, :k]
+    bias = np.array([0.5, -1.0, 2.0], dtype=np.float16)
+
+    b = initz("B", weight_fp8)
+    bscale = initz("b_scale", scales)
+    inputs = [m.tensor("A", DT.FLOAT16, [2, k]), b, bscale]
+    inits = [b, bscale]
+    if with_a_scale:
+        a_scale_value = np.array(0.25, dtype=np.float32)
+        a_scale = initz("a_scale", a_scale_value)
+        inputs.append(a_scale)
+        inits.append(a_scale)
+        a_ref = (a.astype(np.float32) / a_scale_value).astype(
+            ml_dtypes.float8_e4m3fn
+        ).astype(np.float32) * a_scale_value
+    else:
+        inputs.append(ir.Value(name=""))
+        a_ref = a.astype(np.float32)
+    bias_init = initz("bias", bias)
+    inputs.append(bias_init)
+    inits.append(bias_init)
+    expected = (a_ref @ dense_weight.T + bias).astype(np.float16)
+    model = build(
+        "MatMulBlockQuantizedFp8Weight",
+        inputs,
+        [m.tensor("Y", DT.FLOAT16, [2, n])],
+        inits=tuple(inits),
+        attrs=[ir.AttrInt64("block_size", block)],
+        domain="com.microsoft",
+    )
+    feeds = {"A": a}
+    m.assert_mlx_claims(model, feeds)
+    m.assert_matches_ref(model, feeds, [expected], rtol=3e-3, atol=3e-3)
+
+
+def test_gated_add_fp16_rounding():
+    rng = np.random.default_rng(1291)
+    x = rng.standard_normal((2, 3, 8)).astype(np.float16)
+    y = rng.standard_normal((2, 3, 8)).astype(np.float16)
+    gate = rng.standard_normal((2, 3, 1)).astype(np.float16)
+    expected = (x + (y * gate).astype(np.float16)).astype(np.float16)
+    model = build(
+        "GatedAdd",
+        [
+            m.tensor("x", DT.FLOAT16, [2, 3, 8]),
+            m.tensor("y", DT.FLOAT16, [2, 3, 8]),
+            m.tensor("gate", DT.FLOAT16, [2, 3, 1]),
+        ],
+        [m.tensor("out", DT.FLOAT16, [2, 3, 8])],
+        domain="com.microsoft",
+    )
+    feeds = {"x": x, "y": y, "gate": gate}
+    m.assert_mlx_claims(model, feeds)
+    m.assert_matches_ref(model, feeds, [expected], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("with_beta", [False, True])
+def test_linear_attention_gate(with_beta: bool):
+    rng = np.random.default_rng(1292 + with_beta)
+    a = rng.standard_normal((2, 3, 5)).astype(np.float16)
+    bias = rng.standard_normal(5).astype(np.float32)
+    scale = rng.standard_normal(5).astype(np.float32)
+    b = rng.standard_normal((2, 3, 5)).astype(np.float16)
+    inputs = [
+        m.tensor("a", DT.FLOAT16, [2, 3, 5]),
+        m.tensor("bias", DT.FLOAT, [5]),
+        m.tensor("scale", DT.FLOAT, [5]),
+        m.tensor("b", DT.FLOAT16, [2, 3, 5]) if with_beta else ir.Value(name=""),
+    ]
+    outputs = [m.tensor("decay", DT.FLOAT16, [2, 3, 5])]
+    if with_beta:
+        outputs.append(m.tensor("beta", DT.FLOAT16, [2, 3, 5]))
+    model = build("LinearAttentionGate", inputs, outputs, domain="com.microsoft")
+    decay = (
+        np.logaddexp(np.float32(0), a.astype(np.float32) + bias) * scale
+    ).astype(np.float16)
+    expected = [decay]
+    feeds = {"a": a, "bias": bias, "scale": scale}
+    if with_beta:
+        feeds["b"] = b
+        expected.append((1 / (1 + np.exp(-b.astype(np.float32)))).astype(np.float16))
+    m.assert_mlx_claims(model, feeds)
+    m.assert_matches_ref(model, feeds, expected, rtol=2e-3, atol=2e-3)
+
+
+def test_gated_rms_norm_grouped():
+    rng = np.random.default_rng(1294)
+    x = rng.standard_normal((2, 3, 12)).astype(np.float16)
+    gate = rng.standard_normal((2, 3, 12)).astype(np.float16)
+    scale = rng.standard_normal(4).astype(np.float16)
+    eps = 1e-5
+    xg = x.astype(np.float32).reshape(-1, 4)
+    gg = gate.astype(np.float32).reshape(-1, 4)
+    expected = (
+        xg
+        / np.sqrt(np.mean(xg * xg, axis=-1, keepdims=True) + eps)
+        * scale.astype(np.float32)
+        * (gg / (1 + np.exp(-gg)))
+    ).reshape(x.shape).astype(np.float16)
+    model = build(
+        "GatedRMSNorm",
+        [
+            m.tensor("x", DT.FLOAT16, [2, 3, 12]),
+            m.tensor("scale", DT.FLOAT16, [4]),
+            m.tensor("gate", DT.FLOAT16, [2, 3, 12]),
+        ],
+        [m.tensor("out", DT.FLOAT16, [2, 3, 12])],
+        domain="com.microsoft",
+        attrs=[ir.AttrFloat32("epsilon", eps)],
+    )
+    feeds = {"x": x, "scale": scale, "gate": gate}
+    m.assert_mlx_claims(model, feeds)
+    m.assert_matches_ref(model, feeds, [expected], rtol=3e-3, atol=3e-3)
+
+
 # --- TensorScatter (ai.onnx opset 24) -----------------------------------------------------------
 def _tensor_scatter_model(*, batch: int, with_write_indices: bool, axis: int = -2):
     B, H, S, D = batch, 2, 8, 4
@@ -173,7 +335,15 @@ def test_tensor_scatter_decode_write_index():
 
 
 # --- CausalConvWithState (com.microsoft) --------------------------------------------------------
-def _causal_conv_model(*, with_bias: bool, with_state: bool, activation: str = "none"):
+def _causal_conv_model(
+    *,
+    with_bias: bool,
+    with_state: bool,
+    activation: str = "none",
+    domain: str = "com.microsoft",
+    opset: int = 24,
+    state_window: int = 0,
+):
     B, C, L, k = 1, 4, 5, 3
     inp = m.tensor("in", DT.FLOAT, [B, C, L])
     w = m.tensor("w", DT.FLOAT, [C, 1, k])
@@ -184,11 +354,19 @@ def _causal_conv_model(*, with_bias: bool, with_state: bool, activation: str = "
     elif with_state:
         ins.append(empty)  # omitted optional bias
     if with_state:
-        ins.append(m.tensor("ps", DT.FLOAT, [B, C, k - 1]))
-    outs = [m.tensor("o", DT.FLOAT, [B, C, L]), m.tensor("pr", DT.FLOAT, [B, C, k - 1])]
-    attrs = [ir.AttrString("activation", activation)] if activation != "none" else None
-    model = build("CausalConvWithState", ins, outs, domain="com.microsoft", attrs=attrs)
-    rng = np.random.default_rng(hash((with_bias, with_state, activation)) & 0xFFFFFFFF)
+        state_shape = [state_window, B, C, k - 1] if state_window > 0 else [B, C, k - 1]
+        ins.append(m.tensor("ps", DT.FLOAT, state_shape))
+    state_shape = [state_window, B, C, k - 1] if state_window > 0 else [B, C, k - 1]
+    outs = [m.tensor("o", DT.FLOAT, [B, C, L]), m.tensor("pr", DT.FLOAT, state_shape)]
+    attrs = []
+    if activation != "none":
+        attrs.append(ir.AttrString("activation", activation))
+    if state_window > 0:
+        attrs.append(ir.AttrInt64("state_window", state_window))
+    model = build("CausalConvWithState", ins, outs, domain=domain, attrs=attrs, opset=opset)
+    rng = np.random.default_rng(
+        hash((with_bias, with_state, activation, state_window)) & 0xFFFFFFFF
+    )
     feeds = {
         "in": rng.standard_normal((B, C, L)).astype(np.float32),
         "w": rng.standard_normal((C, 1, k)).astype(np.float32),
@@ -196,7 +374,7 @@ def _causal_conv_model(*, with_bias: bool, with_state: bool, activation: str = "
     if with_bias:
         feeds["bias"] = rng.standard_normal((C,)).astype(np.float32)
     if with_state:
-        feeds["ps"] = rng.standard_normal((B, C, k - 1)).astype(np.float32)
+        feeds["ps"] = rng.standard_normal(state_shape).astype(np.float32)
     return model, feeds
 
 
@@ -222,6 +400,66 @@ def test_causal_conv_with_state(with_bias, with_state, activation):
     if not _cpu_supports(model, feeds):
         pytest.skip("ORT CPU lacks com.microsoft.CausalConvWithState in this build")
     m.assert_matches_cpu(model, feeds, rtol=1e-4, atol=1e-5)
+
+
+def test_causal_conv_with_state_ai_onnx_opset27(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ALLOW_RELEASED_ONNX_OPSET_ONLY", "0")
+    model, feeds = _causal_conv_model(
+        with_bias=True,
+        with_state=True,
+        activation="silu",
+        domain="",
+        opset=27,
+    )
+    m.assert_mlx_claims(model, feeds)
+    m.assert_matches_cpu(model, feeds, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.parametrize("state_window", [3, 8])
+def test_causal_conv_with_state_window(state_window: int):
+    model, feeds = _causal_conv_model(
+        with_bias=True,
+        with_state=True,
+        activation="silu",
+        state_window=state_window,
+    )
+    legacy_model, _ = _causal_conv_model(
+        with_bias=True,
+        with_state=True,
+        activation="silu",
+    )
+    legacy_feeds = {
+        "in": feeds["in"],
+        "w": feeds["w"],
+        "bias": feeds["bias"],
+        "ps": feeds["ps"][-1],
+    }
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    expected_output = ort.InferenceSession(
+        legacy_model,
+        options,
+        providers=["CPUExecutionProvider"],
+    ).run(None, legacy_feeds)[0]
+
+    kernel = feeds["w"].shape[2]
+    padded = np.concatenate([feeds["ps"][-1], feeds["in"]], axis=2)
+    states = [
+        padded[:, :, token + 1 : token + kernel]
+        for token in range(feeds["in"].shape[2])
+    ]
+    kept = states[-state_window:]
+    leading_count = state_window - len(kept)
+    leading = np.zeros(
+        (leading_count, *kept[0].shape),
+        dtype=feeds["in"].dtype,
+    )
+    expected_state = np.concatenate([leading, np.stack(kept)], axis=0)
+
+    m.assert_mlx_claims(model, feeds)
+    actual_output, actual_state = m.run_mlx(model, feeds)
+    np.testing.assert_allclose(actual_output, expected_output, rtol=1e-4, atol=1e-5)
+    np.testing.assert_allclose(actual_state, expected_state, rtol=0, atol=0)
 
 
 # --- LinearAttention (com.microsoft) ------------------------------------------------------------
@@ -255,11 +493,34 @@ def _linear_attention_model(
     dtype: ir.DataType = DT.FLOAT,
     scalar_decay: bool = False,
     dyn_time: bool = False,
+    key_heads: int | None = None,
+    domain: str = "com.microsoft",
+    opset: int = 24,
+    shared_beta: bool = False,
+    state_dtype: ir.DataType | None = None,
+    state_window: int = 0,
 ):
     """Build a single-node com.microsoft::LinearAttention model plus random feeds."""
     np_dtype = np.float16 if dtype == DT.FLOAT16 else np.float32
+    state_dtype = dtype if state_dtype is None else state_dtype
+    state_np_dtype = np.float16 if state_dtype == DT.FLOAT16 else np.float32
     rng = np.random.default_rng(
-        hash((rule, B, T, q_heads, kv_heads, d_k, d_v, with_past, scale, scalar_decay, dyn_time))
+        hash(
+            (
+                rule,
+                B,
+                T,
+                q_heads,
+                kv_heads,
+                d_k,
+                d_v,
+                with_past,
+                scale,
+                scalar_decay,
+                dyn_time,
+                state_window,
+            )
+        )
         & 0xFFFFFFFF
     )
 
@@ -270,12 +531,13 @@ def _linear_attention_model(
     # shape-keyed trace's concrete-extent resolution are exercised. Feeds always carry a concrete T.
     Tdim = "seq" if dyn_time else T
     query = m.tensor("query", dtype, [B, Tdim, q_heads * d_k])
-    key = m.tensor("key", dtype, [B, Tdim, q_heads * d_k])
+    key_heads = q_heads if key_heads is None else key_heads
+    key = m.tensor("key", dtype, [B, Tdim, key_heads * d_k])
     value = m.tensor("value", dtype, [B, Tdim, kv_heads * d_v])
     ins: list[ir.Value] = [query, key, value]
     feeds: dict[str, np.ndarray] = {
         "query": feed(B, T, q_heads * d_k),
-        "key": feed(B, T, q_heads * d_k),
+        "key": feed(B, T, key_heads * d_k),
         "value": feed(B, T, kv_heads * d_v),
     }
 
@@ -286,8 +548,13 @@ def _linear_attention_model(
     last = max((i for i, p in present.items() if p), default=2)
 
     if present[3]:
-        ins.append(m.tensor("past_state", dtype, [B, kv_heads, d_k, d_v]))
-        feeds["past_state"] = (rng.standard_normal((B, kv_heads, d_k, d_v)) * 0.1).astype(np_dtype)
+        state_shape = (
+            [state_window, B, kv_heads, d_k, d_v]
+            if state_window > 0
+            else [B, kv_heads, d_k, d_v]
+        )
+        ins.append(m.tensor("past_state", state_dtype, state_shape))
+        feeds["past_state"] = (rng.standard_normal(state_shape) * 0.1).astype(state_np_dtype)
     elif last >= 3:
         ins.append(empty)
     if present[4]:
@@ -299,12 +566,18 @@ def _linear_attention_model(
     elif last >= 4:
         ins.append(empty)
     if present[5]:
-        ins.append(m.tensor("beta", dtype, [B, Tdim, kv_heads]))
-        feeds["beta"] = (rng.random((B, T, kv_heads)) * 0.5 + 0.25).astype(np_dtype)
+        beta_heads = 1 if shared_beta else kv_heads
+        ins.append(m.tensor("beta", dtype, [B, Tdim, beta_heads]))
+        feeds["beta"] = (rng.random((B, T, beta_heads)) * 0.5 + 0.25).astype(np_dtype)
 
+    state_shape = (
+        [state_window, B, kv_heads, d_k, d_v]
+        if state_window > 0
+        else [B, kv_heads, d_k, d_v]
+    )
     outs = [
-        m.tensor("output", dtype, [B, Tdim, kv_heads * d_v]),
-        m.tensor("present_state", dtype, [B, kv_heads, d_k, d_v]),
+        m.tensor("output", dtype, [B, Tdim, max(q_heads, kv_heads) * d_v]),
+        m.tensor("present_state", state_dtype, state_shape),
     ]
     attrs = [
         ir.AttrString("update_rule", rule),
@@ -313,7 +586,9 @@ def _linear_attention_model(
     ]
     if scale is not None:
         attrs.append(ir.AttrFloat32("scale", scale))
-    model = build("LinearAttention", ins, outs, domain="com.microsoft", attrs=attrs)
+    if state_window > 0:
+        attrs.append(ir.AttrInt64("state_window", state_window))
+    model = build("LinearAttention", ins, outs, domain=domain, attrs=attrs, opset=opset)
     return model, feeds
 
 
@@ -327,6 +602,113 @@ def test_linear_attention_rules(rule: str, with_past: bool) -> None:
     if not _cpu_supports(model, feeds):
         pytest.skip("ORT CPU lacks com.microsoft.LinearAttention in this build")
     m.assert_matches_cpu(model, feeds, rtol=1e-3, atol=1e-3)
+
+
+def test_linear_attention_ai_onnx_opset27_standard_gqa(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOW_RELEASED_ONNX_OPSET_ONLY", "0")
+    model, feeds = _linear_attention_model(
+        "gated_delta",
+        B=1,
+        T=4,
+        q_heads=4,
+        kv_heads=2,
+        key_heads=2,
+        d_k=4,
+        d_v=3,
+        with_past=True,
+        domain="",
+        opset=27,
+        shared_beta=True,
+    )
+    m.assert_mlx_claims(model, feeds)
+    m.assert_matches_cpu(model, feeds, rtol=1e-3, atol=1e-3)
+
+
+def test_linear_attention_ai_onnx_opset27_fp16_fp32_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOW_RELEASED_ONNX_OPSET_ONLY", "0")
+    model, feeds = _linear_attention_model(
+        "gated_delta",
+        B=1,
+        T=5,
+        q_heads=4,
+        kv_heads=2,
+        key_heads=2,
+        d_k=4,
+        d_v=3,
+        with_past=True,
+        dtype=DT.FLOAT16,
+        state_dtype=DT.FLOAT,
+        domain="",
+        opset=27,
+        shared_beta=True,
+    )
+    m.assert_mlx_claims(model, feeds)
+    m.assert_matches_cpu(model, feeds, rtol=3e-3, atol=3e-3)
+
+
+@pytest.mark.parametrize(("T", "state_window"), [(5, 3), (2, 4)])
+def test_linear_attention_state_window(T: int, state_window: int) -> None:
+    model, feeds = _linear_attention_model(
+        "gated_delta",
+        B=1,
+        T=T,
+        q_heads=2,
+        kv_heads=2,
+        d_k=4,
+        d_v=3,
+        with_past=True,
+        state_window=state_window,
+    )
+    step_model, _ = _linear_attention_model(
+        "gated_delta",
+        B=1,
+        T=1,
+        q_heads=2,
+        kv_heads=2,
+        d_k=4,
+        d_v=3,
+        with_past=True,
+    )
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    step_session = ort.InferenceSession(
+        step_model,
+        options,
+        providers=["CPUExecutionProvider"],
+    )
+    state = feeds["past_state"][-1].copy()
+    step_outputs = []
+    states = []
+    for token in range(T):
+        step_feeds = {
+            "query": feeds["query"][:, token : token + 1],
+            "key": feeds["key"][:, token : token + 1],
+            "value": feeds["value"][:, token : token + 1],
+            "past_state": state,
+            "decay": feeds["decay"][:, token : token + 1],
+            "beta": feeds["beta"][:, token : token + 1],
+        }
+        output, state = step_session.run(None, step_feeds)
+        step_outputs.append(output)
+        states.append(state)
+
+    expected_output = np.concatenate(step_outputs, axis=1)
+    kept_states = states[-state_window:]
+    if T < state_window:
+        leading = np.zeros(
+            (state_window - T, *state.shape),
+            dtype=state.dtype,
+        )
+        expected_state = np.concatenate([leading, np.stack(kept_states)], axis=0)
+    else:
+        expected_state = np.stack(kept_states)
+
+    m.assert_mlx_claims(model, feeds)
+    actual_output, actual_state = m.run_mlx(model, feeds)
+    np.testing.assert_allclose(actual_output, expected_output, rtol=2e-3, atol=2e-3)
+    np.testing.assert_allclose(actual_state, expected_state, rtol=2e-3, atol=2e-3)
 
 
 @pytest.mark.parametrize("rule", _LINATTN_RULES)
