@@ -43,7 +43,18 @@ from __future__ import annotations
 import os
 
 # `CI` is the de-facto standard flag; GitHub Actions sets both CI=true and GITHUB_ACTIONS=true.
-IN_CI = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+#
+# Falsy *values* count as not-CI, not just an absent variable. Plenty of tooling exports `CI=false`
+# rather than unsetting it, and a bare truthiness test reads that as "in CI" — which would leave
+# telemetry on for exactly the developer machine the rule exists to keep quiet, and do it silently.
+_FALSY = {"", "0", "false", "no", "off"}
+
+
+def _flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() not in _FALSY
+
+
+IN_CI = _flag("CI") or _flag("GITHUB_ACTIONS")
 
 if not IN_CI:
     os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")

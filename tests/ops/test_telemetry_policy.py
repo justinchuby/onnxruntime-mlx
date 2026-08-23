@@ -21,7 +21,12 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOWS = ("ci.yml", "bench.yml", "conformance.yml", "publish.yml")
-_IN_CI = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+# Falsy values count as not-CI, matching the rootdir conftest: tooling that exports `CI=false`
+# rather than unsetting it must not be read as CI.
+_FALSY = ("", "0", "false", "no", "off")
+_IN_CI = os.environ.get("CI", "").strip().lower() not in _FALSY or os.environ.get(
+    "GITHUB_ACTIONS", ""
+).strip().lower() not in _FALSY
 
 
 def test_telemetry_setting_matches_the_environment():
@@ -84,6 +89,22 @@ def test_local_runs_disable_telemetry_even_when_ci_vars_are_absent():
         check=True,
     )
     assert override.stdout.strip() == "1", "an explicit ORT_DISABLE_TELEMETRY must be respected"
+
+    # A falsy CI value means "not CI". Tooling exports `CI=false` rather than unsetting it often
+    # enough that a bare truthiness test would leave telemetry on for a developer machine — the
+    # exact case the rule exists to cover, failing silently in the direction nobody checks.
+    for falsy in ("false", "0", "off", ""):
+        run = subprocess.run(
+            [sys.executable, "-c", program],
+            capture_output=True,
+            text=True,
+            env=dict(local_env, CI=falsy),
+            check=True,
+        )
+        assert run.stdout.strip() == "1", (
+            f"CI={falsy!r} is not a CI environment, so telemetry must still be disabled; "
+            f"got {run.stdout.strip()!r}"
+        )
 
 
 @pytest.mark.parametrize("workflow", _WORKFLOWS)

@@ -586,15 +586,13 @@ def test_constant_of_shape_float64_value_is_claimed(tmp_path) -> None:
     )
 
 
-def test_reshape_dynamic_shape_from_input_shape(capfd, monkeypatch):
-    """Runtime Reshape whose target is derived from Shape(input) (Shape->Gather->Concat with const
-    tail) — a SHAPE-CONST value. The EP must claim it (via the shape-const mid-trace eval), keep the
-    fused partition acyclic, and match ORT CPU. Guards the decode de-fragmentation path."""
+def _build_dynamic_reshape_model():
+    """Runtime Reshape whose target comes from Shape->Gather->Concat with a const tail."""
     import numpy as np
     import onnx_ir as ir
     import _models as m
     DT = ir.DataType
-    B, S, H = 1, 5, 12
+    B, H = 1, 12
     x = ir.Value(name="x", type=ir.TensorType(DT.FLOAT), shape=ir.Shape([B, "S", H]))
     shp = ir.Value(name="shp")
     dims01 = ir.Value(name="dims01")
@@ -615,11 +613,65 @@ def test_reshape_dynamic_shape_from_input_shape(capfd, monkeypatch):
                  const_value=ir.tensor(np.array([3, 4], np.int64))),
     ]
     g = ir.Graph([x], [o], nodes=nodes, initializers=inits, opset_imports={"": 24}, name="mlx_dynreshape")
-    model = ir.to_proto(ir.Model(g, ir_version=11)).SerializeToString()
-    feed = {"x": np.random.default_rng(0).standard_normal((B, S, H)).astype(np.float32)}
-    monkeypatch.setenv("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG", "1")
+    return ir.to_proto(ir.Model(g, ir_version=11)).SerializeToString()
+
+
+def test_build_dynamic_reshape_session() -> None:
+    """Child of the test below: creating the session is what runs GetCapability."""
+    import numpy as np
+    import _models as m
+    model = _build_dynamic_reshape_model()
+    feed = {"x": np.random.default_rng(0).standard_normal((1, 5, 12)).astype(np.float32)}
     m.assert_matches_cpu(model, feed, rtol=1e-5, atol=1e-5)
-    err = capfd.readouterr().err
-    for line in err.splitlines():
-        if "unclaimed" in line:
-            assert "unclaimed Reshape " not in line, f"shape-const Reshape declined: {line}"
+
+
+@pytest.mark.skipif(
+    os.environ.get("ONNXRUNTIME_EP_MLX_CLAIM_TEST_CHILD") == "1",
+    reason="child process: it builds the session, it does not spawn another",
+)
+def test_reshape_dynamic_shape_from_input_shape(tmp_path) -> None:
+    """Runtime Reshape whose target is derived from Shape(input) — a SHAPE-CONST value.
+
+    The EP must claim it via the shape-const mid-trace eval, keep the fused partition acyclic, and
+    match ORT CPU. Guards the decode de-fragmentation path.
+
+    Asserted from the EP trace, in a child process. The previous version of this test set
+    ``ONNXRUNTIME_EP_MLX_CLAIM_DEBUG`` with ``monkeypatch`` and scanned ``capfd``, which could never
+    fire: the EP reads its trace configuration once per process, long before a mid-test ``setenv``.
+    It also could not have worked even if the variable had been read in time, because an unclaimed
+    node still produces the right answer via ORT CPU — so ``assert_matches_cpu`` passing says
+    nothing about who claimed it.
+    """
+    trace = tmp_path / "trace.json"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            f"{Path(__file__).name}::test_build_dynamic_reshape_session",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ],
+        check=True,
+        env={
+            **os.environ,
+            "ONNXRUNTIME_EP_MLX_TRACE": str(trace),
+            "ONNXRUNTIME_EP_MLX_CLAIM_TEST_CHILD": "1",
+        },
+        cwd=str(Path(__file__).parent),
+        timeout=300,
+    )
+    events = json.loads(trace.read_text())
+    claims = [event for event in events if event.get("cat") == "ep.claim"]
+    assert claims, "the EP recorded no capability decision"
+    declined = {
+        key.removeprefix("fallback_")
+        for claim in claims
+        for key in claim["args"]
+        if key.startswith("fallback_")
+    }
+    assert "Reshape" not in declined, (
+        "the shape-const Reshape was declined; its target is derivable at trace time, and each "
+        f"declined node is a partition boundary. Declined: {sorted(declined)}"
+    )

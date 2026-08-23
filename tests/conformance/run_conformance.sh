@@ -96,7 +96,15 @@ export RUN_CANDIDATE="mlx_runtime_wrapper.run_mlx"
 # conftest.py for why). Set here rather than relying on that conftest, because this script drives
 # onnx-tests' own pytest from its checkout, so ours is never loaded. Assigned only if unset, so an
 # explicit value in the environment still wins either way.
-if [[ -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]]; then
+# Falsy values count as not-CI: `-z` alone would read an exported `CI=false` as CI and leave
+# telemetry on for a local conformance run.
+_mlx_in_ci() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    "" | 0 | false | no | off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+if ! _mlx_in_ci "${CI:-}" && ! _mlx_in_ci "${GITHUB_ACTIONS:-}"; then
   export ORT_DISABLE_TELEMETRY="${ORT_DISABLE_TELEMETRY:-1}"
 fi
 
