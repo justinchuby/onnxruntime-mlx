@@ -25,6 +25,10 @@
 //!
 //! Any body that does not match this exact pattern, or that uses a shape/dtype the kernel does not
 //! cover, falls through to the generic unroll unchanged.
+//!
+//! `T` and `B` are Metal template arguments, so MLX compiles and process-globally caches a pipeline
+//! for each distinct sequence/batch shape. This is ideal for the fixed-shape RE-USE graph, but a
+//! variable-length deployment pays a one-time Metal compile for every new shape.
 
 use crate::engine::{MlxError, NodeDesc, Src, SubgraphDesc, TensorRef, TranslationContext};
 use crate::sys::mlx;
@@ -80,7 +84,8 @@ fn static_ints(body_consts: &HashMap<&str, &NodeDesc>, r: &TensorRef) -> Option<
             if dtype != ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 {
                 return None;
             }
-            if data.len() < count * 8 {
+            let byte_count = count.checked_mul(std::mem::size_of::<i64>())?;
+            if data.len() < byte_count {
                 return None;
             }
             Some(
@@ -90,12 +95,14 @@ fn static_ints(body_consts: &HashMap<&str, &NodeDesc>, r: &TensorRef) -> Option<
             )
         };
     if let Some(init) = &r.init {
-        if init.data.is_null() {
+        if init.dtype != ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+            || init.data.is_null()
+        {
             return None;
         }
-        let count: usize = init.shape.iter().map(|&d| d.max(0) as usize).product();
-        let bytes = unsafe { std::slice::from_raw_parts(init.data as *const u8, count * 8) };
-        return read(bytes, count, init.dtype);
+        let byte_count = init.count.checked_mul(std::mem::size_of::<i64>())?;
+        let bytes = unsafe { std::slice::from_raw_parts(init.data as *const u8, byte_count) };
+        return read(bytes, init.count, init.dtype);
     }
     let node = body_consts.get(r.name.as_str())?;
     let t = node.tensors.get("value")?;
@@ -286,10 +293,9 @@ pub fn match_body(body: &SubgraphDesc, num_state: usize, num_scan: usize) -> Opt
     }
 
     // State slots come first in the body's input list, scan slots after.
-    if h_state_slot >= num_state || a_slot >= num_state {
-        return None;
-    }
-    if h_state_slot == a_slot {
+    // The Scan node's state outputs are positional. The recognised body emits h then pass-through
+    // a, so accepting swapped input slots would bind the final states in the wrong order.
+    if h_state_slot != 0 || a_slot != 1 || num_state < 2 {
         return None;
     }
     let scan_slot = |s: usize| -> Option<usize> {

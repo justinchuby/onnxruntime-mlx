@@ -113,7 +113,7 @@ def _scan_body() -> ir.Graph:
     )
 
 
-def selective_scan_model(*, direction: int = 0) -> bytes:
+def selective_scan_model(*, input_direction: int = 0, output_direction: int = 0) -> bytes:
     state = _t("state", DT.FLOAT, [BATCH, D_INNER, D_STATE])
     a_neg = _t("a_neg", DT.FLOAT, [D_INNER, D_STATE])
     dt = _t("dt", DT.FLOAT, [SEQ, BATCH, D_INNER])
@@ -126,8 +126,10 @@ def selective_scan_model(*, direction: int = 0) -> bytes:
     y = _t("y", DT.FLOAT, [SEQ, BATCH, D_INNER])
 
     attributes: dict[str, object] = {"num_scan_inputs": 4, "body": _scan_body()}
-    if direction:
+    if input_direction:
         attributes["scan_input_directions"] = [1, 1, 1, 1]
+    if output_direction:
+        attributes["scan_output_directions"] = [1]
     scan = ir.node(
         "Scan", [state, a_neg, dt, b, c, x], outputs=[final, a_out, y], attributes=attributes
     )
@@ -173,9 +175,19 @@ def test_selective_scan_matches_cpu(extreme: bool) -> None:
     m.assert_matches_cpu(selective_scan_model(), feeds(extreme=extreme), rtol=1e-5, atol=1e-5)
 
 
-def test_selective_scan_reverse_matches_cpu() -> None:
-    """``scan_input_directions=1``: the kernel must walk the sequence backwards."""
-    m.assert_matches_cpu(selective_scan_model(direction=1), feeds(seed=3), rtol=1e-5, atol=1e-5)
+@pytest.mark.parametrize(
+    "input_direction,output_direction",
+    [(0, 0), (1, 0), (0, 1), (1, 1)],
+    ids=["forward", "reverse-input", "reverse-output", "reverse-both"],
+)
+def test_selective_scan_directions_match_cpu(
+    input_direction: int, output_direction: int
+) -> None:
+    """All input/output direction combinations must preserve ONNX Scan ordering."""
+    model = selective_scan_model(
+        input_direction=input_direction, output_direction=output_direction
+    )
+    m.assert_matches_cpu(model, feeds(seed=3), rtol=1e-5, atol=1e-5)
 
 
 def test_nonzero_initial_state_matches_cpu() -> None:
@@ -193,26 +205,50 @@ def test_fused_and_unrolled_agree() -> None:
     configuration once per process.
     """
     with tempfile.TemporaryDirectory() as td:
-        out = Path(td) / "unrolled.npy"
+        out = Path(td) / "unrolled.npz"
+        trace = Path(td) / "trace.json"
         script = (
-            "import sys, numpy as np;"
+            "import os, sys, numpy as np, onnxruntime as ort;"
+            "ort.register_execution_provider_library("
+            "'MLXExecutionProvider', os.environ['ONNXRUNTIME_MLX_EP_LIB']);"
             f"sys.path.insert(0, {str(Path(__file__).parent)!r});"
             "import test_selective_scan as t, _models as mm;"
-            "np.save(sys.argv[1], mm.run_mlx(t.selective_scan_model(), t.feeds(seed=11))[2])"
+            "np.savez(sys.argv[1], *mm.run_mlx(t.selective_scan_model(), t.feeds(seed=11)))"
         )
         child = subprocess.run(
             [sys.executable, "-c", script, str(out)],
-            env={**os.environ, "ONNXRUNTIME_EP_MLX_NO_SELECTIVE_SCAN": "1"},
+            env={
+                **os.environ,
+                "ONNXRUNTIME_EP_MLX_NO_SELECTIVE_SCAN": "1",
+                "ONNXRUNTIME_EP_MLX_TRACE": str(trace),
+            },
             cwd=str(Path(__file__).parent),
             capture_output=True,
             text=True,
             timeout=300,
         )
         assert out.exists(), f"unrolled child failed:\n{child.stderr[-2000:]}"
-        unrolled = np.load(out)
+        assert trace.exists(), f"unrolled child produced no MLX trace:\n{child.stderr[-2000:]}"
+        events = json.loads(trace.read_text())
+        assert not any(
+            e.get("cat") == "op.fast"
+            and e.get("args", {}).get("kernel") == "mlx_selective_scan"
+            for e in events
+        ), "the selective-scan kill-switch did not disable the fused kernel"
+        reasons = [
+            e.get("args", {}).get("reason")
+            for e in events
+            if e.get("cat") == "op.composed" and e.get("name") == "Scan"
+        ]
+        assert any("kill-switch" in (reason or "") for reason in reasons), (
+            f"the child did not prove that MLX executed the generic Scan unroll: {reasons}"
+        )
+        with np.load(out) as saved:
+            unrolled = [saved[f"arr_{i}"] for i in range(3)]
 
-    fused = m.run_mlx(selective_scan_model(), feeds(seed=11))[2]
-    np.testing.assert_allclose(fused, unrolled, rtol=1e-5, atol=1e-5)
+    fused = m.run_mlx(selective_scan_model(), feeds(seed=11))
+    for fused_output, unrolled_output in zip(fused, unrolled, strict=True):
+        np.testing.assert_allclose(fused_output, unrolled_output, rtol=1e-5, atol=1e-5)
 
 
 # --- the assertion that guards against a SILENT revert to the unroll ------------------------------
@@ -223,10 +259,22 @@ def test_fused_and_unrolled_agree() -> None:
     reason="child process: it builds the session, it does not spawn another",
 )
 def test_build_selective_scan_session() -> None:
-    m.run_mlx(selective_scan_model(), feeds())
+    input_direction = int(os.environ.get("ONNXRUNTIME_EP_MLX_TEST_INPUT_DIRECTION", "0"))
+    output_direction = int(os.environ.get("ONNXRUNTIME_EP_MLX_TEST_OUTPUT_DIRECTION", "0"))
+    model = selective_scan_model(
+        input_direction=input_direction, output_direction=output_direction
+    )
+    m.run_mlx(model, feeds())
 
 
-def test_scan_takes_the_fused_kernel_path(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "input_direction,output_direction",
+    [(0, 0), (1, 0), (0, 1), (1, 1)],
+    ids=["forward", "reverse-input", "reverse-output", "reverse-both"],
+)
+def test_scan_takes_the_fused_kernel_path(
+    tmp_path, input_direction: int, output_direction: int
+) -> None:
     """The ``Scan`` must be served by the fused kernel, not the generic unroll.
 
     This cannot be asserted from outputs: both paths are claimed and both return the same numbers,
@@ -245,7 +293,13 @@ def test_scan_takes_the_fused_kernel_path(tmp_path) -> None:
             "no:cacheprovider",
         ],
         check=False,
-        env={**os.environ, "ONNXRUNTIME_EP_MLX_TRACE": str(trace), _CHILD: "1"},
+        env={
+            **os.environ,
+            "ONNXRUNTIME_EP_MLX_TRACE": str(trace),
+            "ONNXRUNTIME_EP_MLX_TEST_INPUT_DIRECTION": str(input_direction),
+            "ONNXRUNTIME_EP_MLX_TEST_OUTPUT_DIRECTION": str(output_direction),
+            _CHILD: "1",
+        },
         cwd=str(Path(__file__).parent),
         timeout=300,
     )

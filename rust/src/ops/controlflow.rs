@@ -264,18 +264,21 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     // that keeps the running state in registers. Declines (falls through to the unroll) unless the
     // body matches exactly and the shapes/dtypes are covered. See `ops/selective_scan.rs`.
     //
-    // Both outcomes are recorded on the node's trace path so a silent regression is detectable: if
-    // the emitting graph changes shape and the pattern stops matching, the node shows up as
-    // `op.composed` with a reason instead of quietly costing 7x more.
+    // A matched body that cannot take the kernel is recorded as composed so a supported-shape or
+    // kill-switch regression is visible. An unrelated Scan body is simply the generic path; it
+    // never had this kernel available and must not pollute the composed-path warning counter.
     let fusable_form = num_scan_out == 1
-        && !selective_scan::disabled()
         && input_directions.iter().all(|&d| d == input_directions[0])
         && scan_axes.iter().all(|&ax| ax == 0)
         && output_axes[0] == 0;
-    let decline_reason: &'static str = if !fusable_form {
-        "Scan form (axes/directions/outputs) not fusable -> unrolled per timestep"
-    } else {
+    let decline_reason: Option<&'static str> =
         match selective_scan::match_body(&body, num_state, num_scan) {
+            Some(_) if selective_scan::disabled() => {
+                Some("fused selective scan disabled by kill-switch -> unrolled per timestep")
+            }
+            Some(_) if !fusable_form => {
+                Some("selective-scan form (axes/directions/outputs) not fusable -> unrolled")
+            }
             Some(m) => {
                 let fused = selective_scan::emit(
                     ctx,
@@ -297,15 +300,14 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
                         ctx.mark_fast(selective_scan::KERNEL_NAME);
                         return Ok(());
                     }
-                    None => {
+                    None => Some(
                         "selective-scan body matched but shape/dtype unsupported by the fused \
-                         kernel -> unrolled"
-                    }
+                         kernel -> unrolled",
+                    ),
                 }
             }
-            None => "Scan body is not a recognised Mamba-1 selective scan -> unrolled per timestep",
-        }
-    };
+            None => None,
+        };
 
     for t in 0..trip {
         let mut bin: Vec<mlx::mlx_array> = Vec::with_capacity(num_state + num_scan);
@@ -360,7 +362,9 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     }
     // Recorded AFTER the unroll: translating the body dispatches through the registry, which
     // resets the per-node path mark, so a mark set before the loop would be clobbered.
-    ctx.mark_composed(decline_reason);
+    if let Some(reason) = decline_reason {
+        ctx.mark_composed(reason);
+    }
     Ok(())
 }
 
