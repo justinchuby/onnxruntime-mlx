@@ -43,13 +43,20 @@ fn read_host_bool(ctx: &TranslationContext, r: &TensorRef) -> Result<bool, MlxEr
     Ok(unsafe { *(h.data as *const u8) } != 0)
 }
 
-/// Every node in a control-flow body must be MLX-translatable (recursively via the registry claim).
+/// Every node in a control-flow body must be MLX-translatable (recursively via the registry claim),
+/// and the body must be free of float64 (see `GraphView::body_uses_float64`).
 fn body_claimable(body: &GraphView) -> bool {
-    body.all_nodes_claimable()
+    !body.body_uses_float64() && body.all_nodes_claimable()
 }
 
 /// Name the first body node the registry refuses, for a denial reason that can be acted on.
 fn body_rejection(body: &GraphView) -> String {
+    if body.body_uses_float64() {
+        return "body carries float64, which MLX can only evaluate on a CPU stream — a \
+                control-flow body is translated inside the parent's (GPU) plan, so it is left to \
+                ORT CPU"
+            .to_string();
+    }
     match body.first_unclaimable_node() {
         Some((op_type, name, reason)) => {
             let label = if name.is_empty() {

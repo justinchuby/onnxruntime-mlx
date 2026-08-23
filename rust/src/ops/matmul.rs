@@ -7,7 +7,7 @@
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::registry::{
-    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_cpu_float,
 };
 use crate::sys::mlx;
 use crate::{deny, require};
@@ -93,8 +93,8 @@ fn matmul_claim(node: &NodeView) -> ClaimResult {
         _ => deny!("missing tensor type/shape info on an input or the output"),
     };
     require!(
-        is_mlx_float(a.dtype) && b.dtype == a.dtype && out.dtype == a.dtype,
-        "inputs/output must share one float dtype (fp32/fp16/bf16), got {}, {} -> {}",
+        is_mlx_cpu_float(a.dtype) && b.dtype == a.dtype && out.dtype == a.dtype,
+        "inputs/output must share one float dtype (fp32/fp16/bf16/fp64), got {}, {} -> {}",
         crate::registry::ort_dtype_name(a.dtype),
         crate::registry::ort_dtype_name(b.dtype),
         crate::registry::ort_dtype_name(out.dtype)
@@ -121,8 +121,8 @@ fn gemm_claim(node: &NodeView) -> ClaimResult {
         _ => deny!("missing tensor type/shape info on an input or the output"),
     };
     require!(
-        is_mlx_float(a.dtype) && b.dtype == a.dtype && out.dtype == a.dtype,
-        "A/B/output must share one float dtype (fp32/fp16/bf16), got {}, {} -> {}",
+        is_mlx_cpu_float(a.dtype) && b.dtype == a.dtype && out.dtype == a.dtype,
+        "A/B/output must share one float dtype (fp32/fp16/bf16/fp64), got {}, {} -> {}",
         crate::registry::ort_dtype_name(a.dtype),
         crate::registry::ort_dtype_name(b.dtype),
         crate::registry::ort_dtype_name(out.dtype)
