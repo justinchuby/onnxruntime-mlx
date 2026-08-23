@@ -2184,9 +2184,6 @@ fn constant_of_shape_claim(node: &NodeView) -> ClaimResult {
     }
     // ONNX defines `value` as a one-element tensor giving both the fill value and the output dtype;
     // omitting it means fp32 zero. Both forms are handled, so long as the output dtype is one MLX
-    // can carry.
-    // ONNX defines `value` as a one-element tensor giving both the fill value and the output dtype;
-    // omitting it means fp32 zero. Both forms are handled, so long as the output dtype is one MLX
     // can carry. `is_movable` rather than `is_mlx_supported`: this op only fills, never computes, so
     // it takes the same dtype set as the data-movement ops — float64 included, which GetCapability
     // then isolates onto an MLX CPU stream.
