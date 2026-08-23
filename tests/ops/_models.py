@@ -153,6 +153,55 @@ def assert_mlx_claims(model: bytes, feeds: dict[str, np.ndarray]) -> None:
     )
 
 
+def assert_op_claimed(
+    model: bytes,
+    feeds: dict[str, np.ndarray],
+    op_type: str,
+    *,
+    rtol: float,
+    atol: float,
+) -> None:
+    """Assert `op_type` ran on MLX (not CPU fallback) *and* the output matches ORT CPU.
+
+    Read from the ORT profile rather than from the EP's own claim-debug output. The debug
+    channel is configured once per process, so a mid-test ``monkeypatch.setenv`` never reaches
+    it — several tests used to scan ``capfd`` for it and silently asserted nothing. Output
+    agreement alone cannot substitute: a declined node still produces the correct answer
+    through ORT CPU, so ``assert_matches_cpu`` passing says nothing about who ran it.
+
+    A claimed op is absorbed into a fused ``MLXExecutionProvider_*`` node and loses its
+    identity, so the assertion is on the contrapositive: no CPU-EP node may carry this
+    ``op_name``.
+    """
+    import json
+    import os
+
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    options.enable_profiling = True
+    options.profile_file_prefix = "mlx_op_claim_probe"
+    session = ort.InferenceSession(model, options, providers=EP_PROVIDERS)
+    session.run(None, feeds)
+    profile_path = session.end_profiling()
+    try:
+        with open(profile_path) as profile:
+            events = json.load(profile)
+    finally:
+        os.remove(profile_path)
+
+    on_cpu = {
+        event["args"].get("op_name")
+        for event in events
+        if event.get("cat") == "Node"
+        and event.get("args", {}).get("provider") == "CPUExecutionProvider"
+    }
+    assert op_type not in on_cpu, (
+        f"{op_type} fell back to ORT CPU instead of being claimed by the MLX EP. "
+        f"Ops left on CPU: {sorted(n for n in on_cpu if n)}"
+    )
+    assert_matches_cpu(model, feeds, rtol=rtol, atol=atol)
+
+
 def assert_matches_ref(
     model: bytes,
     feeds: dict[str, np.ndarray],
