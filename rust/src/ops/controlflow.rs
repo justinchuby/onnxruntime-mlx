@@ -271,6 +271,9 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         && input_directions.iter().all(|&d| d == input_directions[0])
         && scan_axes.iter().all(|&ax| ax == 0)
         && output_axes[0] == 0;
+    // Preserve a production signal when the real exporter drifts structurally, without warning on
+    // ordinary Scan nodes that never resembled this two-state/four-input recurrence.
+    let selective_candidate = num_state == 2 && num_scan == 4 && num_scan_out == 1;
     let decline_reason: Option<&'static str> =
         match selective_scan::match_body(&body, num_state, num_scan) {
             Some(_) if selective_scan::disabled() => {
@@ -305,6 +308,9 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
                          kernel -> unrolled",
                     ),
                 }
+            }
+            None if selective_candidate => {
+                Some("selective-scan-shaped body was not recognised -> unrolled per timestep")
             }
             None => None,
         };
