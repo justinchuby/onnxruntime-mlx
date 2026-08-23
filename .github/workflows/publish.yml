@@ -62,6 +62,14 @@ jobs:
           # builds alike.
           ORT_INCLUDE_DIR="$ORT_HOME/include" MACOSX_DEPLOYMENT_TARGET=14.0 \
             python -m build --wheel ./python -o wheelhouse
+          wheel="$(find wheelhouse -maxdepth 1 -name '*-py3-none-macosx_*_arm64.whl' -print -quit)"
+          test -n "$wheel"
+          rm -rf /tmp/mlx-wheel-audit
+          mkdir -p /tmp/mlx-wheel-audit
+          unzip -q "$wheel" -d /tmp/mlx-wheel-audit
+          while IFS= read -r dylib; do
+            test "$(lipo -archs "$dylib")" = "arm64"
+          done < <(find /tmp/mlx-wheel-audit -name '*.dylib' -type f)
           ls -la wheelhouse
 
       - name: Audit wheels (abi3audit — no native Python ABI to violate)

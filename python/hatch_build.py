@@ -119,14 +119,21 @@ class CustomBuildHook(BuildHookInterface):
         #    py3-none-macosx_*_arm64 tag so ONE wheel serves every interpreter
         #    (CPython 3.10+, free-threaded 3.13t/3.14t, ...).
         plat = sysconfig.get_platform().replace("-", "_").replace(".", "_")
+        if plat.startswith("macosx_"):
+            # setup-python may provide a universal2 interpreter even though MLX and the EP dylib
+            # are Apple-Silicon-only. Advertising universal2 would let Intel pip install a wheel
+            # that dyld cannot load.
+            parts = plat.split("_")
+            if len(parts) < 4:
+                raise RuntimeError(f"unexpected macOS platform tag: {plat}")
+            plat = f"macosx_{parts[1]}_{parts[2]}_arm64"
         # Honour MACOSX_DEPLOYMENT_TARGET for the platform floor: the bundled
         # dylibs (and mlx) target it, so the tag should advertise it rather than
         # whatever floor the running interpreter was built against.
         dep_target = os.environ.get("MACOSX_DEPLOYMENT_TARGET")
         if dep_target and plat.startswith("macosx_"):
-            arch = plat.rsplit("_", 1)[-1]
             major, _, minor = dep_target.partition(".")
-            plat = f"macosx_{major}_{minor or '0'}_{arch}"
+            plat = f"macosx_{major}_{minor or '0'}_arm64"
         build_data["pure_python"] = False
         build_data["infer_tag"] = False
         build_data["tag"] = f"py3-none-{plat}"
