@@ -28,10 +28,15 @@ import sys
 import tempfile
 import time
 
-# Repo-wide rule: ONNX Runtime telemetry stays off. Must precede the `onnxruntime` import, since ORT
-# reads this when its native library loads. This runner is not started by pytest, so the rootdir
-# conftest that does the same thing for the test suites never runs here.
-os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+# Repo-wide rule: ONNX Runtime telemetry is off locally and left on in CI (see the rootdir
+# conftest.py for why). Must precede the `onnxruntime` import, since ORT reads this when its native
+# library loads. This runner is not started by pytest, so that conftest never runs here.
+# Falsy values count as not-CI: tooling that exports `CI=false` would otherwise be read as CI and
+# leave telemetry on for a local benchmark run.
+_CI = os.environ.get("CI", "").strip().lower() not in ("", "0", "false", "no", "off")
+_GHA = os.environ.get("GITHUB_ACTIONS", "").strip().lower() not in ("", "0", "false", "no", "off")
+if not (_CI or _GHA):
+    os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
 
 import onnxruntime as ort
 
