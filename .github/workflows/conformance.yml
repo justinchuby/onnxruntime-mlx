@@ -21,6 +21,12 @@ on:
         required: false
 
 # Apple Silicon only: the MLX EP requires Metal + mlx-c (macos-14 runners are arm64).
+# Repo-wide rule: ONNX Runtime telemetry stays off in CI. Workflow-level so every job
+# inherits it, including steps that invoke ORT outside pytest and so never load the
+# rootdir conftest that sets it locally.
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+
 jobs:
   conformance:
     name: onnx-tests vs MLX EP (macOS arm64)

@@ -21,6 +21,12 @@ permissions:
   contents: read
   pull-requests: write
 
+# Repo-wide rule: ONNX Runtime telemetry stays off in CI. Workflow-level so every job
+# inherits it, including steps that invoke ORT outside pytest and so never load the
+# rootdir conftest that sets it locally.
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+
 jobs:
   bench:
     name: Op benchmark (macOS arm64)
