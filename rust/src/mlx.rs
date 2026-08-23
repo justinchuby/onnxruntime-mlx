@@ -359,6 +359,39 @@ mod float64_primitive_tests {
         unsafe { *sys::mlx_array_data_float64(out.as_raw()) }
     }
 
+    fn eval_softmax<const N: usize>(x: &[f64; N], stream: &Stream) -> Vec<f64> {
+        let shape: [i32; 1] = [N as i32];
+        let a = Array::from_data(
+            x.as_ptr() as *const std::ffi::c_void,
+            &shape,
+            sys::mlx_dtype__MLX_FLOAT64,
+        );
+        let mut raw = unsafe { sys::mlx_array_new() };
+        let rc = unsafe { sys::mlx_softmax_axis(&mut raw, a.as_raw(), 0, false, stream.as_raw()) };
+        assert_eq!(
+            rc, 0,
+            "mlx_softmax_axis failed on a float64 CPU-stream array"
+        );
+        let out = Array::from_raw(raw);
+        unsafe { sys::mlx_array_eval(out.as_raw()) };
+        unsafe { std::slice::from_raw_parts(sys::mlx_array_data_float64(out.as_raw()), N).to_vec() }
+    }
+
+    fn eval_logsumexp<const N: usize>(x: &[f64; N], stream: &Stream) -> f64 {
+        let shape: [i32; 1] = [N as i32];
+        let a = Array::from_data(
+            x.as_ptr() as *const std::ffi::c_void,
+            &shape,
+            sys::mlx_dtype__MLX_FLOAT64,
+        );
+        let mut raw = unsafe { sys::mlx_array_new() };
+        let rc = unsafe { sys::mlx_logsumexp(&mut raw, a.as_raw(), false, stream.as_raw()) };
+        assert_eq!(rc, 0, "mlx_logsumexp failed on a float64 CPU-stream array");
+        let out = Array::from_raw(raw);
+        unsafe { sys::mlx_array_eval(out.as_raw()) };
+        unsafe { *sys::mlx_array_data_float64(out.as_raw()) }
+    }
+
     fn relative_error(got: f64, want: f64) -> f64 {
         if want == 0.0 {
             got.abs()
@@ -377,6 +410,25 @@ mod float64_primitive_tests {
     #[test]
     fn mlx_float64_primitives() {
         let cpu = Stream::new_default_cpu();
+        let compound_input: [f64; 16] = [
+            0.1257302210933933,
+            -0.1321048632913019,
+            0.6404226504432821,
+            0.10490011715303971,
+            -0.535669373161111,
+            0.36159505490948474,
+            1.3040000451301372,
+            0.9470809631292422,
+            -0.7037352358069926,
+            -1.2654214710460525,
+            -0.6232744625373522,
+            0.0413259793472436,
+            -2.3250307746388343,
+            -0.21879166393254573,
+            -1.2459109472530652,
+            -0.7322673547034516,
+        ];
+        let compound_sum = compound_input.iter().map(|x| x.exp()).sum::<f64>();
 
         // Exact in float64: safe for ops to opt in.
         for (name, got, want) in [
@@ -422,6 +474,27 @@ mod float64_primitive_tests {
                 rel <= 1e-6,
                 "mlx_{name} is neither float64-exact nor float32-accurate (rel={rel:.3e}) — \
                  something is badly wrong with the fp64 CPU path"
+            );
+        }
+
+        let softmax = eval_softmax(&compound_input, &cpu);
+        let softmax_rel = softmax
+            .iter()
+            .zip(compound_input)
+            .map(|(&got, x)| relative_error(got, x.exp() / compound_sum))
+            .fold(0.0, f64::max);
+        let logsumexp_rel =
+            relative_error(eval_logsumexp(&compound_input, &cpu), compound_sum.ln());
+        for (name, rel) in [("softmax", softmax_rel), ("logsumexp", logsumexp_rel)] {
+            assert!(
+                rel > 1e-15,
+                "mlx_{name} is now float64-exact (max rel={rel:.3e}) — the ops built on it may \
+                  finally claim float64; update the claim table"
+            );
+            assert!(
+                rel <= 1e-6,
+                "mlx_{name} is neither float64-exact nor float32-accurate (max rel={rel:.3e}) — \
+                  something is badly wrong with the fp64 CPU path"
             );
         }
     }

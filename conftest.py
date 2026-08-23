@@ -55,6 +55,9 @@ def _flag(name: str) -> bool:
 
 
 IN_CI = _flag("CI") or _flag("GITHUB_ACTIONS")
+_MLX_TELEMETRY_MARKER = "_MLX_TELEMETRY_DISABLED_BY_CONFTEST"
+os.environ.pop(_MLX_TELEMETRY_MARKER, None)
 
-if not IN_CI:
-    os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+if not IN_CI and "ORT_DISABLE_TELEMETRY" not in os.environ:
+    os.environ["ORT_DISABLE_TELEMETRY"] = "1"
+    os.environ[_MLX_TELEMETRY_MARKER] = "1"

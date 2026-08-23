@@ -36,17 +36,15 @@ def test_telemetry_setting_matches_the_environment():
     setting back; the environment is what it consults at library load.
     """
     setting = os.environ.get("ORT_DISABLE_TELEMETRY")
+    set_by_conftest = os.environ.get("_MLX_TELEMETRY_DISABLED_BY_CONFTEST") == "1"
     if _IN_CI:
-        assert setting != "1", (
-            "telemetry is disabled in CI, which drops the usage signal ONNX Runtime gets from us. "
-            "The rootdir conftest should only set ORT_DISABLE_TELEMETRY when not in CI."
-        )
+        assert not set_by_conftest, "the rootdir conftest must not disable telemetry in CI"
     else:
-        assert setting == "1", (
-            "ORT_DISABLE_TELEMETRY is not set for this local test process. It has to be assigned "
-            "in the rootdir conftest.py, before anything imports onnxruntime — a fixture is too "
-            "late."
+        assert set_by_conftest or setting is not None, (
+            "a local run must either be disabled by conftest or carry an explicit user override"
         )
+    if set_by_conftest:
+        assert setting == "1", "the conftest marker must only accompany its telemetry opt-out"
 
 
 def test_local_runs_disable_telemetry_even_when_ci_vars_are_absent():
@@ -59,8 +57,9 @@ def test_local_runs_disable_telemetry_even_when_ci_vars_are_absent():
     conftest = _REPO_ROOT / "conftest.py"
     program = (
         "import runpy, os;"
-        "ns = runpy.run_path(r'%s');"
-        "print(os.environ.get('ORT_DISABLE_TELEMETRY', '<unset>'))" % conftest
+        "runpy.run_path(r'%s');"
+        "print(os.environ.get('ORT_DISABLE_TELEMETRY', '<unset>'),"
+        "os.environ.get('_MLX_TELEMETRY_DISABLED_BY_CONFTEST', '<unset>'))" % conftest
     )
 
     local_env = {k: v for k, v in os.environ.items() if k not in ("CI", "GITHUB_ACTIONS")}
@@ -68,7 +67,7 @@ def test_local_runs_disable_telemetry_even_when_ci_vars_are_absent():
     local = subprocess.run(
         [sys.executable, "-c", program], capture_output=True, text=True, env=local_env, check=True
     )
-    assert local.stdout.strip() == "1", (
+    assert local.stdout.strip() == "1 1", (
         f"a local run must disable telemetry, got {local.stdout.strip()!r}"
     )
 
@@ -76,7 +75,7 @@ def test_local_runs_disable_telemetry_even_when_ci_vars_are_absent():
     ci = subprocess.run(
         [sys.executable, "-c", program], capture_output=True, text=True, env=ci_env, check=True
     )
-    assert ci.stdout.strip() == "<unset>", (
+    assert ci.stdout.strip() == "<unset> <unset>", (
         f"a CI run must leave telemetry at ORT's default, got {ci.stdout.strip()!r}"
     )
 
@@ -88,7 +87,9 @@ def test_local_runs_disable_telemetry_even_when_ci_vars_are_absent():
         env=dict(ci_env, ORT_DISABLE_TELEMETRY="1"),
         check=True,
     )
-    assert override.stdout.strip() == "1", "an explicit ORT_DISABLE_TELEMETRY must be respected"
+    assert override.stdout.strip() == "1 <unset>", (
+        "an explicit ORT_DISABLE_TELEMETRY must be respected without being attributed to conftest"
+    )
 
     # A falsy CI value means "not CI". Tooling exports `CI=false` rather than unsetting it often
     # enough that a bare truthiness test would leave telemetry on for a developer machine — the
@@ -101,7 +102,7 @@ def test_local_runs_disable_telemetry_even_when_ci_vars_are_absent():
             env=dict(local_env, CI=falsy),
             check=True,
         )
-        assert run.stdout.strip() == "1", (
+        assert run.stdout.strip() == "1 1", (
             f"CI={falsy!r} is not a CI environment, so telemetry must still be disabled; "
             f"got {run.stdout.strip()!r}"
         )
@@ -118,7 +119,8 @@ def test_workflow_does_not_force_telemetry_off(workflow):
     path = _REPO_ROOT / ".github" / "workflows" / workflow
     config = yaml.safe_load(path.read_text())
     workflow_env = config.get("env") or {}
-    assert workflow_env.get("ORT_DISABLE_TELEMETRY") != "1", (
+    disabled = str(workflow_env.get("ORT_DISABLE_TELEMETRY", "")).strip().lower()
+    assert disabled not in {"1", "true", "yes", "on"}, (
         f"{workflow} disables ONNX Runtime telemetry for the whole workflow, which removes the "
         "usage signal CI is meant to provide. Scope it to a job or step if some specific step "
         "needs it."
