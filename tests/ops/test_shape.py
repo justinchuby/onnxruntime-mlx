@@ -9,6 +9,12 @@ EP claims — mirroring how a constant-folded real model presents them.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import onnx_ir as ir
 import onnxruntime as ort
@@ -507,6 +513,77 @@ def test_constant_of_shape_runtime_shape_from_input():
     graph = ir.Graph([x], [o], nodes=nodes, name="g", opset_imports={"": 20})
     model = ir.to_proto(ir.Model(graph, ir_version=10)).SerializeToString()
     _assert_matches_cpu_noopt(model, {"x": np.zeros((3, 5), np.float32)}, rtol=0.0, atol=0.0)
+
+
+def _fp64_constant_of_shape_model() -> bytes:
+    """ConstantOfShape whose `value` is float64.
+
+    1e-300 is unrepresentable in float32, so a narrowed fill would flush to zero.
+    """
+    shape = np.array([2, 3], np.int64)
+    return build(
+        "ConstantOfShape",
+        [initz("s", shape)],
+        [m.tensor("o", DT.DOUBLE, [2, 3])],
+        inits=(initz("s", shape),),
+        attrs=[ir.AttrTensor("value", ir.tensor(np.array([1e-300], np.float64)))],
+    )
+
+
+def test_build_fp64_constant_of_shape_session() -> None:
+    """Child of the test below: creating the session is what runs GetCapability."""
+    _assert_matches_cpu_noopt(_fp64_constant_of_shape_model(), {}, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.skipif(
+    os.environ.get("ONNXRUNTIME_EP_MLX_CLAIM_TEST_CHILD") == "1",
+    reason="child process: it builds the session, it does not spawn another",
+)
+def test_constant_of_shape_float64_value_is_claimed(tmp_path) -> None:
+    """A float64 `value` must be claimed, not stranded on CPU.
+
+    ConstantOfShape only fills, so it takes the data-movement dtype set rather than the arithmetic
+    one; float64 belongs there because MLX carries the dtype through `full` unchanged. The node is
+    coloured float64 by GetCapability and its cluster runs on an MLX CPU stream, so the general
+    "MLX rejects float64" rule does not apply to it.
+
+    Asserted from the EP trace rather than from the output: an unclaimed node still produces the
+    right answer via ORT CPU, so numerical agreement cannot tell the two apart. The EP reads its
+    trace configuration once per process, hence the child process.
+    """
+    trace = tmp_path / "trace.json"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            f"{Path(__file__).name}::test_build_fp64_constant_of_shape_session",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ],
+        check=True,
+        env={
+            **os.environ,
+            "ONNXRUNTIME_EP_MLX_TRACE": str(trace),
+            "ONNXRUNTIME_EP_MLX_CLAIM_TEST_CHILD": "1",
+        },
+        cwd=str(Path(__file__).parent),
+        timeout=300,
+    )
+    events = json.loads(trace.read_text())
+    claims = [event for event in events if event.get("cat") == "ep.claim"]
+    assert claims, "the EP recorded no capability decision"
+    declined = {
+        key.removeprefix("fallback_")
+        for claim in claims
+        for key in claim["args"]
+        if key.startswith("fallback_")
+    }
+    assert "ConstantOfShape" not in declined, (
+        "a float64 `value` was declined; the op only fills, so it takes the data-movement "
+        f"dtype set and the fp64 cluster runs on a CPU stream. Declined: {sorted(declined)}"
+    )
 
 
 def test_reshape_dynamic_shape_from_input_shape(capfd, monkeypatch):

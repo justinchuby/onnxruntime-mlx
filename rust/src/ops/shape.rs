@@ -995,7 +995,11 @@ fn constant_of_shape_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<()
     let r = match fill {
         Some((bytes, value_dtype)) => {
             // ONNX takes the output dtype from `value`, so build the scalar in that dtype and let
-            // mlx_full carry it; no widening round-trip (float64 would abort on the GPU stream).
+            // mlx_full carry it, with no widening round-trip. Note the scalar must be built in its
+            // own dtype rather than staged through float64 as a common transport: an fp64 array is
+            // only evaluable on an MLX CPU stream, and a plan gets that stream only when
+            // GetCapability coloured it fp64, so routing an fp32 fill through float64 would abort
+            // the GPU-stream plan it lands in.
             let scalar =
                 ctx.scalar_from_bytes(&bytes, crate::engine::mlx_dtype_from_onnx(value_dtype));
             ctx.emit(|res, st| unsafe {
@@ -2181,16 +2185,21 @@ fn constant_of_shape_claim(node: &NodeView) -> ClaimResult {
     // ONNX defines `value` as a one-element tensor giving both the fill value and the output dtype;
     // omitting it means fp32 zero. Both forms are handled, so long as the output dtype is one MLX
     // can carry.
+    // ONNX defines `value` as a one-element tensor giving both the fill value and the output dtype;
+    // omitting it means fp32 zero. Both forms are handled, so long as the output dtype is one MLX
+    // can carry. `is_movable` rather than `is_mlx_supported`: this op only fills, never computes, so
+    // it takes the same dtype set as the data-movement ops — float64 included, which GetCapability
+    // then isolates onto an MLX CPU stream.
     require!(
-        crate::registry::is_mlx_supported(out),
+        crate::registry::is_movable(out),
         "ConstantOfShape: output dtype {} is not an MLX dtype",
         crate::registry::ort_dtype_name(out)
     );
-    // A `value` this cannot rebuild byte-exactly in an MLX dtype (notably float64, which MLX
-    // rejects on the GPU stream) is left to CPU rather than silently narrowed.
+    // A `value` this cannot rebuild byte-exactly in an MLX dtype is left to CPU rather than
+    // silently narrowed.
     if let Some(v) = node.attr_tensor_dtype("value") {
         require!(
-            crate::registry::is_mlx_supported(v),
+            crate::registry::is_movable(v),
             "ConstantOfShape: `value` dtype {} is not an MLX dtype",
             crate::registry::ort_dtype_name(v)
         );
