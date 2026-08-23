@@ -1142,7 +1142,19 @@ impl GraphView {
     /// Every node in this body is MLX-translatable (recursively via the registry claim). A body with
     /// no nodes (e.g. a pure alias branch) is trivially claimable.
     pub fn all_nodes_claimable(&self) -> bool {
-        self.nodes().iter().all(claimable)
+        self.first_unclaimable_node().is_none()
+    }
+
+    /// The first node in this graph the registry refuses, as `(op_type, name, reason)`.
+    ///
+    /// `all_nodes_claimable` only answers yes/no, which makes a rejected control-flow body
+    /// opaque: the parent reports that *something* inside is unclaimable without saying what.
+    /// Returning the offending node lets the caller name it in its own denial reason.
+    pub fn first_unclaimable_node(&self) -> Option<(String, String, String)> {
+        self.nodes().iter().find_map(|n| match claim_decision(n) {
+            Ok(()) => None,
+            Err(reason) => Some((n.op_type(), n.name(), reason.into_owned())),
+        })
     }
 }
 
@@ -1218,6 +1230,12 @@ pub fn is_range_type(t: ort::ONNXTensorElementDataType) -> bool {
 
 /// Strict elementwise-or-trailing-suffix broadcast (rejects mismatched non-suffix shapes). A scalar
 /// operand is allowed only via `scalar_or_suffix`.
+///
+/// A negative extent is ORT's encoding for an unknown (symbolic) dimension, not a literal size, so
+/// it is treated as compatible with anything. Comparing it as a value would reject ordinary
+/// broadcasts such as `[-1, -1, 64]` against `[-1, -1, -1]` purely because the static shape is not
+/// fully known. Concrete shapes are resolved when the closure is compiled shape-keyed, and a model
+/// whose runtime extents genuinely do not broadcast would already have failed ORT shape inference.
 pub fn suffix_broadcast(a: &[i64], b: &[i64]) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
@@ -1229,6 +1247,9 @@ pub fn suffix_broadcast(a: &[i64], b: &[i64]) -> bool {
     for i in 0..short.len() {
         let l = long[off + i];
         let s = short[i];
+        if l < 0 || s < 0 {
+            continue;
+        }
         if l != s && s != 1 && l != 1 {
             return false;
         }
@@ -1242,4 +1263,32 @@ pub fn scalar_or_suffix_broadcast(a: &[i64], b: &[i64]) -> bool {
         return true;
     }
     suffix_broadcast(a, b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suffix_broadcast_treats_unknown_extents_as_compatible() {
+        // ORT reports symbolic dims as -1; an unknown extent is not a literal
+        // size and must not be compared as one.
+        assert!(suffix_broadcast(&[-1, -1, 64], &[-1, -1, -1]));
+        assert!(suffix_broadcast(&[-1, 256, 1], &[1, 256, 16]));
+        assert!(suffix_broadcast(&[-1], &[8]));
+        assert!(scalar_or_suffix_broadcast(&[-1, -1, 64], &[-1, -1, -1]));
+    }
+
+    #[test]
+    fn suffix_broadcast_still_rejects_known_mismatches() {
+        // Fully known extents that cannot broadcast are still refused, including
+        // when an unknown dim sits alongside them.
+        assert!(!suffix_broadcast(&[2, 3], &[2, 4]));
+        assert!(!suffix_broadcast(&[-1, 3], &[-1, 4]));
+        // The ordinary numpy suffix rules keep working.
+        assert!(suffix_broadcast(&[2, 3], &[3]));
+        assert!(suffix_broadcast(&[2, 3], &[1, 3]));
+        assert!(!suffix_broadcast(&[2, 3], &[]));
+        assert!(scalar_or_suffix_broadcast(&[2, 3], &[]));
+    }
 }
