@@ -8,8 +8,8 @@ on:
 # ONNX Runtime telemetry is deliberately NOT disabled here. It stays off on developer
 # machines (rootdir conftest.py) and on in CI, so ORT's maintainers still see the runtime
 # being used. If a job flakes on exit 134 with a green test summary, that is ORT's telemetry
-# worker aborting at teardown -- set ORT_DISABLE_TELEMETRY: "1" here rather than debugging
-# the PR under test.
+# worker aborting at teardown -- set ORT_DISABLE_TELEMETRY: "1" on the affected job or step
+# rather than debugging the PR under test.
 # Apple Silicon only: the MLX EP requires Metal + mlx-c (macos-14 runners are arm64).
 jobs:
   # Layout only, so this needs neither Metal nor ONNX Runtime: rustfmt parses

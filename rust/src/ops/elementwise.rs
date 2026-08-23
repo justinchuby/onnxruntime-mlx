@@ -386,8 +386,8 @@ fn softmax_claim(node: &NodeView) -> ClaimResult {
         _ => deny!("missing tensor type/shape info on input or output"),
     };
     require!(
-        is_mlx_cpu_float(i.dtype) && i.dtype == o.dtype,
-        "input/output must be the same float dtype (fp32/fp16/bf16/fp64), got {} -> {}",
+        is_mlx_float(i.dtype) && i.dtype == o.dtype,
+        "input/output must be the same float dtype (fp32/fp16/bf16), got {} -> {}",
         crate::registry::ort_dtype_name(i.dtype),
         crate::registry::ort_dtype_name(o.dtype)
     );
@@ -809,9 +809,9 @@ fn is_inf_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-/// LogSoftmax is `x - logsumexp(x)`; both primitives were measured exact in fp64.
+/// LogSoftmax is `x - logsumexp(x)`; MLX's logsumexp is only float32-accurate for fp64.
 fn log_softmax_claim(node: &NodeView) -> ClaimResult {
-    float_unary_claim_inner(node, true)?;
+    float_unary_claim_inner(node, false)?;
     let input = node.input_info(0).expect("validated above");
     let rank = input.shape.len() as i64;
     require!(rank > 0, "input must have rank >= 1 (got a scalar)");

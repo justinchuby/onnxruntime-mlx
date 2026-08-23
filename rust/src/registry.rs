@@ -1262,13 +1262,13 @@ pub fn is_float64(t: ort::ONNXTensorElementDataType) -> bool {
 ///    |---|---|
 ///    | `log` `sqrt` `rsqrt` `tanh` `expm1` `power` `abs` `neg` `sign` `floor` `ceil` `round` `reciprocal` | `exp` `sin` `cos` `erf` `sigmoid` `logaddexp` |
 ///    | `add` `subtract` `multiply` `divide` `maximum` `minimum` | |
-///    | `sum` `prod` `mean` `logsumexp` `softmax` `matmul` | |
+///    | `sum` `prod` `mean` `matmul` | `logsumexp` `softmax` |
 ///
 /// So an op opts in only when *every* primitive its handler emits is in the left column. Claiming a
 /// right-column op would make the EP quietly return float32-accurate answers for a float64 model,
 /// which is worse than ORT's honest `NOT_IMPLEMENTED`. That is why `Sigmoid`, `Erf`, `Gelu`, `Exp`,
 /// `Softplus`, `Mish`, `Swish` and the trig family stay fp32-only while `Log`, `Sqrt`, `Tanh`,
-/// `Relu`, `Elu`/`Selu`/`Celu` (expm1), `Clip`, `MatMul`, the reductions and all data movement do
+/// `Relu`, `Elu`/`Selu`/`Celu` (expm1), `Clip`, `MatMul`, exact reductions and all data movement do
 /// carry fp64.
 pub fn is_mlx_cpu_float(t: ort::ONNXTensorElementDataType) -> bool {
     is_mlx_float(t) || is_float64(t)

@@ -523,8 +523,14 @@ fn reduction_claim(node: &NodeView, float_only: bool) -> ClaimResult {
         crate::registry::ort_dtype_name(x.dtype),
         crate::registry::ort_dtype_name(out.dtype)
     );
-    // Reductions are plain MLX primitives that carry their element dtype through, so float64 is
-    // admitted here (it then runs on the MLX CPU stream — see `Plan::requires_cpu_stream`).
+    // Most reductions carry float64 exactly on MLX's CPU stream. LogSumExp is built on exp and is
+    // only float32-accurate there, so claiming it would silently put seven-digit results in an
+    // fp64 tensor.
+    let lossy_float64 = node.op_type() == "ReduceLogSumExp" && crate::registry::is_float64(x.dtype);
+    require!(
+        !lossy_float64,
+        "ReduceLogSumExp is only float32-accurate on MLX for float64 input"
+    );
     if float_only {
         require!(
             is_mlx_cpu_float(x.dtype),

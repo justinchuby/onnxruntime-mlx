@@ -247,7 +247,8 @@ unsafe fn get_capability_impl(
             .collect();
 
         // Claiming view: build the per-op fallback reasons for the declined nodes (only when
-        // observability is active, so this extra FFI never touches the traced-off fast path). The        // legacy `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG` env still forces the raw stderr dump for quick debugging.
+        // observability is active, so this extra FFI never touches the traced-off fast path). The
+        // legacy `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG` env still forces the raw stderr dump.
         let tr = crate::trace::tracer();
         let mut rejected: Vec<(String, usize, String, Vec<String>)> = Vec::new();
         if tr.active() || std::env::var_os("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG").is_some() {
@@ -1920,27 +1921,72 @@ unsafe fn read_tensor_attr(
             return None;
         }
         let mut info: *mut ort::OrtTensorTypeAndShapeInfo = ptr::null_mut();
-        (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+        let st = (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+        if !st.is_null() {
+            release_status(api, st);
+            (api.ReleaseValue.unwrap())(value);
+            return None;
+        }
+        if info.is_null() {
+            (api.ReleaseValue.unwrap())(value);
+            return None;
+        }
         let mut nd: usize = 0;
-        (api.GetDimensionsCount.unwrap())(info, &mut nd);
+        let st = (api.GetDimensionsCount.unwrap())(info, &mut nd);
+        if !st.is_null() {
+            release_status(api, st);
+            (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+            (api.ReleaseValue.unwrap())(value);
+            return None;
+        }
         let mut dims = vec![0i64; nd];
         if nd > 0 {
-            (api.GetDimensions.unwrap())(info, dims.as_mut_ptr(), nd);
+            let st = (api.GetDimensions.unwrap())(info, dims.as_mut_ptr(), nd);
+            if !st.is_null() {
+                release_status(api, st);
+                (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+                (api.ReleaseValue.unwrap())(value);
+                return None;
+            }
         }
         let mut etype: ort::ONNXTensorElementDataType = 0;
-        (api.GetTensorElementType.unwrap())(info, &mut etype);
+        let st = (api.GetTensorElementType.unwrap())(info, &mut etype);
+        if !st.is_null() {
+            release_status(api, st);
+            (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+            (api.ReleaseValue.unwrap())(value);
+            return None;
+        }
         let mut count: usize = 0;
-        (api.GetTensorShapeElementCount.unwrap())(info, &mut count);
+        let st = (api.GetTensorShapeElementCount.unwrap())(info, &mut count);
+        if !st.is_null() {
+            release_status(api, st);
+            (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+            (api.ReleaseValue.unwrap())(value);
+            return None;
+        }
         (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
 
         let width = element_byte_size(etype);
         let mut data: *const c_void = ptr::null();
-        (api.GetTensorData.unwrap())(value, &mut data);
-        if width == 0 || data.is_null() {
+        let st = (api.GetTensorData.unwrap())(value, &mut data);
+        if !st.is_null() {
+            release_status(api, st);
             (api.ReleaseValue.unwrap())(value);
             return None;
         }
-        let bytes = std::slice::from_raw_parts(data as *const u8, count * width).to_vec();
+        let byte_count = match count.checked_mul(width) {
+            Some(n) if width > 0 => n,
+            _ => {
+                (api.ReleaseValue.unwrap())(value);
+                return None;
+            }
+        };
+        if data.is_null() {
+            (api.ReleaseValue.unwrap())(value);
+            return None;
+        }
+        let bytes = std::slice::from_raw_parts(data as *const u8, byte_count).to_vec();
         (api.ReleaseValue.unwrap())(value);
         Some(crate::engine::ConstTensor {
             data: bytes,

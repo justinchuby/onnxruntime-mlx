@@ -12,9 +12,10 @@ CPU stream. These tests assert the two halves of that:
   fp64 -> Cast -> fp32` must partition into *separate* fused subgraphs.
 
 Ops whose MLX primitive is only float32-accurate on a float64 input (`exp`, `sin`, `cos`, `erf`,
-`sigmoid`, `logaddexp` — see `is_mlx_cpu_float` in `rust/src/registry.rs`) are deliberately NOT
-claimed for fp64, and `test_lossy_primitive_ops_do_not_claim_float64` pins that so the EP can never
-start quietly returning 7-digit answers in a float64 container.
+`sigmoid`, `logaddexp`, `softmax`, `logsumexp` — see `is_mlx_cpu_float` in
+`rust/src/registry.rs`) are deliberately NOT claimed for fp64, and
+`test_lossy_primitive_ops_do_not_claim_float64` pins that so the EP can never start quietly
+returning 7-digit answers in a float64 container.
 """
 
 from __future__ import annotations
@@ -164,7 +165,17 @@ def test_float64_constant_of_shape_is_bit_exact():
     np.testing.assert_array_equal(got, np.full((2, 3), np.float64(fill)))
 
 
-LOSSY_FP64_OPS = ["Exp", "Erf", "Sigmoid", "Sin", "Cos", "Softplus"]
+LOSSY_FP64_OPS = [
+    "Exp",
+    "Erf",
+    "Sigmoid",
+    "Sin",
+    "Cos",
+    "Softplus",
+    "Softmax",
+    "LogSoftmax",
+    "ReduceLogSumExp",
+]
 
 
 def _profile_providers_then_discard(session) -> set[str]:
@@ -188,7 +199,15 @@ def test_lossy_primitive_ops_do_not_claim_float64(op_type):
     result. Claiming them would return a ~7-digit answer in a float64 container with no way for the
     caller to tell, so they must fall back to ORT rather than be claimed.
     """
-    model = _unary(op_type)
+    if op_type == "ReduceLogSumExp":
+        model = m.make_model(
+            op_type,
+            [_f64("x", [2, 3])],
+            [_f64("y", [1, 1])],
+            attributes={"keepdims": 1},
+        )
+    else:
+        model = _unary(op_type)
     feeds = {"x": np.abs(X)}
 
     # Two phases, so no profile file is ever orphaned: ORT writes the profile the moment a
