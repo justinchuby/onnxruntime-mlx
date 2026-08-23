@@ -126,6 +126,7 @@ The **core Rust modules** register:
 | `conv.rs` | Conv/ConvTranspose/DeformConv and local/global pooling |
 | `quant.rs` | MatMulNBits, GatherBlockQuantized, Quantize/Dequantize/DynamicQuantize, MatMulInteger, ConvInteger, QLinearMatMul, QLinearConv |
 | `ssm.rs` | TensorScatter (opset 24), CausalConvWithState, LinearAttention (linear/gated/delta/gated_delta, GQA) |
+| `selective_scan.rs` | Mamba-1 selective scan: recognises the `Scan` body and replaces the per-timestep unroll with one custom Metal kernel (state kept in registers) |
 | `misc.rs` / `image.rs` | Constants, losses, NonZero/Unique/Det, numeric TF-IDF, and image decoding |
 | `random.rs` / `signal.rs` / `recurrent.rs` / `vision.rs` / `controlflow.rs` | Random, signal/FFT/window, RNN/GRU/LSTM, vision/detection, and recursive control-flow translations |
 

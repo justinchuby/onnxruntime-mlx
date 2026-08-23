@@ -19,6 +19,7 @@
 //! kernels (with the body ops still offloaded to MLX via the ordinary flat path).
 
 use crate::engine::{MlxError, NodeDesc, SubgraphDesc, TensorRef, TranslationContext};
+use crate::ops::selective_scan;
 use crate::registry::{
     ClaimPredicate, ClaimResult, GraphView, K_ANY_OPSET, NodeView, OpHandler, OpRegistration,
     OpRegistry,
@@ -259,6 +260,53 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
 
     let mut collected: Vec<Vec<mlx::mlx_array>> = vec![Vec::new(); num_scan_out];
 
+    // Fused Mamba-1 selective scan: replaces the whole unroll below with one custom Metal kernel
+    // that keeps the running state in registers. Declines (falls through to the unroll) unless the
+    // body matches exactly and the shapes/dtypes are covered. See `ops/selective_scan.rs`.
+    //
+    // Both outcomes are recorded on the node's trace path so a silent regression is detectable: if
+    // the emitting graph changes shape and the pattern stops matching, the node shows up as
+    // `op.composed` with a reason instead of quietly costing 7x more.
+    let fusable_form = num_scan_out == 1
+        && !selective_scan::disabled()
+        && input_directions.iter().all(|&d| d == input_directions[0])
+        && scan_axes.iter().all(|&ax| ax == 0)
+        && output_axes[0] == 0;
+    let decline_reason: &'static str = if !fusable_form {
+        "Scan form (axes/directions/outputs) not fusable -> unrolled per timestep"
+    } else {
+        match selective_scan::match_body(&body, num_state, num_scan) {
+            Some(m) => {
+                let fused = selective_scan::emit(
+                    ctx,
+                    state[m.h_state],
+                    state[m.a_state],
+                    scans[m.dt],
+                    scans[m.b],
+                    scans[m.c],
+                    scans[m.x],
+                    input_directions[0] == 1,
+                    output_directions[0] == 1,
+                )?;
+                match fused {
+                    Some((h_final, y)) => {
+                        let a_pass = state[m.a_state];
+                        ctx.bind(&n.outputs[m.h_state], h_final);
+                        ctx.bind(&n.outputs[m.a_state], a_pass);
+                        ctx.bind(&n.outputs[m.out_y], y);
+                        ctx.mark_fast(selective_scan::KERNEL_NAME);
+                        return Ok(());
+                    }
+                    None => {
+                        "selective-scan body matched but shape/dtype unsupported by the fused \
+                         kernel -> unrolled"
+                    }
+                }
+            }
+            None => "Scan body is not a recognised Mamba-1 selective scan -> unrolled per timestep",
+        }
+    };
+
     for t in 0..trip {
         let mut bin: Vec<mlx::mlx_array> = Vec::with_capacity(num_state + num_scan);
         bin.extend_from_slice(&state[..num_state]);
@@ -310,6 +358,9 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         let stacked = ctx.stack(&parts, axis as i32)?;
         ctx.bind(&n.outputs[num_state + i], stacked);
     }
+    // Recorded AFTER the unroll: translating the body dispatches through the registry, which
+    // resets the per-node path mark, so a mark set before the loop would be clobbered.
+    ctx.mark_composed(decline_reason);
     Ok(())
 }
 
