@@ -48,6 +48,21 @@ fn body_claimable(body: &GraphView) -> bool {
     body.all_nodes_claimable()
 }
 
+/// Name the first body node the registry refuses, for a denial reason that can be acted on.
+fn body_rejection(body: &GraphView) -> String {
+    match body.first_unclaimable_node() {
+        Some((op_type, name, reason)) => {
+            let label = if name.is_empty() {
+                op_type
+            } else {
+                format!("{op_type} '{name}'")
+            };
+            format!("body contains an unclaimable operation: {label}: {reason}")
+        }
+        None => "body contains an unclaimable operation".to_string(),
+    }
+}
+
 fn is_bool(node: &NodeView, i: usize) -> bool {
     matches!(node.input_info(i), Some(info)
         if info.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL)
@@ -384,10 +399,7 @@ fn scan_claim(node: &NodeView) -> ClaimResult {
         noutputs,
         body.output_names().len()
     );
-    require!(
-        body_claimable(body),
-        "body contains an unclaimable operation"
-    );
+    require!(body_claimable(body), "{}", body_rejection(body));
     let num_scan_out = body.output_names().len() - num_state as usize;
     let output_axes_present = node.ints_attr("scan_output_axes").0;
     let output_axes = read_attr("scan_output_axes", num_scan_out)?;

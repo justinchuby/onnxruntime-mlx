@@ -1830,9 +1830,64 @@ unsafe fn collect_attributes(api: &ort::OrtApi, node: *const ort::OrtNode, nd: &
                         }
                     }
                 }
-                _ => {} // STRINGS / GRAPH / TENSOR not carried by wave-1 ops.
+                t if t == ort::OrtOpAttrType_ORT_OP_ATTR_TENSOR => {
+                    if let Some(ct) = read_tensor_attr(api, attr) {
+                        nd.tensors.insert(name, ct);
+                    }
+                }
+                _ => {} // STRINGS / GRAPH not carried by any claimed op.
             }
         }
+    }
+}
+
+/// Read a TENSOR-valued attribute (e.g. `ConstantOfShape`'s `value`) into owned bytes.
+///
+/// The `OrtValue` ORT hands back is ours to release, and its buffer does not outlive it, so the
+/// element bytes are copied into the `ConstTensor` rather than borrowed.
+unsafe fn read_tensor_attr(
+    api: &ort::OrtApi,
+    attr: *const ort::OrtOpAttr,
+) -> Option<crate::engine::ConstTensor> {
+    unsafe {
+        let mut value: *mut ort::OrtValue = ptr::null_mut();
+        let st = (api.OpAttr_GetTensorAttributeAsOrtValue.unwrap())(attr, &mut value);
+        if !st.is_null() {
+            release_status(api, st);
+            return None;
+        }
+        if value.is_null() {
+            return None;
+        }
+        let mut info: *mut ort::OrtTensorTypeAndShapeInfo = ptr::null_mut();
+        (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+        let mut nd: usize = 0;
+        (api.GetDimensionsCount.unwrap())(info, &mut nd);
+        let mut dims = vec![0i64; nd];
+        if nd > 0 {
+            (api.GetDimensions.unwrap())(info, dims.as_mut_ptr(), nd);
+        }
+        let mut etype: ort::ONNXTensorElementDataType = 0;
+        (api.GetTensorElementType.unwrap())(info, &mut etype);
+        let mut count: usize = 0;
+        (api.GetTensorShapeElementCount.unwrap())(info, &mut count);
+        (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+
+        let width = element_byte_size(etype);
+        let mut data: *const c_void = ptr::null();
+        (api.GetTensorData.unwrap())(value, &mut data);
+        if width == 0 || data.is_null() {
+            (api.ReleaseValue.unwrap())(value);
+            return None;
+        }
+        let bytes = std::slice::from_raw_parts(data as *const u8, count * width).to_vec();
+        (api.ReleaseValue.unwrap())(value);
+        Some(crate::engine::ConstTensor {
+            data: bytes,
+            shape: dims,
+            dtype: etype,
+            count,
+        })
     }
 }
 
