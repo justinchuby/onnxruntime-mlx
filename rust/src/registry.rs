@@ -719,12 +719,25 @@ impl NodeView {
                 return None;
             }
             let mut info: *mut ort::OrtTensorTypeAndShapeInfo = std::ptr::null_mut();
-            (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+            let st = (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+            if !st.is_null() {
+                self.release_status(st);
+                (api.ReleaseValue.unwrap())(value);
+                return None;
+            }
+            if info.is_null() {
+                (api.ReleaseValue.unwrap())(value);
+                return None;
+            }
             let mut etype: ort::ONNXTensorElementDataType = 0;
-            (api.GetTensorElementType.unwrap())(info, &mut etype);
+            let st = (api.GetTensorElementType.unwrap())(info, &mut etype);
+            let ok = st.is_null();
+            if !ok {
+                self.release_status(st);
+            }
             (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
             (api.ReleaseValue.unwrap())(value);
-            Some(etype)
+            ok.then_some(etype)
         }
     }
 

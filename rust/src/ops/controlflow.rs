@@ -52,7 +52,11 @@ fn body_claimable(body: &GraphView) -> bool {
 fn body_rejection(body: &GraphView) -> String {
     match body.first_unclaimable_node() {
         Some((op_type, name, reason)) => {
-            let label = if name.is_empty() { op_type } else { format!("{op_type} '{name}'") };
+            let label = if name.is_empty() {
+                op_type
+            } else {
+                format!("{op_type} '{name}'")
+            };
             format!("body contains an unclaimable operation: {label}: {reason}")
         }
         None => "body contains an unclaimable operation".to_string(),

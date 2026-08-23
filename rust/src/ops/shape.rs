@@ -996,7 +996,8 @@ fn constant_of_shape_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<()
         Some((bytes, value_dtype)) => {
             // ONNX takes the output dtype from `value`, so build the scalar in that dtype and let
             // mlx_full carry it; no widening round-trip (float64 would abort on the GPU stream).
-            let scalar = ctx.scalar_from_bytes(&bytes, crate::engine::mlx_dtype_from_onnx(value_dtype));
+            let scalar =
+                ctx.scalar_from_bytes(&bytes, crate::engine::mlx_dtype_from_onnx(value_dtype));
             ctx.emit(|res, st| unsafe {
                 mlx::mlx_full(res, s.as_ptr(), s.len(), scalar, mlx_type, st)
             })?
