@@ -1210,6 +1210,22 @@ impl GraphView {
             Err(reason) => Some((n.op_type(), n.name(), reason.into_owned())),
         })
     }
+
+    /// Any node anywhere in this body (including nested bodies) carries a float64 tensor.
+    ///
+    /// A control-flow node is claimed as a whole and its body is translated inside the parent's
+    /// plan, so the body never gets a cluster — or a stream — of its own. GetCapability's fp64
+    /// colouring only sees the control-flow node itself, so a float64 tensor buried in a body would
+    /// otherwise ride along on the GPU stream and hard-error inside MLX. Callers use this to decline
+    /// such bodies outright.
+    pub fn body_uses_float64(&self) -> bool {
+        self.nodes().iter().any(|n| {
+            node_uses_float64(n)
+                || n.subgraphs()
+                    .iter()
+                    .any(|(_, body)| body.body_uses_float64())
+        })
+    }
 }
 
 // ---- Shared claim helpers (port of op_claim.h) --------------------------------------------------
@@ -1221,6 +1237,50 @@ pub fn is_mlx_float(t: ort::ONNXTensorElementDataType) -> bool {
     t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16
+}
+
+/// float64 (ONNX DOUBLE).
+pub fn is_float64(t: ort::ONNXTensorElementDataType) -> bool {
+    t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE
+}
+
+/// Float dtypes an op may carry when it opts IN to the fp64 CPU-stream path: fp32/fp16/bf16 plus
+/// float64.
+///
+/// This is deliberately a *separate* predicate from [`is_mlx_float`], for two independent reasons.
+///
+/// 1. MLX rejects float64 on the Metal backend outright, so an fp64 node is only translatable on an
+///    MLX CPU stream; widening `is_mlx_float` (used by ~everything) would admit fp64 into
+///    GPU-stream subgraphs and hard-error at run time.
+///
+/// 2. **MLX's CPU float64 support is partial, and silently so.** Several primitives keep the
+///    `float64` dtype on the result while computing in float32 and widening back — the array claims
+///    to be double precision and is not. Measured on MLX 0.32.1 (see the `mlx_float64_primitives`
+///    test, which re-checks this at build time):
+///
+///    | exact in fp64 | silently float32-accurate |
+///    |---|---|
+///    | `log` `sqrt` `rsqrt` `tanh` `expm1` `power` `abs` `neg` `sign` `floor` `ceil` `round` `reciprocal` | `exp` `sin` `cos` `erf` `sigmoid` `logaddexp` |
+///    | `add` `subtract` `multiply` `divide` `maximum` `minimum` | |
+///    | `sum` `prod` `mean` `logsumexp` `softmax` `matmul` | |
+///
+/// So an op opts in only when *every* primitive its handler emits is in the left column. Claiming a
+/// right-column op would make the EP quietly return float32-accurate answers for a float64 model,
+/// which is worse than ORT's honest `NOT_IMPLEMENTED`. That is why `Sigmoid`, `Erf`, `Gelu`, `Exp`,
+/// `Softplus`, `Mish`, `Swish` and the trig family stay fp32-only while `Log`, `Sqrt`, `Tanh`,
+/// `Relu`, `Elu`/`Selu`/`Celu` (expm1), `Clip`, `MatMul`, the reductions and all data movement do
+/// carry fp64.
+pub fn is_mlx_cpu_float(t: ort::ONNXTensorElementDataType) -> bool {
+    is_mlx_float(t) || is_float64(t)
+}
+
+/// True when any tensor slot of `node` (input or output) is float64.
+///
+/// Drives two things: the cluster-boundary rule in GetCapability (an fp64 node never merges with a
+/// non-fp64 node) and the CPU-stream selection for the resulting plan.
+pub fn node_uses_float64(node: &NodeView) -> bool {
+    (0..node.num_inputs()).any(|i| node.input_info(i).is_some_and(|s| is_float64(s.dtype)))
+        || (0..node.num_outputs()).any(|i| node.output_info(i).is_some_and(|s| is_float64(s.dtype)))
 }
 
 pub fn is_signed_integer(t: ort::ONNXTensorElementDataType) -> bool {
@@ -1251,10 +1311,16 @@ pub fn is_mlx_numeric(t: ort::ONNXTensorElementDataType) -> bool {
     is_mlx_float(t) || is_signed_integer(t) || is_unsigned_integer(t)
 }
 
-/// Dtypes the pure data-movement ops carry end-to-end (every case CopyOut can memcpy). Excludes
-/// float64 and uint64 (no CopyOut case). Port of `IsMovableType`.
+/// Dtypes the pure data-movement ops carry end-to-end (every case CopyOut can memcpy). Port of
+/// `IsMovableType`.
+///
+/// float64 is included: these ops never do arithmetic, `copy_out_raw_delta` sizes every memcpy from
+/// the MLX array's own `itemsize`, and MLX's CPU backend carries fp64 through gather/reshape/concat
+/// unchanged. GetCapability isolates the resulting fp64 nodes into their own cluster, which runs on
+/// an MLX CPU stream.
 pub fn is_movable(t: ort::ONNXTensorElementDataType) -> bool {
     is_mlx_float(t)
+        || is_float64(t)
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16
         || t == ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
@@ -1331,6 +1397,30 @@ mod tests {
         assert!(suffix_broadcast(&[-1, 256, 1], &[1, 256, 16]));
         assert!(suffix_broadcast(&[-1], &[8]));
         assert!(scalar_or_suffix_broadcast(&[-1, -1, 64], &[-1, -1, -1]));
+    }
+
+    #[test]
+    fn float64_is_a_separate_opt_in_from_the_gpu_float_set() {
+        use ort::*;
+        const F64: ort::ONNXTensorElementDataType =
+            ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE;
+        const F32: ort::ONNXTensorElementDataType =
+            ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+
+        // `is_mlx_float` gates the GPU-stream paths and must NEVER admit float64: MLX rejects fp64
+        // on Metal outright, so widening it would turn a claim into a run-time hard error.
+        assert!(!is_mlx_float(F64));
+        assert!(!is_mlx_supported(F64));
+        assert!(!is_mlx_numeric(F64));
+
+        // The opt-in predicate is the only float set that carries fp64.
+        assert!(is_mlx_cpu_float(F64));
+        assert!(is_mlx_cpu_float(F32));
+        assert!(is_float64(F64));
+        assert!(!is_float64(F32));
+
+        // Data movement is dtype-agnostic (CopyOut sizes from the array's own itemsize).
+        assert!(is_movable(F64));
     }
 
     #[test]

@@ -20,6 +20,14 @@ impl Stream {
         }
     }
 
+    /// The default CPU stream. MLX hard-errors on float64 on the GPU
+    /// ("float64 is not supported on the GPU"), so an fp64 subgraph must run here.
+    pub fn new_default_cpu() -> Self {
+        Stream {
+            raw: unsafe { mlx::mlx_default_cpu_stream_new() },
+        }
+    }
+
     pub fn new_gpu() -> Self {
         unsafe {
             let device = mlx::mlx_device_new_type(mlx::mlx_device_type__MLX_GPU, 0);
@@ -315,5 +323,106 @@ impl Closure {
 impl Drop for Closure {
     fn drop(&mut self) {
         unsafe { mlx::mlx_closure_free(self.raw) };
+    }
+}
+
+#[cfg(test)]
+mod float64_primitive_tests {
+    use super::*;
+    use crate::sys::mlx as sys;
+
+    fn scalar_f64(v: f64) -> Array {
+        let shape: [i32; 1] = [1];
+        Array::from_data(
+            &v as *const f64 as *const std::ffi::c_void,
+            &shape,
+            sys::mlx_dtype__MLX_FLOAT64,
+        )
+    }
+
+    fn eval_unary(
+        op: unsafe extern "C" fn(*mut sys::mlx_array, sys::mlx_array, sys::mlx_stream) -> i32,
+        x: f64,
+        stream: &Stream,
+    ) -> f64 {
+        let a = scalar_f64(x);
+        let mut raw = unsafe { sys::mlx_array_new() };
+        let rc = unsafe { op(&mut raw, a.as_raw(), stream.as_raw()) };
+        assert_eq!(rc, 0, "mlx unary op failed on a float64 CPU-stream array");
+        let out = Array::from_raw(raw);
+        unsafe { sys::mlx_array_eval(out.as_raw()) };
+        assert_eq!(
+            out.dtype(),
+            sys::mlx_dtype__MLX_FLOAT64,
+            "float64 input must produce a float64 result"
+        );
+        unsafe { *sys::mlx_array_data_float64(out.as_raw()) }
+    }
+
+    fn relative_error(got: f64, want: f64) -> f64 {
+        if want == 0.0 {
+            got.abs()
+        } else {
+            ((got - want) / want).abs()
+        }
+    }
+
+    /// Pins the measured float64 behaviour of the MLX primitives the fp64 opt-in relies on.
+    ///
+    /// MLX keeps the `float64` dtype but computes some primitives in float32 and widens back, so a
+    /// result can *look* double-precision and carry only ~7 significant digits. The op claim table
+    /// (`is_mlx_cpu_float`) is derived from exactly this split, so if an MLX upgrade moves a
+    /// primitive between the two columns this test fails and the claim table must be revisited —
+    /// rather than the EP silently returning float32-accurate answers for a float64 model.
+    #[test]
+    fn mlx_float64_primitives() {
+        let cpu = Stream::new_default_cpu();
+
+        // Exact in float64: safe for ops to opt in.
+        for (name, got, want) in [
+            ("log", eval_unary(sys::mlx_log, 0.7, &cpu), 0.7f64.ln()),
+            ("sqrt", eval_unary(sys::mlx_sqrt, 2.0, &cpu), 2.0f64.sqrt()),
+            ("tanh", eval_unary(sys::mlx_tanh, 0.7, &cpu), 0.7f64.tanh()),
+            (
+                "expm1",
+                eval_unary(sys::mlx_expm1, -1e-9, &cpu),
+                (-1e-9f64).exp_m1(),
+            ),
+            (
+                "reciprocal",
+                eval_unary(sys::mlx_reciprocal, 3.0, &cpu),
+                1.0 / 3.0,
+            ),
+        ] {
+            assert!(
+                relative_error(got, want) <= 1e-15,
+                "mlx_{name} was float64-exact when the claim table was written but now differs \
+                 (got {got:.17e}, want {want:.17e}); re-check which ops may claim float64"
+            );
+        }
+
+        // Silently float32-accurate: ops built on these must NOT claim float64.
+        for (name, got, want) in [
+            ("exp", eval_unary(sys::mlx_exp, -3.5, &cpu), (-3.5f64).exp()),
+            ("sin", eval_unary(sys::mlx_sin, -3.5, &cpu), (-3.5f64).sin()),
+            ("cos", eval_unary(sys::mlx_cos, -3.5, &cpu), (-3.5f64).cos()),
+            (
+                "sigmoid",
+                eval_unary(sys::mlx_sigmoid, -3.5, &cpu),
+                1.0 / (1.0 + 3.5f64.exp()),
+            ),
+        ] {
+            let rel = relative_error(got, want);
+            assert!(
+                rel > 1e-15,
+                "mlx_{name} is now float64-exact (got {got:.17e}, want {want:.17e}) — the ops \
+                 built on it may finally claim float64; update the claim table"
+            );
+            assert!(
+                rel <= 1e-6,
+                "mlx_{name} is neither float64-exact nor float32-accurate (rel={rel:.3e}) — \
+                 something is badly wrong with the fp64 CPU path"
+            );
+        }
     }
 }

@@ -422,6 +422,10 @@ pub struct Plan {
     pub cache: HashMap<String, Array>,
     pub native_attention_decode: bool,
     pub dedicated_decode_stream: bool,
+    /// This subgraph carries float64 tensors and must run on an MLX **CPU** stream: MLX rejects
+    /// float64 on Metal outright. GetCapability guarantees an fp64 cluster contains only fp64 nodes,
+    /// so flipping the whole plan to the CPU stream never drags fp32 work off the GPU.
+    pub requires_cpu_stream: bool,
     pub stable_cross_cache_enabled: bool,
     /// Boundary K/V inputs used directly by cross-attention MHA nodes.
     pub stable_cross_ctx_indices: Vec<usize>,
@@ -569,11 +573,25 @@ impl Plan {
             !std::env::var_os("ONNXRUNTIME_EP_MLX_NO_STABLE_CROSS_CACHE")
                 .map(|value| value != "0" && !value.is_empty())
                 .unwrap_or(false);
+        // Best-effort fp64 detection from the descriptors alone (declared output dtypes + hoisted
+        // initializers). `build_plan` ORs in the authoritative claim-time answer, which also sees
+        // input dtypes; this covers the plans built directly in tests and control-flow bodies.
+        let requires_cpu_stream = nodes.iter().any(|node| {
+            node.outputs
+                .iter()
+                .any(|o| crate::registry::is_float64(o.otype))
+                || node.inputs.iter().any(|i| {
+                    i.init
+                        .as_ref()
+                        .is_some_and(|init| crate::registry::is_float64(init.dtype))
+                })
+        });
         Plan {
             nodes,
             cache: HashMap::new(),
             native_attention_decode,
-            dedicated_decode_stream,
+            dedicated_decode_stream: dedicated_decode_stream && !requires_cpu_stream,
+            requires_cpu_stream,
             stable_cross_cache_enabled,
             stable_cross_ctx_indices,
             compiled: CompiledSubgraph::new(CompiledConfig::decode()),
@@ -1230,6 +1248,17 @@ impl<'a> TranslationContext<'a> {
         self.keep(Array::from_raw(unsafe { mlxsys::mlx_array_new_float32(v) }))
     }
 
+    /// A kept 0-d float64 scalar array. Used by the fp64 CPU-stream path so a constant like Selu's
+    /// alpha is not first rounded through fp32.
+    pub fn scalar_f64(&mut self, v: f64) -> mlxsys::mlx_array {
+        let sh: [i32; 0] = [];
+        self.keep(Array::from_data(
+            &v as *const f64 as *const c_void,
+            &sh,
+            mlxsys::mlx_dtype__MLX_FLOAT64,
+        ))
+    }
+
     /// A kept 0-d int32 scalar array.
     pub fn scalar_i32(&mut self, v: i32) -> mlxsys::mlx_array {
         self.keep(Array::from_raw(unsafe { mlxsys::mlx_array_new_int(v) }))
@@ -1309,14 +1338,20 @@ impl<'a> TranslationContext<'a> {
 
     /// Softmax over the last axis (precise), used by the Softmax handler.
     /// Softmax over a single (already-normalized, or negative) axis via `mlx_softmax_axis`.
+    ///
+    /// The `precise` flag asks MLX to accumulate in float32. That is what we want for fp16/bf16, but
+    /// for a float64 input it is a *down*cast: an input near float32's max (3.4e38 is a perfectly
+    /// ordinary float64) overflows to inf and the result comes back NaN. Ask for the precise path
+    /// only when the input is actually narrower than float32.
     pub fn softmax_axis(
         &mut self,
         a: mlxsys::mlx_array,
         axis: i32,
     ) -> Result<mlxsys::mlx_array, MlxError> {
+        let precise = self.dtype_of(a) != mlxsys::mlx_dtype__MLX_FLOAT64;
         let mut res = Array::new();
         let mut raw = res.as_raw();
-        let rc = unsafe { mlxsys::mlx_softmax_axis(&mut raw, a, axis, true, self.stream) };
+        let rc = unsafe { mlxsys::mlx_softmax_axis(&mut raw, a, axis, precise, self.stream) };
         res = Array::from_raw(raw);
         if rc != 0 {
             return Err("mlx_softmax_axis failed".to_string());

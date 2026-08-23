@@ -4,9 +4,9 @@
 
 use crate::engine::{MlxError, NodeDesc, TranslationContext, mlx_dtype_from_onnx};
 use crate::registry::{
-    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_int_index, is_mlx_float,
-    is_mlx_numeric, is_mlx_supported, is_signed_integer, is_unsigned_integer,
-    scalar_or_suffix_broadcast,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_float64, is_int_index,
+    is_mlx_cpu_float, is_mlx_float, is_mlx_numeric, is_mlx_supported, is_signed_integer,
+    is_unsigned_integer, scalar_or_suffix_broadcast,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -313,8 +313,8 @@ fn binary_same_type_claim(
         b.shape
     );
     require!(
-        is_mlx_float(a.dtype) || int_ok(a.dtype),
-        "dtype {} not supported here (float fp32/fp16/bf16 or the admitted integer types only)",
+        is_mlx_cpu_float(a.dtype) || int_ok(a.dtype),
+        "dtype {} not supported here (float fp32/fp16/bf16/fp64 or the admitted integer types only)",
         crate::registry::ort_dtype_name(a.dtype)
     );
     Ok(())
@@ -335,8 +335,9 @@ fn sub_claim(node: &NodeView) -> ClaimResult {
     binary_same_type_claim(node, is_signed_integer)
 }
 
-/// Single fp32/fp16/bf16 input, same dtype out.
-fn float_unary_claim(node: &NodeView) -> ClaimResult {
+/// Single float input, same dtype out. `allow_float64` is set only by ops whose MLX primitive was
+/// measured exact in fp64 (see [`crate::registry::is_mlx_cpu_float`]).
+fn float_unary_claim_inner(node: &NodeView, allow_float64: bool) -> ClaimResult {
     require!(
         node.num_inputs() == 1 && node.num_outputs() == 1,
         "expects 1 input and 1 output, got {}in/{}out",
@@ -347,17 +348,29 @@ fn float_unary_claim(node: &NodeView) -> ClaimResult {
         (Some(i), Some(o)) => (i, o),
         _ => deny!("missing tensor type/shape info on input or output"),
     };
+    let ok = i.dtype == o.dtype
+        && if allow_float64 {
+            is_mlx_cpu_float(i.dtype)
+        } else {
+            is_mlx_float(i.dtype)
+        };
     require!(
-        i.dtype == o.dtype && is_mlx_float(i.dtype),
-        "input/output must be the same float dtype (fp32/fp16/bf16), got {} -> {}",
+        ok,
+        "input/output must be the same float dtype ({}), got {} -> {}",
+        if allow_float64 {
+            "fp32/fp16/bf16/fp64"
+        } else {
+            "fp32/fp16/bf16"
+        },
         crate::registry::ort_dtype_name(i.dtype),
         crate::registry::ort_dtype_name(o.dtype)
     );
     Ok(())
 }
 
+/// `mlx_sigmoid` is silently float32-accurate on a float64 input, so Sigmoid stays fp32/fp16/bf16.
 fn sigmoid_claim(node: &NodeView) -> ClaimResult {
-    float_unary_claim(node)
+    float_unary_claim_inner(node, false)
 }
 
 /// Softmax over the last axis (axis == -1 or rank-1), fp32/fp16/bf16.
@@ -373,8 +386,8 @@ fn softmax_claim(node: &NodeView) -> ClaimResult {
         _ => deny!("missing tensor type/shape info on input or output"),
     };
     require!(
-        is_mlx_float(i.dtype) && i.dtype == o.dtype,
-        "input/output must be the same float dtype (fp32/fp16/bf16), got {} -> {}",
+        is_mlx_cpu_float(i.dtype) && i.dtype == o.dtype,
+        "input/output must be the same float dtype (fp32/fp16/bf16/fp64), got {} -> {}",
         crate::registry::ort_dtype_name(i.dtype),
         crate::registry::ort_dtype_name(o.dtype)
     );
@@ -573,7 +586,7 @@ fn variadic_claim(node: &NodeView, allow_int: bool) -> ClaimResult {
         None => deny!("missing output tensor type/shape info"),
     };
     require!(
-        is_mlx_float(out.dtype)
+        is_mlx_cpu_float(out.dtype)
             || (allow_int && (is_signed_integer(out.dtype) || is_unsigned_integer(out.dtype))),
         "output dtype {} not supported ({})",
         crate::registry::ort_dtype_name(out.dtype),
@@ -635,7 +648,7 @@ fn comparison_claim(node: &NodeView, allow_bool: bool) -> ClaimResult {
         crate::registry::ort_dtype_name(out.dtype)
     );
     require!(
-        is_mlx_numeric(a.dtype) || (allow_bool && is_bool(a.dtype)),
+        is_mlx_numeric(a.dtype) || is_float64(a.dtype) || (allow_bool && is_bool(a.dtype)),
         "input dtype {} not supported ({})",
         crate::registry::ort_dtype_name(a.dtype),
         if allow_bool {
@@ -796,8 +809,9 @@ fn is_inf_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+/// LogSoftmax is `x - logsumexp(x)`; both primitives were measured exact in fp64.
 fn log_softmax_claim(node: &NodeView) -> ClaimResult {
-    float_unary_claim(node)?;
+    float_unary_claim_inner(node, true)?;
     let input = node.input_info(0).expect("validated above");
     let rank = input.shape.len() as i64;
     require!(rank > 0, "input must have rank >= 1 (got a scalar)");

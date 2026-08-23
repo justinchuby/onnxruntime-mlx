@@ -42,6 +42,10 @@ pub struct MlxEp {
     ep_api: *const ort::OrtEpApi,
     name: CString,
     stream: Stream,
+    /// The MLX CPU stream, used only by subgraphs that carry float64 (MLX has no Metal fp64 path).
+    /// Created up front and shared: `mlx_default_cpu_stream_new` returns MLX's default CPU stream,
+    /// so this is a handle, not a second execution context.
+    cpu_stream: Stream,
 }
 
 impl MlxEp {
@@ -64,6 +68,7 @@ impl MlxEp {
             ep_api,
             name: name.to_owned(),
             stream: Stream::new_default_gpu(),
+            cpu_stream: Stream::new_default_cpu(),
         })
     }
 
@@ -231,9 +236,18 @@ unsafe fn get_capability_impl(
             })
             .collect();
 
+        // fp64 colour: which claimed nodes carry a float64 tensor. Used to keep fp64 work in its own
+        // cluster (and thus on its own MLX CPU stream) — see `build_convex_clusters`.
+        let float64: Vec<bool> = nodes
+            .iter()
+            .map(|&node| {
+                let view = NodeView::new(ep.ort_api, node);
+                crate::registry::node_uses_float64(&view)
+            })
+            .collect();
+
         // Claiming view: build the per-op fallback reasons for the declined nodes (only when
-        // observability is active, so this extra FFI never touches the traced-off fast path). The
-        // legacy `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG` env still forces the raw stderr dump for quick debugging.
+        // observability is active, so this extra FFI never touches the traced-off fast path). The        // legacy `ONNXRUNTIME_EP_MLX_CLAIM_DEBUG` env still forces the raw stderr dump for quick debugging.
         let tr = crate::trace::tracer();
         let mut rejected: Vec<(String, usize, String, Vec<String>)> = Vec::new();
         if tr.active() || std::env::var_os("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG").is_some() {
@@ -289,9 +303,9 @@ unsafe fn get_capability_impl(
         // every node that could lie between two members is included, while still avoiding the
         // thousands of singleton partitions previously used for this graph.
         let clusters = if mixed_vision_quant_graph {
-            build_contiguous_clusters(&supported)
+            build_contiguous_clusters(&supported, &float64)
         } else {
-            build_convex_clusters(api, &nodes, &supported)
+            build_convex_clusters(api, &nodes, &supported, &float64)
         };
         let layer_boundary_outputs = if in_cf_body {
             HashSet::new()
@@ -571,7 +585,7 @@ mod layer_partition_tests {
     }
 }
 
-fn build_contiguous_clusters(supported: &[bool]) -> Vec<Vec<usize>> {
+fn build_contiguous_clusters(supported: &[bool], float64: &[bool]) -> Vec<Vec<usize>> {
     let mut clusters = Vec::new();
     let mut start = 0usize;
     while start < supported.len() {
@@ -582,7 +596,9 @@ fn build_contiguous_clusters(supported: &[bool]) -> Vec<Vec<usize>> {
             break;
         }
         let mut end = start + 1;
-        while end < supported.len() && supported[end] {
+        // An fp64 run and an fp32 run never share a cluster: the fp64 side must run on an MLX CPU
+        // stream, and merging them would drag the fp32 work off the GPU.
+        while end < supported.len() && supported[end] && float64[end] == float64[start] {
             end += 1;
         }
         clusters.push((start..end).collect());
@@ -691,13 +707,18 @@ unsafe fn graph_metadata_value(
 /// Groups supported nodes into maximal, convex, connected clusters. A set S is convex (a valid single
 /// fused node) iff no node x outside S lies on a path between two members of S. Faithful port of
 /// `BuildConvexClusters` (union-find + reachability bitsets).
+///
+/// `float64` colours the nodes: an fp64 node and a non-fp64 node are never merged into the same
+/// cluster. MLX cannot run float64 on Metal, so an fp64 cluster is executed on an MLX CPU stream;
+/// without this rule the maximal-cluster search would happily absorb neighbouring fp32 nodes
+/// (they are graph-connected through `Cast`) and silently move GPU work onto the CPU.
 fn build_convex_clusters(
     api: &ort::OrtApi,
     nodes: &[*const ort::OrtNode],
     supported: &[bool],
+    float64: &[bool],
 ) -> Vec<Vec<usize>> {
     let n = nodes.len();
-    let words = n.div_ceil(64);
 
     // tensor name -> producing node index.
     let mut producer: HashMap<String, usize> = HashMap::new();
@@ -727,6 +748,20 @@ fn build_convex_clusters(
             }
         }
     }
+
+    cluster_edges(n, supported, float64, &succ, &pred)
+}
+
+/// The pure graph half of [`build_convex_clusters`], over an explicit adjacency (no ORT FFI) so the
+/// convexity and fp64-colouring rules are unit-testable.
+fn cluster_edges(
+    n: usize,
+    supported: &[bool],
+    float64: &[bool],
+    succ: &[Vec<usize>],
+    pred: &[Vec<usize>],
+) -> Vec<Vec<usize>> {
+    let words = n.div_ceil(64);
 
     // Kahn topological order for reachability accumulation.
     let mut indeg: Vec<usize> = pred.iter().map(|p| p.len()).collect();
@@ -766,14 +801,15 @@ fn build_convex_clusters(
         }
     }
 
-    // Candidate merge edges: direct data edges between two supported nodes.
+    // Candidate merge edges: direct data edges between two supported nodes OF THE SAME fp64 colour.
+    // Withholding the mixed-colour edges is what makes an fp64 region its own cluster.
     let mut edges: Vec<(usize, usize)> = Vec::new();
     for u in 0..n {
         if !supported[u] {
             continue;
         }
         for &v in &succ[u] {
-            if supported[v] {
+            if supported[v] && float64[u] == float64[v] {
                 edges.push((u, v));
             }
         }
@@ -965,7 +1001,14 @@ unsafe fn compile_impl(
             let fused_node = *fused_nodes.add(i);
             match build_plan(api, graph, fused_node) {
                 Ok(plan) => {
-                    let info = SubgraphComputeInfo::new(ep.ort_api, ep.stream.as_raw(), plan);
+                    // A compiled subgraph carries the stream it runs on: fp64 clusters get the MLX
+                    // CPU stream, everything else keeps the GPU stream.
+                    let stream = if plan.requires_cpu_stream {
+                        ep.cpu_stream.as_raw()
+                    } else {
+                        ep.stream.as_raw()
+                    };
+                    let info = SubgraphComputeInfo::new(ep.ort_api, stream, plan);
                     *node_compute_infos.add(i) =
                         Box::into_raw(info) as *mut ort::OrtNodeComputeInfo;
                 }
@@ -1200,12 +1243,29 @@ unsafe fn build_plan(
         let has_control_flow = any_control_flow(&nodes);
         let has_compile_barrier = has_compile_barrier(&nodes);
         let mut plan = Plan::new(nodes);
+        // Authoritative fp64 answer: the claim-time view sees INPUT dtypes too, so it catches nodes
+        // whose float64 operands produce a non-float64 output (Equal/Greater/IsNaN on doubles).
+        if snodes.iter().any(|&node| {
+            crate::registry::node_uses_float64(&crate::registry::NodeView::new(api, node))
+        }) {
+            plan.requires_cpu_stream = true;
+            plan.dedicated_decode_stream = false;
+        }
         plan.compiled.enabled =
             crate::compiled::compile_enabled(has_control_flow || has_compile_barrier);
         plan.prefill.enabled =
             crate::compiled::prefill_enabled(has_control_flow || has_compile_barrier, &plan.nodes);
         plan.general.enabled = crate::compiled::general_enabled(has_compile_barrier, &plan.nodes);
         plan.general.control_flow_specialization_enabled = has_control_flow;
+        if plan.requires_cpu_stream {
+            // `mlx_compile` traces and caches a closure; the fp64 CPU-stream path is the
+            // capability-only path and does not need (or want) the compiled fast paths, whose
+            // shape/stream specialization is tuned for the GPU stream. Eager translation is correct
+            // and is what the conformance suite exercises.
+            plan.compiled.enabled = false;
+            plan.prefill.enabled = false;
+            plan.general.enabled = false;
+        }
         Ok(plan)
     }
 }
@@ -2243,5 +2303,115 @@ mod tests {
         reset_stable_cross_caches(&mut plan, Some(42));
         assert_eq!(plan.compiled.stable_generation_key, Some(42));
         assert_eq!(plan.prefill.stable_generation_key, Some(42));
+    }
+}
+
+#[cfg(test)]
+mod float64_cluster_tests {
+    use super::{build_contiguous_clusters, cluster_edges};
+
+    /// Build `(succ, pred)` for a straight chain `0 -> 1 -> ... -> n-1`.
+    fn chain(n: usize) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
+        let mut succ = vec![Vec::new(); n];
+        let mut pred = vec![Vec::new(); n];
+        for i in 0..n.saturating_sub(1) {
+            succ[i].push(i + 1);
+            pred[i + 1].push(i);
+        }
+        (succ, pred)
+    }
+
+    /// The load-bearing rule: fp32 -> Cast -> fp64 region -> Cast -> fp32 must NOT collapse into one
+    /// cluster. If it did, the whole thing would need the MLX CPU stream and the fp32 work either
+    /// side would silently move off the GPU.
+    ///
+    /// Node colouring below mirrors what `node_uses_float64` reports: a `Cast` that touches a
+    /// float64 slot on either side is itself fp64-coloured.
+    #[test]
+    fn float64_region_forms_its_own_cluster() {
+        // 0,1 fp32 | 2 Cast(fp32->fp64) | 3,4 fp64 | 5 Cast(fp64->fp32) | 6,7 fp32
+        let n = 8;
+        let (succ, pred) = chain(n);
+        let supported = vec![true; n];
+        let float64 = vec![false, false, true, true, true, true, false, false];
+
+        let clusters = cluster_edges(n, &supported, &float64, &succ, &pred);
+
+        assert_eq!(
+            clusters,
+            vec![vec![0, 1], vec![2, 3, 4, 5], vec![6, 7]],
+            "an fp64 region must be its own cluster, with the fp32 regions kept separate"
+        );
+    }
+
+    /// Without any fp64 the colouring is inert: one maximal cluster, exactly as before.
+    #[test]
+    fn all_float32_still_forms_one_maximal_cluster() {
+        let n = 8;
+        let (succ, pred) = chain(n);
+        let clusters = cluster_edges(n, &vec![true; n], &vec![false; n], &succ, &pred);
+        assert_eq!(clusters, vec![(0..n).collect::<Vec<_>>()]);
+    }
+
+    /// A diamond where both branches are fp64 still merges (same colour), so the rule costs nothing
+    /// on a uniformly-fp64 graph.
+    #[test]
+    fn uniform_float64_graph_merges_normally() {
+        //     0
+        //    / \
+        //   1   2
+        //    \ /
+        //     3
+        let n = 4;
+        let succ = vec![vec![1, 2], vec![3], vec![3], vec![]];
+        let pred = vec![vec![], vec![0], vec![0], vec![1, 2]];
+        let clusters = cluster_edges(n, &vec![true; n], &vec![true; n], &succ, &pred);
+        assert_eq!(clusters, vec![vec![0, 1, 2, 3]]);
+    }
+
+    /// The contiguous-cluster fallback (used for the mixed vision/quant export) applies the same
+    /// boundary rule.
+    #[test]
+    fn contiguous_clusters_split_on_the_float64_boundary() {
+        let supported = vec![true, true, true, true, true];
+        let float64 = vec![false, false, true, true, false];
+        assert_eq!(
+            build_contiguous_clusters(&supported, &float64),
+            vec![vec![0, 1], vec![2, 3], vec![4]]
+        );
+    }
+}
+
+#[cfg(test)]
+mod float64_plan_tests {
+    use crate::engine::{NodeDesc, OutRef, Plan};
+    use crate::sys::ort;
+
+    fn node_with_output(otype: ort::ONNXTensorElementDataType) -> NodeDesc {
+        let mut node = NodeDesc::new("Elu".to_string(), String::new(), 6);
+        node.outputs.push(OutRef {
+            name: "y".to_string(),
+            external: true,
+            ctx_index: 0,
+            otype,
+        });
+        node
+    }
+
+    #[test]
+    fn float64_plan_requests_the_cpu_stream() {
+        let plan = Plan::new(vec![node_with_output(
+            ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE,
+        )]);
+        assert!(plan.requires_cpu_stream);
+        assert!(!plan.dedicated_decode_stream);
+    }
+
+    #[test]
+    fn float32_plan_keeps_the_gpu_stream() {
+        let plan = Plan::new(vec![node_with_output(
+            ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+        )]);
+        assert!(!plan.requires_cpu_stream);
     }
 }

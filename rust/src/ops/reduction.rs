@@ -10,7 +10,8 @@
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::mlx::VectorArray;
 use crate::registry::{
-    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float, is_mlx_numeric,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_float64, is_mlx_cpu_float,
+    is_mlx_float, is_mlx_numeric,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -522,15 +523,17 @@ fn reduction_claim(node: &NodeView, float_only: bool) -> ClaimResult {
         crate::registry::ort_dtype_name(x.dtype),
         crate::registry::ort_dtype_name(out.dtype)
     );
+    // Reductions are plain MLX primitives that carry their element dtype through, so float64 is
+    // admitted here (it then runs on the MLX CPU stream — see `Plan::requires_cpu_stream`).
     if float_only {
         require!(
-            is_mlx_float(x.dtype),
-            "dtype must be float32, float16, or bfloat16, got {}",
+            is_mlx_cpu_float(x.dtype),
+            "dtype must be float32, float16, bfloat16, or float64, got {}",
             crate::registry::ort_dtype_name(x.dtype)
         );
     } else {
         require!(
-            is_mlx_numeric(x.dtype),
+            is_mlx_numeric(x.dtype) || is_float64(x.dtype),
             "dtype must be an MLX-supported numeric type, got {}",
             crate::registry::ort_dtype_name(x.dtype)
         );
