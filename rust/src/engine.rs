@@ -27,8 +27,7 @@ pub struct InitData {
     pub data: *const c_void,
     pub shape: Vec<i64>,
     pub dtype: ort::ONNXTensorElementDataType,
-    /// Element count of the initializer (kept for weight-repack handlers in the next wave).
-    #[allow(dead_code)]
+    /// ORT-reported element count, used to bound typed initializer reads safely.
     pub count: usize,
     /// Owned copy of the bytes (control-flow body initializers), keeping `data` valid.
     #[allow(dead_code)]
