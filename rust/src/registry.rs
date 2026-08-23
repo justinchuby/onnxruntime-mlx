@@ -687,6 +687,47 @@ impl NodeView {
         }
     }
 
+    /// Element dtype of a TENSOR-valued attribute, or `None` when `name` is absent or not a tensor.
+    ///
+    /// Lets a claim reject a fill value it could not rebuild in an MLX dtype before the node is
+    /// taken, rather than discovering it during translation.
+    pub fn attr_tensor_dtype(&self, name: &str) -> Option<ort::ONNXTensorElementDataType> {
+        unsafe {
+            let api = self.api();
+            let cname = std::ffi::CString::new(name).ok()?;
+            let mut attr: *const ort::OrtOpAttr = std::ptr::null();
+            let st = (api.Node_GetAttributeByName.unwrap())(self.node, cname.as_ptr(), &mut attr);
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            if attr.is_null() {
+                return None;
+            }
+            let mut atype: ort::OrtOpAttrType = 0;
+            (api.OpAttr_GetType.unwrap())(attr, &mut atype);
+            if atype != ort::OrtOpAttrType_ORT_OP_ATTR_TENSOR {
+                return None;
+            }
+            let mut value: *mut ort::OrtValue = std::ptr::null_mut();
+            let st = (api.OpAttr_GetTensorAttributeAsOrtValue.unwrap())(attr, &mut value);
+            if !st.is_null() {
+                self.release_status(st);
+                return None;
+            }
+            if value.is_null() {
+                return None;
+            }
+            let mut info: *mut ort::OrtTensorTypeAndShapeInfo = std::ptr::null_mut();
+            (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+            let mut etype: ort::ONNXTensorElementDataType = 0;
+            (api.GetTensorElementType.unwrap())(info, &mut etype);
+            (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+            (api.ReleaseValue.unwrap())(value);
+            Some(etype)
+        }
+    }
+
     /// The raw attribute type of `name` (ORT_OP_ATTR_UNDEFINED when absent). Lets a claim match a
     /// specific attribute form (e.g. Constant's value_int/value_float/value_ints/value_floats).
     pub fn attr_type(&self, name: &str) -> ort::OrtOpAttrType {

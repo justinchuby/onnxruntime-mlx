@@ -983,20 +983,38 @@ fn constant_of_shape_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<()
     let shape_i64 = read_ints(ctx, n, 0)?;
     let s: Vec<i32> = shape_i64.iter().map(|&x| x as i32).collect();
     let out_type = n.outputs[0].otype;
-    let r = if out_type == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 {
-        let value = ctx.scalar_i64(-1);
-        ctx.emit(|res, st| unsafe {
-            mlx::mlx_full(
-                res,
-                s.as_ptr(),
-                s.len(),
-                value,
-                mlx::mlx_dtype__MLX_INT64,
-                st,
-            )
-        })?
-    } else {
-        ctx.zeros(&s, mlx::mlx_dtype__MLX_FLOAT32)?
+    let mlx_type = crate::engine::mlx_dtype_from_onnx(out_type);
+
+    // ONNX: `value` is a one-element tensor supplying the fill value and the output dtype; absent,
+    // the output is fp32 zeros. Read the attribute when present so the explicit-value form is not
+    // stranded on CPU (each such node is a partition boundary).
+    let fill = n
+        .tensors
+        .get("value")
+        .and_then(|t| t.single_element_bytes().map(|b| (b.to_vec(), t.dtype)));
+    let r = match fill {
+        Some((bytes, value_dtype)) => {
+            // ONNX takes the output dtype from `value`, so build the scalar in that dtype and let
+            // mlx_full carry it; no widening round-trip (float64 would abort on the GPU stream).
+            let scalar = ctx.scalar_from_bytes(&bytes, crate::engine::mlx_dtype_from_onnx(value_dtype));
+            ctx.emit(|res, st| unsafe {
+                mlx::mlx_full(res, s.as_ptr(), s.len(), scalar, mlx_type, st)
+            })?
+        }
+        None if out_type == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 => {
+            let value = ctx.scalar_i64(-1);
+            ctx.emit(|res, st| unsafe {
+                mlx::mlx_full(
+                    res,
+                    s.as_ptr(),
+                    s.len(),
+                    value,
+                    mlx::mlx_dtype__MLX_INT64,
+                    st,
+                )
+            })?
+        }
+        None => ctx.zeros(&s, mlx::mlx_dtype__MLX_FLOAT32)?,
     };
     ctx.bind(&n.outputs[0], r);
     Ok(())
@@ -2143,28 +2161,39 @@ fn constant_of_shape_claim(node: &NodeView) -> ClaimResult {
         ),
         None => deny!("missing output tensor type/shape info"),
     };
-    let shape = match node.read_const_int64(0) {
-        Some(s) => s,
-        None => deny!(
-            "ConstantOfShape: `input` shape must be a constant int64 initializer; this node's is a runtime value — stays on CPU"
+    // A constant `input` is checked here; a runtime one is resolved at trace time by `read_ints`,
+    // exactly as Reshape's `shape` input is. Refusing the runtime form is what used to strand a
+    // zero-init state tensor on CPU, and each such node is a partition boundary: on a dynamic-shape
+    // Mamba model that split the graph into 79 fused subgraphs instead of 1.
+    match node.read_const_int64(0) {
+        Some(shape) => require!(
+            shape.iter().all(|&d| d >= 0 && d <= i32::MAX as i64),
+            "ConstantOfShape: shape dims must be in [0, i32::MAX] (got {:?})",
+            shape
         ),
-    };
+        None => require!(
+            node.input_info(0).map(|i| i.dtype)
+                == Some(ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64),
+            "ConstantOfShape: `input` must be int64 (a runtime shape-derived value resolves at trace time)"
+        ),
+    }
+    // ONNX defines `value` as a one-element tensor giving both the fill value and the output dtype;
+    // omitting it means fp32 zero. Both forms are handled, so long as the output dtype is one MLX
+    // can carry.
     require!(
-        shape.iter().all(|&d| d >= 0 && d <= i32::MAX as i64),
-        "ConstantOfShape: shape dims must be in [0, i32::MAX] (got {:?})",
-        shape
-    );
-    // The `value` TENSOR attribute is not carried through the NodeDesc, so only the no-value-attr
-    // fp32-zeros form is claimed; ORT CPU constant-folds / evaluates the explicit-value forms.
-    require!(
-        !node.has_attr("value"),
-        "ConstantOfShape: an explicit `value` attribute is not claimed (only the default fp32-zeros form is); ORT CPU evaluates the explicit-value forms"
-    );
-    require!(
-        out == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-        "ConstantOfShape: only fp32 output is claimed (the default-value zeros form), got {}",
+        crate::registry::is_mlx_supported(out),
+        "ConstantOfShape: output dtype {} is not an MLX dtype",
         crate::registry::ort_dtype_name(out)
     );
+    // A `value` this cannot rebuild byte-exactly in an MLX dtype (notably float64, which MLX
+    // rejects on the GPU stream) is left to CPU rather than silently narrowed.
+    if let Some(v) = node.attr_tensor_dtype("value") {
+        require!(
+            crate::registry::is_mlx_supported(v),
+            "ConstantOfShape: `value` dtype {} is not an MLX dtype",
+            crate::registry::ort_dtype_name(v)
+        );
+    }
     Ok(())
 }
 

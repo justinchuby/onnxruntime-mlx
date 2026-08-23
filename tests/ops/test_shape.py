@@ -462,6 +462,53 @@ def test_constant_of_shape_default_zero():
     _assert_matches_cpu_noopt(model, {}, rtol=0.0, atol=0.0)
 
 
+def test_constant_of_shape_explicit_value():
+    """An explicit one-element `value` sets both the fill and the output dtype.
+
+    Previously refused, which stranded the node on CPU; each such node is a partition boundary.
+    """
+    shape = np.array([2, 3], np.int64)
+    model = build(
+        "ConstantOfShape",
+        [initz("s", shape)],
+        [m.tensor("o", DT.FLOAT, [2, 3])],
+        inits=(initz("s", shape),),
+        attrs=[ir.AttrTensor("value", ir.tensor(np.array([2.5], np.float32)))],
+    )
+    _assert_matches_cpu_noopt(model, {}, rtol=0.0, atol=0.0)
+
+
+def test_constant_of_shape_explicit_value_int64():
+    """A non-float `value` must keep its own dtype rather than being narrowed through a float."""
+    shape = np.array([4], np.int64)
+    model = build(
+        "ConstantOfShape",
+        [initz("s", shape)],
+        [m.tensor("o", DT.INT64, [4])],
+        inits=(initz("s", shape),),
+        attrs=[ir.AttrTensor("value", ir.tensor(np.array([7], np.int64)))],
+    )
+    _assert_matches_cpu_noopt(model, {}, rtol=0.0, atol=0.0)
+
+
+def test_constant_of_shape_runtime_shape_from_input():
+    """Shape input derived from Shape(x) at run time, not a constant initializer.
+
+    This is the form a Scan's zero-init carried state takes when the batch dim is dynamic; refusing
+    it split a dynamic-shape Mamba graph into 79 fused subgraphs instead of 18.
+    """
+    x = ir.Value(name="x", type=ir.TensorType(DT.FLOAT), shape=ir.Shape(["B", 5]))
+    shp = ir.Value(name="shp")
+    o = ir.Value(name="o", type=ir.TensorType(DT.FLOAT), shape=ir.Shape(["B", 5]))
+    nodes = [
+        ir.node("Shape", [x], outputs=[shp]),
+        ir.node("ConstantOfShape", [shp], outputs=[o]),
+    ]
+    graph = ir.Graph([x], [o], nodes=nodes, name="g", opset_imports={"": 20})
+    model = ir.to_proto(ir.Model(graph, ir_version=10)).SerializeToString()
+    _assert_matches_cpu_noopt(model, {"x": np.zeros((3, 5), np.float32)}, rtol=0.0, atol=0.0)
+
+
 def test_reshape_dynamic_shape_from_input_shape(capfd, monkeypatch):
     """Runtime Reshape whose target is derived from Shape(input) (Shape->Gather->Concat with const
     tail) — a SHAPE-CONST value. The EP must claim it (via the shape-const mid-trace eval), keep the

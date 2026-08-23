@@ -105,6 +105,17 @@ pub struct ConstTensor {
     pub count: usize,
 }
 
+impl ConstTensor {
+    /// Raw bytes of a single-element tensor, for one-element attributes such as
+    /// `ConstantOfShape`'s `value`. Returns `None` unless the tensor holds exactly one element.
+    pub fn single_element_bytes(&self) -> Option<&[u8]> {
+        if self.count != 1 || self.data.is_empty() {
+            return None;
+        }
+        Some(self.data.as_slice())
+    }
+}
+
 /// A control-flow node's body subgraph (If then/else branch, Scan/Loop body), captured recursively so
 /// the translator can realize the control flow by translating the body inline. `input_names` /
 /// `output_names` are the body graph's FORMAL inputs/outputs (positional). `nodes` are the body's
@@ -1231,6 +1242,23 @@ impl<'a> TranslationContext<'a> {
             &v as *const i64 as *const c_void,
             &sh,
             mlxsys::mlx_dtype__MLX_INT64,
+        ))
+    }
+
+    /// A kept 0-d scalar built byte-exactly from host data of the given MLX dtype.
+    ///
+    /// Deliberately does not widen through FLOAT64 as a transport: the EP runs on a GPU stream and
+    /// MLX rejects float64 there, so a widening round-trip would abort the process.
+    pub fn scalar_from_bytes(
+        &mut self,
+        bytes: &[u8],
+        dtype: mlxsys::mlx_dtype,
+    ) -> mlxsys::mlx_array {
+        let sh: [i32; 0] = [];
+        self.keep(Array::from_data(
+            bytes.as_ptr() as *const c_void,
+            &sh,
+            dtype,
         ))
     }
 
