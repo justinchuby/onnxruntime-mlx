@@ -411,17 +411,9 @@ def _dyn_out(name: str, dtype: ir.DataType, channels: int, spatial_rank: int) ->
     return ir.Value(name=name, type=ir.TensorType(dtype), shape=ir.Shape(dims))
 
 
-def _assert_dynamic_on_mlx(model: bytes, feeds, op_type: str, tol, capfd, monkeypatch) -> None:
+def _assert_dynamic_on_mlx(model: bytes, feeds, op_type: str, tol) -> None:
     """Run through the EP, assert `op_type` was CLAIMED (not declined) and output matches CPU."""
-    monkeypatch.setenv("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG", "1")
-    m.assert_matches_cpu(model, feeds, **tol)
-    err = capfd.readouterr().err
-    # ONNXRUNTIME_EP_MLX_CLAIM_DEBUG prints one line per declined op-type: "... unclaimed <Op> xN (<reason>): [...]".
-    for line in err.splitlines():
-        if "unclaimed" in line:
-            assert f"unclaimed {op_type} " not in line, (
-                f"{op_type} was declined with dynamic spatial: {line}"
-            )
+    m.assert_op_claimed(model, feeds, op_type, **tol)
 
 
 DYN_CONV_CASES = [
@@ -442,8 +434,6 @@ def test_conv_dynamic_spatial(
     strides: tuple[int, int],
     pads: tuple[int, int, int, int] | None,
     auto_pad: str,
-    capfd,
-    monkeypatch,
 ) -> None:
     weight = _initializer("weight", _sample(weight_shape, dtype))
     attributes = [ir.AttrInt64s("strides", strides)]
@@ -459,7 +449,7 @@ def test_conv_dynamic_spatial(
         attributes=attributes,
     )
     _assert_dynamic_on_mlx(
-        model, {"x": _sample(x_shape, dtype)}, "Conv", _tolerance(dtype), capfd, monkeypatch
+        model, {"x": _sample(x_shape, dtype)}, "Conv", _tolerance(dtype)
     )
 
 
@@ -480,8 +470,6 @@ def test_max_pool_dynamic_spatial(
     strides: tuple[int, int],
     pads: tuple[int, int, int, int] | None,
     auto_pad: str,
-    capfd,
-    monkeypatch,
 ) -> None:
     attributes = [ir.AttrInt64s("kernel_shape", kernel), ir.AttrInt64s("strides", strides)]
     if auto_pad == "NOTSET":
@@ -495,5 +483,5 @@ def test_max_pool_dynamic_spatial(
         attributes=attributes,
     )
     _assert_dynamic_on_mlx(
-        model, {"x": _sample(x_shape, dtype)}, "MaxPool", _tolerance(dtype), capfd, monkeypatch
+        model, {"x": _sample(x_shape, dtype)}, "MaxPool", _tolerance(dtype)
     )

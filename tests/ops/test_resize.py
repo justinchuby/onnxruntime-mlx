@@ -311,34 +311,29 @@ def _dyn_resize(dt, channels: int, *, scales=None, sizes=None, mode: str, ctm: s
     return ir.to_proto(ir.Model(graph, ir_version=10)).SerializeToString()
 
 
-def _assert_resize_claimed(model: bytes, feeds, tol, capfd, monkeypatch) -> None:
-    monkeypatch.setenv("ONNXRUNTIME_EP_MLX_CLAIM_DEBUG", "1")
-    m.assert_matches_cpu(model, feeds, **tol)
-    err = capfd.readouterr().err
-    for line in err.splitlines():
-        if "unclaimed" in line:
-            assert "unclaimed Resize " not in line, f"Resize declined with dynamic spatial: {line}"
+def _assert_resize_claimed(model: bytes, feeds, tol) -> None:
+    m.assert_op_claimed(model, feeds, "Resize", **tol)
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float16], ids=["fp32", "fp16"])
 @pytest.mark.parametrize(
     "mode,ctm", [("nearest", "asymmetric"), ("linear", "pytorch_half_pixel")], ids=["nearest", "linear"]
 )
-def test_resize_dynamic_spatial_scales(dtype, mode, ctm, capfd, monkeypatch) -> None:
+def test_resize_dynamic_spatial_scales(dtype, mode, ctm) -> None:
     # constant 2x spatial scales, dynamic H/W input
     scales = np.array([1, 1, 2, 2], np.float32)
     model = _dyn_resize(dtype, 3, scales=scales, mode=mode, ctm=ctm)
     x = np.random.default_rng(1).random((1, 3, 7, 5)).astype(dtype)
-    _assert_resize_claimed(model, {"x": x}, _TOL[np.dtype(dtype)], capfd, monkeypatch)
+    _assert_resize_claimed(model, {"x": x}, _TOL[np.dtype(dtype)])
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float16], ids=["fp32", "fp16"])
 @pytest.mark.parametrize(
     "mode,ctm", [("nearest", "asymmetric"), ("linear", "pytorch_half_pixel")], ids=["nearest", "linear"]
 )
-def test_resize_dynamic_spatial_sizes(dtype, mode, ctm, capfd, monkeypatch) -> None:
+def test_resize_dynamic_spatial_sizes(dtype, mode, ctm) -> None:
     # constant target sizes, dynamic H/W input
     sizes = np.array([1, 3, 10, 12], np.int64)
     model = _dyn_resize(dtype, 3, sizes=sizes, mode=mode, ctm=ctm)
     x = np.random.default_rng(2).random((1, 3, 7, 5)).astype(dtype)
-    _assert_resize_claimed(model, {"x": x}, _TOL[np.dtype(dtype)], capfd, monkeypatch)
+    _assert_resize_claimed(model, {"x": x}, _TOL[np.dtype(dtype)])
