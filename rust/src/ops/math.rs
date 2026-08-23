@@ -9,6 +9,13 @@ use crate::registry::{
 use crate::sys::mlx;
 use crate::{deny, require};
 
+/// True for the MLX float dtypes that can carry a NaN payload.
+fn is_mlx_float_dtype(t: mlx::mlx_dtype) -> bool {
+    t == mlx::mlx_dtype__MLX_FLOAT32
+        || t == mlx::mlx_dtype__MLX_FLOAT16
+        || t == mlx::mlx_dtype__MLX_BFLOAT16
+}
+
 // ---- handlers -----------------------------------------------------------------------------------
 
 fn div_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
@@ -62,7 +69,21 @@ unary_handler!(neg_op, mlx::mlx_negative);
 unary_handler!(abs_op, mlx::mlx_abs);
 
 // Unary math / rounding / trig — each is a direct mlx-c primitive (dtype-preserving).
-unary_handler!(sign_op, mlx::mlx_sign);
+
+/// ONNX `Sign` propagates NaN (`Sign(NaN) == NaN`), while `mlx_sign` maps NaN to 0. Re-introduce the
+/// NaN lanes for float inputs; integer inputs have no NaN so they take the primitive unchanged.
+fn sign_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let x = ctx.resolve(&n.inputs[0])?;
+    let signed = ctx.unary(mlx::mlx_sign, x)?;
+    let r = if is_mlx_float_dtype(ctx.dtype_of(x)) {
+        let nans = ctx.unary(mlx::mlx_isnan, x)?;
+        ctx.where_(nans, x, signed)?
+    } else {
+        signed
+    };
+    ctx.bind(&n.outputs[0], r);
+    Ok(())
+}
 unary_handler!(reciprocal_op, mlx::mlx_reciprocal);
 unary_handler!(ceil_op, mlx::mlx_ceil);
 unary_handler!(floor_op, mlx::mlx_floor);
