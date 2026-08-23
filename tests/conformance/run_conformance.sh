@@ -92,6 +92,10 @@ export MLX_EP_LIB
 export DYLD_LIBRARY_PATH="${ORT_LIB_DIR:-}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
 export RUN_CANDIDATE="mlx_runtime_wrapper.run_mlx"
+# Repo-wide rule: ONNX Runtime telemetry stays off. Set here rather than relying on the rootdir
+# conftest, because this script drives onnx-tests' own pytest from its checkout, so our conftest is
+# never loaded. Assigned only if unset, so an explicit 0 in the environment still wins.
+export ORT_DISABLE_TELEMETRY="${ORT_DISABLE_TELEMETRY:-1}"
 
 RESULTS_DIR="$HERE"
 CSV="$RESULTS_DIR/results.csv"

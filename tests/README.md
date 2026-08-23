@@ -52,3 +52,25 @@ MallocStackLogging=1 leaks --atExit -- \
 The stress scripts (`rust/stress_add.py`, `rust/stress_norm_attn.py`, `rust/stress_wave2.py`) exercise
 the fast-norm / fast-SDPA / RoPE / multi-output paths across many back-to-back sessions and report
 **0 leaks / 0 bytes**.
+
+## ONNX Runtime telemetry is disabled repo-wide
+
+`ORT_DISABLE_TELEMETRY=1` is set for every entry point that reaches ONNX Runtime. Besides not
+phoning home from a test or benchmark run, this removes a real failure mode: ORT's 1DS telemetry
+HTTP worker can lock an already-destroyed mutex during interpreter teardown and abort the process
+(`Abort trap: 6`, exit 134) *after* every test has passed. The throw comes from a background thread
+and is never caught, so it takes the run down and reds CI on an unrelated change.
+
+ORT reads the variable when its native library loads, so it must be in the environment **before**
+anything imports `onnxruntime` — a pytest fixture runs too late. It is set in four places, one per
+entry point, because none of them passes through the others:
+
+| Where | Covers |
+| --- | --- |
+| `conftest.py` (rootdir) | every pytest suite; imported before the per-suite conftests import ORT |
+| `.github/workflows/*.yml` | all CI jobs, workflow-level, including steps that don't run pytest |
+| `bench/bench.py` | the benchmark runner, which is invoked directly |
+| `tests/conformance/run_conformance.sh` | onnx-tests subprocesses, driven from *its* checkout, so this repo's conftest is never collected |
+
+Each is assigned only if unset, so an explicit `ORT_DISABLE_TELEMETRY=0` still wins for deliberate
+debugging. `tests/ops/test_telemetry_policy.py` guards all four against drift.

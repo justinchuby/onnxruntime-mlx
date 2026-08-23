@@ -28,6 +28,11 @@ import sys
 import tempfile
 import time
 
+# Repo-wide rule: ONNX Runtime telemetry stays off. Must precede the `onnxruntime` import, since ORT
+# reads this when its native library loads. This runner is not started by pytest, so the rootdir
+# conftest that does the same thing for the test suites never runs here.
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+
 import onnxruntime as ort
 
 import cases as case_mod
