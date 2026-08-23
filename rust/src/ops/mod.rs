@@ -17,6 +17,7 @@ pub mod controlflow;
 pub mod misc;
 pub mod random;
 pub mod recurrent;
+pub mod selective_scan;
 pub mod signal;
 pub mod ssm;
 pub mod stragglers;
