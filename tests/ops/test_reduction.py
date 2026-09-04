@@ -168,7 +168,12 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
         shape=ir.Shape(["batch", 1, "query", "total"]),
     )
     nodes = [
-        ir.node("CumSum", [attention_mask, axis], outputs=[all_indices]),
+        ir.node(
+            "CumSum",
+            [attention_mask, axis],
+            outputs=[all_indices],
+            name="shape_safety_cumsum",
+        ),
         ir.node("Unsqueeze", [all_indices, axis_1], outputs=[kv_indices]),
         ir.node(
             "Shape",
@@ -187,6 +192,7 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
             "Slice",
             [all_indices, start, total_length, axis_1],
             outputs=[query_indices_2d],
+            name="shape_safety_slice",
         ),
         ir.node("Unsqueeze", [query_indices_2d, axis_2], outputs=[query_indices]),
         ir.node("GreaterOrEqual", [query_indices, kv_indices], outputs=[mask_3d]),
@@ -233,7 +239,6 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
         )
         seqlens_k = m.tensor("seqlens_k", DT.INT32, [1])
         total_sequence_length = m.tensor("total_sequence_length", DT.INT32, [1])
-        absent = ir.Value(name="")
         attention_output = m.tensor("attention_output", DT.FLOAT, [1, 1, hidden])
         present_key = ir.Value(
             name="present_key",
@@ -256,10 +261,6 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
                     past_value,
                     seqlens_k,
                     total_sequence_length,
-                    absent,
-                    absent,
-                    absent,
-                    bias,
                 ],
                 attributes={
                     "num_heads": 1,
@@ -269,6 +270,7 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
                 },
                 domain="com.microsoft",
                 outputs=[attention_output, present_key, present_value],
+                name="shape_safety_gqa",
             )
         )
         tokens = m.tensor("tokens", DT.FLOAT, [1, hidden])
@@ -298,8 +300,14 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
                     "Reshape",
                     [attention_output, token_shape],
                     outputs=[tokens],
+                    name="shape_safety_tokens",
                 ),
-                ir.node("MatMul", [tokens, router_weight], outputs=[router]),
+                ir.node(
+                    "MatMul",
+                    [tokens, router_weight],
+                    outputs=[router],
+                    name="shape_safety_router",
+                ),
             ]
         )
 
@@ -342,6 +350,7 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
                     },
                     domain="com.microsoft",
                     outputs=[qmoe_output],
+                    name="shape_safety_qmoe",
                 ),
                 ir.node("Add", [qmoe_output, tokens], outputs=[decoder_output]),
             ]
@@ -633,17 +642,6 @@ def test_cumsum_abort_isolation_child() -> None:
     assert {"CumSum", "Slice", "QMoE", "GroupQueryAttention"}.isdisjoint(cpu_ops), (
         f"decoder shape-safety nodes fell back to CPU: {sorted(op for op in cpu_ops if op)}"
     )
-    mlx_partitions = {
-        event.get("name")
-        for event in profile_events
-        if event.get("cat") == "Node"
-        and event.get("args", {}).get("provider") == "MLXExecutionProvider"
-    }
-    assert len(mlx_partitions) >= 5, (
-        "CumSum, ONNX Slice, QMoE's internal Slice emitter, and their eligible neighbours "
-        f"were not isolated into distinct MLX partitions: {sorted(mlx_partitions)}"
-    )
-
     invalid_axis = _cumsum_model(axis_initializer=None)
     with pytest.raises(Exception, match="axis"):
         m._session(invalid_axis, m.EP_PROVIDERS).run(
@@ -699,36 +697,99 @@ def test_cumsum_failures_do_not_abort_host() -> None:
             f"evaluated.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
         trace_events = json.loads(trace_path.read_text())
-        decode_events = [
+
+        def partition_ops(event) -> tuple[str, ...]:
+            return tuple(
+                op for op in event.get("args", {}).get("ops", "").split(",") if op
+            )
+
+        def partition_names(event) -> tuple[str, ...]:
+            return tuple(
+                name
+                for name in event.get("args", {}).get("node_names", "").split(",")
+                if name
+            )
+
+        gqa_decode_events = [
             event
             for event in trace_events
             if event.get("name") == "mlx.compute[decode]"
             and event.get("args", {}).get("path") == "decode"
+            and "shape_safety_gqa" in partition_names(event)
         ]
-        decode_cache = {event["args"].get("cache") for event in decode_events}
-        assert {"MISS", "HIT"} <= decode_cache, (
-            "the eligible GQA decoder partition did not compile shapeless once and replay at "
-            f"T=7: {decode_events}"
+        assert [event["args"].get("cache") for event in gqa_decode_events] == [
+            "MISS",
+            "HIT",
+        ], (
+            "the exact 7-input GQA partition must compile shapeless at T=4 and replay at T=7: "
+            f"{gqa_decode_events}"
         )
-        assert any(event["args"].get("nodes", 0) > 1 for event in decode_events), (
-            "the shapeless decode partition contains no surrounding eligible decoder nodes: "
-            f"{decode_events}"
+        assert len(
+            {event["args"].get("partition_id") for event in gqa_decode_events}
+        ) == 1
+        assert all(
+            set(partition_names(event))
+            == {
+                "shape_safety_gqa",
+                "shape_safety_tokens",
+                "shape_safety_router",
+            }
+            and set(partition_ops(event))
+            == {"GroupQueryAttention", "Reshape", "MatMul"}
+            for event in gqa_decode_events
+        ), (
+            "decode evidence must be the exact GQA+Reshape+MatMul partition, not Shape/Sub or a "
+            f"shape-keyed Slice emitter: {gqa_decode_events}"
         )
-        isolated_general = [
+
+        cumsum_slice_events = [
             event
             for event in trace_events
             if event.get("name") == "mlx.compute[general]"
-            and event.get("args", {}).get("nodes") == 1
+            and set(partition_names(event))
+            == {"shape_safety_cumsum", "shape_safety_slice"}
         ]
-        assert len(isolated_general) >= 6, (
-            "CumSum, ONNX Slice, and QMoE must each execute in a singleton shape-keyed MLX "
-            f"partition on both T=4 and T=7 runs: {isolated_general}"
+        assert [event["args"].get("cache") for event in cumsum_slice_events] == [
+            "MISS",
+            "RETRACE",
+        ], (
+            "adjacent CumSum+Slice must share their shape-keyed partition and retrace for T=4->7: "
+            f"{cumsum_slice_events}"
         )
-        assert any(
-            event["args"].get("cache") == "RETRACE" for event in isolated_general
+        assert all(
+            set(partition_ops(event)) == {"CumSum", "Slice"}
+            for event in cumsum_slice_events
+        )
+
+        qmoe_events = [
+            event
+            for event in trace_events
+            if event.get("name") == "mlx.compute[general]"
+            and partition_names(event) == ("shape_safety_qmoe",)
+        ]
+        assert [event["args"].get("cache") for event in qmoe_events] == [
+            "MISS",
+            "HIT",
+        ], (
+            "QMoE's internal Slice emitter must be an isolated shape-keyed partition and reuse "
+            f"its unchanged [1,8] shape at T=7: {qmoe_events}"
+        )
+        assert all(partition_ops(event) == ("QMoE",) for event in qmoe_events), (
+            "QMoE must not merge with shapeless neighbours: "
+            f"{qmoe_events}"
+        )
+        assert len(
+            {event["args"].get("partition_id") for event in cumsum_slice_events}
+        ) == 1
+        assert len(
+            {event["args"].get("partition_id") for event in qmoe_events}
+        ) == 1
+        assert (
+            cumsum_slice_events[0]["args"].get("partition_id")
+            != qmoe_events[0]["args"].get("partition_id")
         ), (
-            "the T=4 -> T=7 shape change did not retrace the isolated shape-keyed partitions: "
-            f"{isolated_general}"
+            "CumSum+Slice and QMoE must remain distinct shape-keyed partitions: "
+            f"{cumsum_slice_events}, {qmoe_events}"
         )
     finally:
         trace_path.unlink(missing_ok=True)

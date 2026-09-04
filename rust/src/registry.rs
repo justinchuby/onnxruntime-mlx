@@ -31,12 +31,22 @@ pub type ClaimPredicate = fn(&NodeView) -> ClaimResult;
 ///
 /// `Shapeless` is an affirmative promise that the handler's shapeless trace emits only MLX
 /// primitives implementing `Primitive::output_shapes`. `ShapeKeyedOnly` carries the exact reason
-/// that promise cannot be made. The reason is surfaced by tests and kept at the registration
-/// boundary so partitioning and every compiled execution route share one authority.
+/// that promise cannot be made while still allowing a shape-keyed trace. `EagerOnly` is stricter:
+/// no compiled route currently preserves that concrete form's semantics (and unsupported forms
+/// use it conservatively too). Reasons stay at the registration boundary so partitioning and every
+/// compiled execution route share one authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompileShapeSafety {
     Shapeless,
     ShapeKeyedOnly { reason: &'static str },
+    EagerOnly { reason: &'static str },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompilePartitionClass {
+    Shapeless,
+    ShapeKeyed,
+    Eager,
 }
 
 pub const MLX_PAD_SHAPE_REASON: &str =
@@ -57,6 +67,18 @@ pub const MLX_VIEW_SHAPE_REASON: &str =
 impl CompileShapeSafety {
     pub const fn allows_shapeless(self) -> bool {
         matches!(self, Self::Shapeless)
+    }
+
+    pub const fn allows_shape_keyed(self) -> bool {
+        !matches!(self, Self::EagerOnly { .. })
+    }
+
+    pub const fn partition_class(self) -> CompilePartitionClass {
+        match self {
+            Self::Shapeless => CompilePartitionClass::Shapeless,
+            Self::ShapeKeyedOnly { .. } => CompilePartitionClass::ShapeKeyed,
+            Self::EagerOnly { .. } => CompilePartitionClass::Eager,
+        }
     }
 }
 
@@ -196,7 +218,9 @@ impl OpRegistry {
             CompileShapeRule::Always(safety) => safety,
             CompileShapeRule::Classified(classifier) => classifier(node),
         };
-        if let CompileShapeSafety::ShapeKeyedOnly { reason } = safety {
+        if let CompileShapeSafety::ShapeKeyedOnly { reason }
+        | CompileShapeSafety::EagerOnly { reason } = safety
+        {
             assert!(
                 !reason.is_empty(),
                 "shape classifier for {}::{} returned an empty reason",

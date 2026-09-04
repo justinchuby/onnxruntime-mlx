@@ -59,8 +59,8 @@ Every registered lowering therefore makes an explicit choice at its registration
 - `register_shapeless` is an affirmative promise that its **shapeless-specific** trace emits only
   primitives implementing `Primitive::output_shapes`;
 - `register_shape_keyed` carries the exact missing-primitive reason;
-- `register_shape_classified` derives the decision from concrete static node geometry (used by quant
-  handlers so ordinary aligned `MatMulNBits` decode remains shapeless).
+- `register_shape_classified` derives `Shapeless`, `ShapeKeyedOnly`, or the stricter `EagerOnly`
+  from concrete node properties (used by quant handlers and per-form GroupQueryAttention).
 
 There is no unclassified registration API. `NodeDesc` stores the resulting decision during Compile,
 so decoder partition colouring and every compiled execution route consume the same proof. Eager MLX
@@ -70,7 +70,7 @@ The MLX 0.32.1 audit found these missing-`output_shapes` primitives in current l
 
 | MLX primitive | Registered lowerings that can emit it |
 |---|---|
-| `Slice` | ONNX `Slice`; QMoE; CausalConvWithState; LinearAttention; Scan; DeformConv; LRN; RNN/GRU/LSTM; DFT; `ai.onnx.ml` SVMClassifier/FeatureVectorizer; `com.microsoft` Attention/PackedMultiHeadAttention/RotaryEmbedding/MRotaryEmbedding/PagedAttention; GridSample/RoiAlign/MaxRoiPool; conditional block-quantized matmul, MatMulNBits zero-point trim, and GatherBlockQuantized zero-point trim forms |
+| `Slice` | ONNX `Slice`; QMoE; CausalConvWithState; LinearAttention; Scan; DeformConv; LRN; RNN/GRU/LSTM; DFT; `ai.onnx.ml` SVMClassifier/FeatureVectorizer; `com.microsoft` Attention/PackedMultiHeadAttention/RotaryEmbedding/MRotaryEmbedding/PagedAttention; sliding-window and attention-bias GroupQueryAttention; GridSample/RoiAlign/MaxRoiPool; conditional block-quantized matmul, MatMulNBits zero-point trim, and GatherBlockQuantized zero-point trim forms |
 | `Scan` | CumSum; internal LinearAttention cumulative gating |
 | `AsStrided` | AveragePool/MaxPool/LpPool; STFT |
 | `Pad` | AveragePool/MaxPool/LpPool; LRN; CenterCropPad; ONNX Pad; LinearAttention; conditional unaligned MatMulNBits |
@@ -81,14 +81,15 @@ The MLX 0.32.1 audit found these missing-`output_shapes` primitives in current l
 | `FFT` | DFT/STFT |
 | `CustomKernel` | the fused selective-scan branch inside ONNX Scan |
 
-`GroupQueryAttention` is the deliberate exception: its eager and shape-keyed paths use `Slice`, but
-the shapeless decode configuration replaces those operations with data-fed RoPE rows and
-shape-preserving alternatives. That specialized trace remains explicitly registered as shapeless.
+`GroupQueryAttention` is classified per node. Claimable non-sliding forms without attention bias use
+the slice-free shapeless decode configuration (data-fed RoPE rows plus shape-preserving cache
+updates). Sliding-window and attention-bias forms emit `Slice` and remain `EagerOnly`; unsupported
+forms are also denied compilation conservatively.
 
-In decoder graphs, shape-keyed nodes receive a separate partition colour. They remain claimed by MLX
-but execute through a shape-keyed or eager partition instead of aborting the surrounding shapeless
-decoder closure. ShapeKeyed pays one recompile per distinct `(shape, dtype)` tuple — cheap when the
-shape set is small and repeating (prefill prompt lengths, CNN batch sizes), pathological if unbounded.
+In decoder graphs, shapeless, shape-keyed-only, and eager-only nodes receive distinct partition
+colours. Stricter nodes remain claimed by MLX without disabling a more capable neighbouring
+partition. ShapeKeyed pays one recompile per distinct `(shape, dtype)` tuple — cheap when the shape
+set is small and repeating (prefill prompt lengths, CNN batch sizes), pathological if unbounded.
 
 ### Two distinct senses of "dynamic"
 

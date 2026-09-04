@@ -23,7 +23,8 @@ use std::os::raw::{c_char, c_void};
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
-    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_mlx_float,
+    ClaimResult, CompileShapeSafety, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry,
+    is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -1737,6 +1738,43 @@ fn group_query_attention_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+const GQA_UNSUPPORTED_COMPILE_REASON: &str =
+    "GroupQueryAttention form is not accepted by the lowering claim predicate";
+const GQA_SLIDING_COMPILE_REASON: &str =
+    "sliding-window GroupQueryAttention emits MLX Slice and is not compile-eligible";
+const GQA_BIAS_COMPILE_REASON: &str =
+    "attention-bias GroupQueryAttention emits MLX Slice and its bias semantics are eager-only";
+
+fn group_query_attention_compile_shape_safety_for(
+    claimable: bool,
+    sliding: bool,
+    has_bias: bool,
+) -> CompileShapeSafety {
+    if !claimable {
+        CompileShapeSafety::EagerOnly {
+            reason: GQA_UNSUPPORTED_COMPILE_REASON,
+        }
+    } else if sliding {
+        CompileShapeSafety::EagerOnly {
+            reason: GQA_SLIDING_COMPILE_REASON,
+        }
+    } else if has_bias {
+        CompileShapeSafety::EagerOnly {
+            reason: GQA_BIAS_COMPILE_REASON,
+        }
+    } else {
+        CompileShapeSafety::Shapeless
+    }
+}
+
+fn group_query_attention_compile_shape_safety(node: &NodeView) -> CompileShapeSafety {
+    group_query_attention_compile_shape_safety_for(
+        group_query_attention_claim(node).is_ok(),
+        node.int_attr("sliding_window_cache", 0) != 0,
+        node.input_present(10),
+    )
+}
+
 /// Q/K/V present and same MLX float dtype as the output.
 fn check_qkv_float(node: &NodeView) -> Option<ort::ONNXTensorElementDataType> {
     if node.num_inputs() < 3 || node.num_outputs() == 0 {
@@ -3011,16 +3049,18 @@ pub fn register_attention(registry: &mut OpRegistry) {
         paged_attention_claim,
         "emits MLX Slice and Scatter, which lack Primitive::output_shapes in MLX 0.32.1",
     );
-    // GQA's eager and shape-keyed paths use Slice, but the shapeless decode route replaces every
-    // such operation with data-fed RoPE rows and shape-preserving alternatives.
-    shapeless(
-        registry,
-        "com.microsoft",
-        "GroupQueryAttention",
-        K_ANY_OPSET,
-        K_ANY_OPSET,
-        group_query_attention_op,
-        group_query_attention_claim,
+    // Non-sliding, no-bias GQA uses the slice-free compiled decode route. Sliding-window and
+    // attention-bias forms emit Slice and remain eager; unsupported forms are conservative too.
+    registry.register_shape_classified(
+        OpRegistration {
+            domain: "com.microsoft",
+            op_type: "GroupQueryAttention",
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler: group_query_attention_op,
+            claim: group_query_attention_claim,
+        },
+        group_query_attention_compile_shape_safety,
     );
     // Attention entered ai.onnx at opset 23; opset 24 adds the trailing nonpad_kv_seqlen input.
     shapeless(
@@ -3101,4 +3141,48 @@ pub fn register_attention(registry: &mut OpRegistry) {
         mrotary_embedding_claim,
         crate::registry::MLX_SLICE_SHAPE_REASON,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        GQA_BIAS_COMPILE_REASON, GQA_SLIDING_COMPILE_REASON, GQA_UNSUPPORTED_COMPILE_REASON,
+        group_query_attention_compile_shape_safety_for,
+    };
+    use crate::registry::CompileShapeSafety;
+
+    #[test]
+    fn group_query_attention_compile_shape_safety_matrix() {
+        assert_eq!(
+            group_query_attention_compile_shape_safety_for(true, false, false),
+            CompileShapeSafety::Shapeless,
+            "claimable slice-free 7-input GQA must remain shapeless"
+        );
+        assert_eq!(
+            group_query_attention_compile_shape_safety_for(true, false, false),
+            CompileShapeSafety::Shapeless,
+            "claimable slice-free 9-input GQA must remain shapeless"
+        );
+        assert_eq!(
+            group_query_attention_compile_shape_safety_for(true, false, true),
+            CompileShapeSafety::EagerOnly {
+                reason: GQA_BIAS_COMPILE_REASON
+            },
+            "11-input attention-bias GQA must never regain shapeless classification"
+        );
+        assert_eq!(
+            group_query_attention_compile_shape_safety_for(true, true, false),
+            CompileShapeSafety::EagerOnly {
+                reason: GQA_SLIDING_COMPILE_REASON
+            },
+            "sliding-window GQA must never regain shapeless classification"
+        );
+        assert_eq!(
+            group_query_attention_compile_shape_safety_for(false, false, false),
+            CompileShapeSafety::EagerOnly {
+                reason: GQA_UNSUPPORTED_COMPILE_REASON
+            },
+            "invalid or unsupported GQA forms must never be classified shapeless"
+        );
+    }
 }

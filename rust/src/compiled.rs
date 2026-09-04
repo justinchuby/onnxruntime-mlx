@@ -57,11 +57,14 @@ fn node_compile_shape_safety(node: &NodeDesc) -> CompileShapeSafety {
 
 fn compile_shape_mode_supported(nodes: &[NodeDesc], shapeless: bool) -> bool {
     nodes.iter().all(|node| {
-        (!shapeless || node_compile_shape_safety(node).allows_shapeless())
-            && node
-                .subgraphs
-                .iter()
-                .all(|subgraph| compile_shape_mode_supported(&subgraph.nodes, shapeless))
+        (if shapeless {
+            node_compile_shape_safety(node).allows_shapeless()
+        } else {
+            node_compile_shape_safety(node).allows_shape_keyed()
+        }) && node
+            .subgraphs
+            .iter()
+            .all(|subgraph| compile_shape_mode_supported(&subgraph.nodes, shapeless))
     })
 }
 
@@ -290,10 +293,7 @@ pub fn prefill_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     }
     compile_shape_mode_supported(nodes, false)
         && !nodes.iter().any(reads_data_dependent_parameter)
-        && nodes.iter().any(|n| {
-            n.op_type == "GroupQueryAttention"
-                && n.ints.get("sliding_window_cache").copied().unwrap_or(0) == 0
-        })
+        && nodes.iter().any(|n| n.op_type == "GroupQueryAttention")
 }
 
 /// Query sequence length S = trailing dim of the `input_ids` dynamic ctx input (decode => 1, prefill
@@ -865,13 +865,13 @@ fn build_closure(
     kctx: *mut ort::OrtKernelContext,
     stream: mlxsys::mlx_stream,
 ) -> bool {
-    if unsafe { &*plan_ptr }.nodes.iter().any(|n| {
-        n.op_type == "GroupQueryAttention"
-            && n.ints.get("sliding_window_cache").copied().unwrap_or(0) != 0
-    }) {
+    let cfg = slot.get(unsafe { &*plan_ptr }).config;
+    if !compile_shape_mode_supported(
+        &unsafe { &*plan_ptr }.nodes,
+        cfg.shape_mode == ShapeMode::Shapeless,
+    ) {
         return true;
     }
-    let cfg = slot.get(unsafe { &*plan_ptr }).config;
 
     let mut dyn_inputs: Vec<DynInput> = Vec::new();
     let mut ext_outputs: Vec<OutRef> = Vec::new();
@@ -1328,6 +1328,19 @@ mod shape_inference_tests {
             )],
             true
         ));
+        let eager_only_gqa = NodeDesc::new(
+            "GroupQueryAttention".to_string(),
+            "com.microsoft".to_string(),
+            1,
+            CompileShapeSafety::EagerOnly {
+                reason: "attention-bias form",
+            },
+        );
+        assert!(!compile_shape_mode_supported(
+            std::slice::from_ref(&eager_only_gqa),
+            false
+        ));
+        assert!(!compile_shape_mode_supported(&[eager_only_gqa], true));
     }
 
     #[test]

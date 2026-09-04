@@ -190,12 +190,11 @@ struct Summary {
     cache_hit: u64,
     cache_miss: u64,
     cache_retrace: u64,
-    /// The set of shape keys seen per compiled-path tag. A shape-keyed HIT whose key is in the
-    /// set is a genuine cache reuse; a key not yet seen (with the slot already compiled) is a real
-    /// RETRACE. A set (not a single "last key") is required because one path tag (e.g. `general`)
-    /// hosts MANY distinct fused subgraphs — a single last-key would thrash between them and
-    /// mislabel every alternating call as a RETRACE.
-    seen_shape_keys: HashMap<&'static str, std::collections::HashSet<String>>,
+    /// The set of shape keys seen per compiled path and concrete partition. A shape-keyed HIT whose
+    /// key is in the set is genuine cache reuse; a new key with an already-compiled slot is a real
+    /// RETRACE. Partition scoping prevents unrelated general partitions from classifying each
+    /// other's cache events.
+    seen_shape_keys: HashMap<String, std::collections::HashSet<String>>,
     // ---- Memory view ----
     managed_wrap_count: u64,
     managed_wrap_bytes: u64,
@@ -459,9 +458,9 @@ impl MlxTracer {
     }
 
     /// **Execution-path view** — record which path a Compute call fired (decode / prefill /
-    /// general / eager), its compile-cache state (HIT / MISS / RETRACE), the shape key, and
-    /// the node count. `shape_key` classifies HIT vs RETRACE for shape-keyed paths; pass an
-    /// empty key for the shapeless decode / eager paths.
+    /// general / eager), its compile-cache state (HIT / MISS / RETRACE), the shape key, and the
+    /// concrete partition membership. `shape_key` classifies HIT vs RETRACE for shape-keyed paths;
+    /// pass an empty key for the shapeless decode / eager paths.
     ///
     /// Returns the classified [`CacheState`] (so the caller can log it) after resolving
     /// `Miss`→`Hit`/`Retrace` against the last shape key seen on this path. Emits a
@@ -472,12 +471,24 @@ impl MlxTracer {
         path: ComputePath,
         cache: CacheState,
         shape_key: &str,
-        node_count: usize,
+        nodes: &[NodeDesc],
     ) -> CacheState {
         if !self.active() {
             return cache;
         }
         let tag = path.as_str();
+        let partition_id = format!("{:x}", nodes.as_ptr() as usize);
+        let cache_scope = format!("{tag}:{partition_id}");
+        let ops = nodes
+            .iter()
+            .map(|node| node.op_type.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let node_names = nodes
+            .iter()
+            .map(|node| node.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
         let resolved = {
             let mut s = match self.summary.lock() {
                 Ok(g) => g,
@@ -499,7 +510,7 @@ impl MlxTracer {
                     // is compiled (pre_valid) but a NEW key means a real under-the-hood retrace.
                     let seen = s
                         .seen_shape_keys
-                        .get(tag)
+                        .get(&cache_scope)
                         .map(|set| set.contains(shape_key))
                         .unwrap_or(false);
                     if seen {
@@ -512,7 +523,7 @@ impl MlxTracer {
             };
             if !shape_key.is_empty() {
                 s.seen_shape_keys
-                    .entry(tag)
+                    .entry(cache_scope)
                     .or_default()
                     .insert(shape_key.to_string());
             }
@@ -528,7 +539,10 @@ impl MlxTracer {
             let mut args = Args::new()
                 .with("path", tag)
                 .with("cache", resolved.as_str())
-                .with("nodes", node_count as u64);
+                .with("nodes", nodes.len() as u64)
+                .with("partition_id", partition_id)
+                .with("ops", ops)
+                .with("node_names", node_names);
             if !shape_key.is_empty() {
                 args = args.with("shape_key", shape_key.to_string());
             }
