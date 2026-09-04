@@ -757,43 +757,23 @@ def test_cumsum_failures_do_not_abort_host() -> None:
             if event.get("name", "").startswith("mlx.compute[")
             and "decoder_shape_safety_slice" in partition_names(event)
         ]
-        cumsum_events = [
-            event
+        assert cumsum_compute_events == slice_compute_events
+        assert len(cumsum_compute_events) == 2
+        assert all(
+            event.get("name") == "mlx.compute[eager]"
+            and event["args"].get("path") == "eager"
+            and event["args"].get("cache") == "n/a"
+            and set(partition_names(event))
+            == {
+                "decoder_shape_safety_cumsum",
+                "decoder_shape_safety_slice",
+            }
+            and set(partition_ops(event)) == {"CumSum", "Slice"}
             for event in cumsum_compute_events
-            if event.get("name") == "mlx.compute[general]"
-        ]
-        slice_events = [
-            event
-            for event in slice_compute_events
-            if event.get("name") == "mlx.compute[general]"
-        ]
-        assert [event["args"].get("cache") for event in cumsum_events] == [
-            "MISS",
-            "RETRACE",
-        ], (
-            "the partition containing CumSum must be shape-keyed and retrace for T=4->7: "
-            f"{cumsum_compute_events}"
+        ), (
+            "CumSum and its adjacent runtime-parameter Slice must share one correctly coloured "
+            f"eager MLX partition on both T=4 and T=7: {cumsum_compute_events}"
         )
-        assert [event["args"].get("cache") for event in slice_events] == [
-            "MISS",
-            "RETRACE",
-        ], (
-            "the partition containing ONNX Slice must be shape-keyed and retrace for T=4->7: "
-            f"{slice_compute_events}"
-        )
-        for cumsum_event, slice_event in zip(cumsum_events, slice_events, strict=True):
-            same_partition = cumsum_event["args"].get(
-                "partition_id"
-            ) == slice_event["args"].get("partition_id")
-            if same_partition:
-                assert {
-                    "decoder_shape_safety_cumsum",
-                    "decoder_shape_safety_slice",
-                } <= set(partition_names(cumsum_event))
-                assert {"CumSum", "Slice"} <= set(partition_ops(cumsum_event))
-            else:
-                assert "CumSum" in partition_ops(cumsum_event)
-                assert "Slice" in partition_ops(slice_event)
 
         qmoe_events = [
             event
@@ -813,20 +793,17 @@ def test_cumsum_failures_do_not_abort_host() -> None:
             f"{qmoe_events}"
         )
         assert len(
-            {event["args"].get("partition_id") for event in cumsum_events}
+            {event["args"].get("partition_id") for event in cumsum_compute_events}
         ) == 1
-        assert len({event["args"].get("partition_id") for event in slice_events}) == 1
         assert len(
             {event["args"].get("partition_id") for event in qmoe_events}
         ) == 1
         assert (
-            cumsum_events[0]["args"].get("partition_id")
-            != qmoe_events[0]["args"].get("partition_id")
-            and slice_events[0]["args"].get("partition_id")
+            cumsum_compute_events[0]["args"].get("partition_id")
             != qmoe_events[0]["args"].get("partition_id")
         ), (
-            "CumSum/Slice and QMoE must remain distinct shape-keyed partitions: "
-            f"{cumsum_events}, {slice_events}, {qmoe_events}"
+            "CumSum/Slice and QMoE must remain distinct compile-class partitions: "
+            f"{cumsum_compute_events}, {qmoe_events}"
         )
     finally:
         trace_path.unlink(missing_ok=True)
