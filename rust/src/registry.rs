@@ -50,19 +50,19 @@ pub enum CompilePartitionClass {
 }
 
 pub const MLX_PAD_SHAPE_REASON: &str =
-    "emits MLX Pad, which lacks Primitive::output_shapes in MLX 0.32.1";
+    "emits MLX Pad, which lacks Primitive::output_shapes in MLX 0.32.2";
 pub const MLX_RANDOM_BITS_SHAPE_REASON: &str =
-    "emits MLX RandomBits, which lacks Primitive::output_shapes in MLX 0.32.1";
+    "emits MLX RandomBits, which lacks Primitive::output_shapes in MLX 0.32.2";
 pub const MLX_SCAN_SHAPE_REASON: &str =
-    "emits MLX Scan, which lacks Primitive::output_shapes in MLX 0.32.1";
+    "emits MLX Scan, which lacks Primitive::output_shapes in MLX 0.32.2";
 pub const MLX_SCATTER_SHAPE_REASON: &str =
-    "emits MLX Scatter, which lacks Primitive::output_shapes in MLX 0.32.1";
+    "emits MLX Scatter, which lacks Primitive::output_shapes in MLX 0.32.2";
 pub const MLX_SLICE_SHAPE_REASON: &str =
-    "emits MLX Slice, which lacks Primitive::output_shapes in MLX 0.32.1";
+    "emits MLX Slice, which lacks Primitive::output_shapes in MLX 0.32.2";
 pub const MLX_SPLIT_SHAPE_REASON: &str =
-    "emits MLX Split, which lacks Primitive::output_shapes in MLX 0.32.1";
+    "emits MLX Split, which lacks Primitive::output_shapes in MLX 0.32.2";
 pub const MLX_VIEW_SHAPE_REASON: &str =
-    "emits MLX View, which lacks Primitive::output_shapes in MLX 0.32.1";
+    "emits MLX View, which lacks Primitive::output_shapes in MLX 0.32.2";
 
 impl CompileShapeSafety {
     pub const fn allows_shapeless(self) -> bool {
@@ -1394,7 +1394,7 @@ pub fn is_float64(t: ort::ONNXTensorElementDataType) -> bool {
 ///
 /// 2. **MLX's CPU float64 support is partial, and silently so.** Several primitives keep the
 ///    `float64` dtype on the result while computing in float32 and widening back — the array claims
-///    to be double precision and is not. Measured on MLX 0.32.1 (see the `mlx_float64_primitives`
+///    to be double precision and is not. Measured on MLX 0.32.2 (see the `mlx_float64_primitives`
 ///    test, which re-checks this at build time):
 ///
 ///    | exact in fp64 | silently float32-accurate |

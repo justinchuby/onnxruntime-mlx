@@ -1608,14 +1608,14 @@ pub fn register_conv(registry: &mut OpRegistry) {
         "AveragePool",
         average_pool_op,
         average_pool_claim,
-        "emits MLX AsStrided and may emit Pad; neither implements Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX AsStrided and may emit Pad; neither implements Primitive::output_shapes in MLX 0.32.2",
     );
     shape_keyed(
         registry,
         "MaxPool",
         max_pool_op,
         max_pool_claim,
-        "emits MLX AsStrided and may emit Pad; neither implements Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX AsStrided and may emit Pad; neither implements Primitive::output_shapes in MLX 0.32.2",
     );
     shapeless(
         registry,
@@ -1634,7 +1634,7 @@ pub fn register_conv(registry: &mut OpRegistry) {
         "LpPool",
         lp_pool_op,
         lp_pool_claim,
-        "emits MLX AsStrided and may emit Pad; neither implements Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX AsStrided and may emit Pad; neither implements Primitive::output_shapes in MLX 0.32.2",
     );
     shapeless(
         registry,

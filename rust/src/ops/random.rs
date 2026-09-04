@@ -452,7 +452,7 @@ fn parse_einsum_term(raw: &str, output: bool) -> Option<Vec<EinsumToken>> {
 
 fn parse_einsum(raw: &str) -> Option<(Vec<Vec<EinsumToken>>, Vec<EinsumToken>)> {
     let eq: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
-    // MLX 0.32.1 includes equation punctuation in its internal used-character set before reserving
+    // MLX 0.32.2 includes equation punctuation in its internal used-character set before reserving
     // virtual labels. More than 52 distinct raw characters underflows that reservation.
     if eq.chars().collect::<HashSet<_>>().len() > 52 {
         return None;
@@ -469,11 +469,6 @@ fn parse_einsum(raw: &str) -> Option<(Vec<Vec<EinsumToken>>, Vec<EinsumToken>)> 
         .split(',')
         .map(|term| parse_einsum_term(term, false))
         .collect::<Option<Vec<_>>>()?;
-    // MLX 0.32.1 parses comma-separated terms with std::getline, which drops a trailing empty
-    // scalar term. Leading/interior scalar terms are preserved and remain supported.
-    if lhs.ends_with(',') {
-        return None;
-    }
     let output = if let Some(output) = explicit_output {
         parse_einsum_term(output, true)?
     } else {
@@ -764,11 +759,11 @@ mod einsum_parser_tests {
     use super::{merge_broadcast_dim, parse_einsum};
 
     #[test]
-    fn scalar_terms_and_outputs_are_valid_except_trailing_scalar_input() {
+    fn scalar_terms_and_outputs_are_valid() {
         assert!(parse_einsum(",ij->ij").is_some());
         assert!(parse_einsum("ij,,jk->ik").is_some());
         assert!(parse_einsum("i,i->").is_some());
-        assert!(parse_einsum("ij,->ij").is_none());
+        assert!(parse_einsum("ij,->ij").is_some());
     }
 
     #[test]

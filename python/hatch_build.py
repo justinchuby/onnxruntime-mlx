@@ -25,21 +25,16 @@ from pathlib import Path
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 PLUGIN_DYLIB = "libonnxruntime_mlx_ep.dylib"
+MLX_VERSION = "0.32.2"
+MLX_COMMIT = "1f8e74e3f12f31365464a6867c6579f0e9b29d85"
+MLXC_COMMIT = "c74db5307cc8ce122f48d97ef951b30578674e7f"
 
 
-def _brew_prefix(pkg: str) -> Path:
-    out = subprocess.run(
-        ["brew", "--prefix", pkg],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return Path(out.stdout.strip())
-
-
-def _dependency_prefix(env_name: str, brew_pkg: str) -> Path:
+def _dependency_prefix(env_name: str) -> Path:
     value = os.environ.get(env_name)
-    return Path(value) if value else _brew_prefix(brew_pkg)
+    if not value:
+        raise RuntimeError(f"{env_name} was not initialized by the pinned MLX setup")
+    return Path(value)
 
 
 def _linked_dependency(binary: Path, basename: str) -> str | None:
@@ -77,6 +72,49 @@ def _resolve_ort_include() -> str:
     )
 
 
+def _ensure_mlx(project_root: Path) -> None:
+    mlx_value = os.environ.get("MLX_PREFIX")
+    mlxc_value = os.environ.get("MLXC_PREFIX")
+    if bool(mlx_value) != bool(mlxc_value):
+        raise RuntimeError("MLX_PREFIX and MLXC_PREFIX must be set together")
+
+    if not mlx_value:
+        script = project_root / "scripts" / "setup_mlx.sh"
+        if not script.is_file():
+            script = project_root.parent / "rust" / "scripts" / "setup_mlx.sh"
+        if not script.is_file():
+            raise RuntimeError("Pinned MLX setup script not found in repository checkout or sdist")
+        prefix = project_root / ".deps" / "mlx"
+        env = {
+            **os.environ,
+            "MLX_VERSION": MLX_VERSION,
+            "MLX_COMMIT": MLX_COMMIT,
+            "MLXC_COMMIT": MLXC_COMMIT,
+        }
+        _run([str(script), str(prefix)], env=env)
+        mlx_value = mlxc_value = str(prefix)
+        os.environ["MLX_PREFIX"] = mlx_value
+        os.environ["MLXC_PREFIX"] = mlxc_value
+
+    mlx_prefix = Path(mlx_value)
+    mlxc_prefix = Path(mlxc_value)
+    version_header = mlx_prefix / "include" / "mlx" / "version.h"
+    ops_header = mlxc_prefix / "include" / "mlx" / "c" / "ops.h"
+    fast_header = mlxc_prefix / "include" / "mlx" / "c" / "fast.h"
+    version_text = version_header.read_text()
+    ops_text = ops_header.read_text()
+    fast_text = fast_header.read_text()
+    expected = (
+        "#define MLX_VERSION_MAJOR 0",
+        "#define MLX_VERSION_MINOR 32",
+        "#define MLX_VERSION_PATCH 2",
+    )
+    if not all(line in version_text for line in expected):
+        raise RuntimeError(f"MLX_PREFIX must provide MLX {MLX_VERSION}: {mlx_prefix}")
+    if "mlx_cumsum_axis(" not in ops_text or "force_fused" not in fast_text:
+        raise RuntimeError(f"MLXC_PREFIX does not provide the MLX 0.32.2 C ABI: {mlxc_prefix}")
+
+
 class CustomBuildHook(BuildHookInterface):
     PLUGIN_NAME = "custom"
 
@@ -97,6 +135,8 @@ class CustomBuildHook(BuildHookInterface):
             )
 
         pkg_dir = project_root / "src" / "onnxruntime_ep_mlx"
+
+        _ensure_mlx(project_root)
 
         # 1) Build the Rust EP dylib.
         env = dict(os.environ)
@@ -140,14 +180,16 @@ class CustomBuildHook(BuildHookInterface):
 
     # -- mlx bundling ---------------------------------------------------------
     def _bundle_mlx(self, pkg_dir: Path, plugin: Path) -> None:
-        mlxc_pfx = _dependency_prefix("MLXC_PREFIX", "mlx-c")
-        mlx_pfx = _dependency_prefix("MLX_PREFIX", "mlx")
+        mlxc_pfx = _dependency_prefix("MLXC_PREFIX")
+        mlx_pfx = _dependency_prefix("MLX_PREFIX")
         mlxc_src = mlxc_pfx / "lib" / "libmlxc.dylib"
         mlx_src = mlx_pfx / "lib" / "libmlx.dylib"
         metallib_src = mlx_pfx / "lib" / "mlx.metallib"
         for f in (mlxc_src, mlx_src, metallib_src):
             if not f.is_file():
-                raise RuntimeError(f"Required mlx artifact missing: {f} (brew install mlx-c)")
+                raise RuntimeError(
+                    f"Required MLX artifact missing: {f}. Run the pinned setup script first."
+                )
 
         mlxc_dst = pkg_dir / "libmlxc.dylib"
         mlx_dst = pkg_dir / "libmlx.dylib"

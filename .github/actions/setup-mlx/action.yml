@@ -1,0 +1,29 @@
+name: Build pinned MLX runtime
+description: Build mlx-c against the repository's pinned MLX release without Python bindings.
+
+inputs:
+  mlx-version:
+    description: MLX release version
+    required: true
+  mlx-commit:
+    description: Immutable MLX release commit
+    required: true
+  mlxc-commit:
+    description: mlx-c commit whose CMake pin matches the MLX release
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Build MLX and mlx-c
+      shell: bash
+      env:
+        MLX_VERSION: ${{ inputs.mlx-version }}
+        MLX_COMMIT: ${{ inputs.mlx-commit }}
+        MLXC_COMMIT: ${{ inputs.mlxc-commit }}
+      run: |
+        set -euo pipefail
+        prefix="$RUNNER_TEMP/mlx-${MLX_COMMIT}-${MLXC_COMMIT}/install"
+        "$GITHUB_ACTION_PATH/../../../rust/scripts/setup_mlx.sh" "$prefix"
+        echo "MLX_PREFIX=$prefix" >> "$GITHUB_ENV"
+        echo "MLXC_PREFIX=$prefix" >> "$GITHUB_ENV"

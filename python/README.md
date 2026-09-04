@@ -6,7 +6,7 @@
 MLX-native ONNX Runtime execution provider for Apple Silicon. It is an
 out-of-tree plugin EP for ONNX Runtime 1.29 and requires no ONNX Runtime fork.
 
-The wheel bundles MLX 0.32.1 and mlx-c 0.6.0_4. It supports encoder, LLM
+The wheel bundles MLX 0.32.2 commit `1f8e74e3` and mlx-c commit `c74db530`. It supports encoder, LLM
 prefill, and token-at-a-time decode workloads, including quantized matmul,
 attention, normalization, convolution, shape operations, and compiled
 shape-specialized `If`, `Loop`, and `Scan` control flow.

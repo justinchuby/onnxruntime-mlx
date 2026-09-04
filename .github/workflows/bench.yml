@@ -32,19 +32,32 @@ jobs:
     runs-on: macos-14
     env:
       ORT_VERSION: "1.29.0"
-      MLX_VERSION: "0.32.1"
-      MLXC_VERSION: "0.6.0_4"
+      MLX_VERSION: "0.32.2"
+      MLX_COMMIT: "1f8e74e3f12f31365464a6867c6579f0e9b29d85"
+      MLXC_COMMIT: "c74db5307cc8ce122f48d97ef951b30578674e7f"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # need the base commit to build the comparison dylib
 
-      - name: Install mlx-c (hard dependency)
+      - name: Check base runtime ABI compatibility
+        id: base-abi
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          brew update
-          brew install mlx-c
-          test "$(brew list --versions mlx | awk '{print $2}')" = "$MLX_VERSION"
-          test "$(brew list --versions mlx-c | awk '{print $2}')" = "$MLXC_VERSION"
+          base_sha="${BASE_SHA:-origin/main}"
+          echo "sha=$base_sha" >> "$GITHUB_OUTPUT"
+          if git show "$base_sha:rust/src/engine.rs" | grep -q "mlx_cumsum_axis"; then
+            echo "compatible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "compatible=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/setup-mlx
+        with:
+          mlx-version: ${{ env.MLX_VERSION }}
+          mlx-commit: ${{ env.MLX_COMMIT }}
+          mlxc-commit: ${{ env.MLXC_COMMIT }}
 
       - name: Install Rust toolchain (rustup — no third-party action, supply-chain hardening)
         run: |
@@ -73,9 +86,10 @@ jobs:
           cp rust/target/release/libonnxruntime_mlx_ep.dylib "$RUNNER_TEMP/pr.dylib"
 
       - name: Build base (main) EP dylib in a worktree
+        if: steps.base-abi.outputs.compatible == 'true'
         run: |
           set -euo pipefail
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          BASE_SHA="${{ steps.base-abi.outputs.sha }}"
           git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
           ( cd "$RUNNER_TEMP/base/rust" && ORT_INCLUDE_DIR="$ORT_HOME/include" cargo build --release )
           cp "$RUNNER_TEMP/base/rust/target/release/libonnxruntime_mlx_ep.dylib" "$RUNNER_TEMP/base.dylib"
@@ -84,17 +98,30 @@ jobs:
         run: |
           set -euo pipefail
           export DYLD_LIBRARY_PATH="$ORT_HOME/lib"
-          # Same harness + same cases for both builds → the delta is apples-to-apples even if the PR
-          # changed the case set (a new case the base dylib can't claim just shows as a fallback).
-          ONNXRUNTIME_MLX_EP_LIB="$RUNNER_TEMP/base.dylib" python bench/bench.py --out base.json --label "base (main)"
-          ONNXRUNTIME_MLX_EP_LIB="$RUNNER_TEMP/pr.dylib"   python bench/bench.py --out pr.json   --label "PR"
+          if [ "${{ steps.base-abi.outputs.compatible }}" = "true" ]; then
+            # Same harness + same cases for both builds → the delta is apples-to-apples even if the
+            # PR changed the case set.
+            ONNXRUNTIME_MLX_EP_LIB="$RUNNER_TEMP/base.dylib" python bench/bench.py --out base.json --label "base (main)"
+          fi
+          ONNXRUNTIME_MLX_EP_LIB="$RUNNER_TEMP/pr.dylib" python bench/bench.py --out pr.json --label "PR"
 
       - name: Build comparison report
         run: |
-          python bench/compare.py --base base.json --pr pr.json --threshold 10 > comment.md
+          if [ "${{ steps.base-abi.outputs.compatible }}" = "true" ]; then
+            python bench/compare.py --base base.json --pr pr.json --threshold 10 > comment.md
+          else
+            {
+              echo "<!-- mlx-ep-bench -->"
+              echo "## MLX EP op benchmark"
+              echo
+              echo "The PR benchmark completed, but the base comparison was skipped because this PR updates the mlx-c ABI."
+              echo "Normal base-vs-PR comparisons resume after the dependency bump reaches main."
+            } > comment.md
+          fi
           cat comment.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upsert PR comment
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}

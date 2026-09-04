@@ -621,14 +621,14 @@ pub fn register(registry: &mut OpRegistry) {
         "DFT",
         dft_op,
         dft_claim,
-        "emits MLX FFT and may emit Slice; neither implements Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX FFT and may emit Slice; neither implements Primitive::output_shapes in MLX 0.32.2",
     );
     shape_keyed(
         registry,
         "STFT",
         stft_op,
         stft_claim,
-        "emits MLX AsStrided and FFT, which lack Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX AsStrided and FFT, which lack Primitive::output_shapes in MLX 0.32.2",
     );
     shapeless(registry, "HannWindow", hann_op, window_claim);
     shapeless(registry, "HammingWindow", hamming_op, window_claim);

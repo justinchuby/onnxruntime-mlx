@@ -1,18 +1,14 @@
 use std::env;
 use std::path::PathBuf;
-use std::process::Command;
 
-fn brew_prefix(pkg: &str) -> String {
-    let out = Command::new("brew")
-        .arg("--prefix")
-        .arg(pkg)
-        .output()
-        .unwrap_or_else(|_| panic!("failed to run `brew --prefix {pkg}`"));
-    String::from_utf8(out.stdout).unwrap().trim().to_string()
-}
-
-fn dependency_prefix(env_name: &str, brew_pkg: &str) -> String {
-    env::var(env_name).unwrap_or_else(|_| brew_prefix(brew_pkg))
+fn dependency_prefix(env_name: &str) -> String {
+    env::var(env_name).unwrap_or_else(|_| {
+        panic!(
+            "{env_name} is required. Run `scripts/setup_mlx.sh \"$PWD/.deps/mlx-0.32.2\"` from the \
+             published crate (or `rust/scripts/setup_mlx.sh` from the repository), then set \
+             MLX_PREFIX and MLXC_PREFIX to that prefix."
+        )
+    })
 }
 
 /// Discover the ONNX Runtime C-API include directory for a standalone checkout.
@@ -49,8 +45,8 @@ fn resolve_ort_include() -> String {
 
 fn main() {
     let ort_inc = resolve_ort_include();
-    let mlxc = dependency_prefix("MLXC_PREFIX", "mlx-c");
-    let mlx = dependency_prefix("MLX_PREFIX", "mlx");
+    let mlxc = dependency_prefix("MLXC_PREFIX");
+    let mlx = dependency_prefix("MLX_PREFIX");
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     println!("cargo:rerun-if-changed=wrapper_ort.h");
@@ -89,11 +85,15 @@ fn main() {
     // We call ORT purely through the OrtApi function-pointer table handed to
     // CreateEpFactories, so we do NOT link libonnxruntime. Only mlx-c + mlx + frameworks.
     println!("cargo:rustc-link-search=native={mlxc}/lib");
-    println!("cargo:rustc-link-search=native={mlx}/lib");
+    if mlx != mlxc {
+        println!("cargo:rustc-link-search=native={mlx}/lib");
+    }
     println!("cargo:rustc-link-lib=dylib=mlxc");
     println!("cargo:rustc-link-lib=dylib=mlx");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{mlxc}/lib");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{mlx}/lib");
+    if mlx != mlxc {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{mlx}/lib");
+    }
     for fw in ["Metal", "Foundation", "QuartzCore", "Accelerate"] {
         println!("cargo:rustc-link-lib=framework={fw}");
     }

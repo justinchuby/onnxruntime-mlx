@@ -1237,8 +1237,12 @@ impl<'a> TranslationContext<'a> {
         reverse: bool,
         inclusive: bool,
     ) -> Result<mlxsys::mlx_array, MlxError> {
+        let dtype = mlxsys::mlx_optional_dtype {
+            value: mlxsys::mlx_dtype__MLX_BOOL,
+            has_value: false,
+        };
         self.emit(|res, stream| unsafe {
-            mlxsys::mlx_cumsum(res, a, axis, reverse, inclusive, stream)
+            mlxsys::mlx_cumsum_axis(res, a, axis, reverse, inclusive, dtype, stream)
         })
     }
 
@@ -1250,8 +1254,12 @@ impl<'a> TranslationContext<'a> {
         reverse: bool,
         inclusive: bool,
     ) -> Result<mlxsys::mlx_array, MlxError> {
+        let dtype = mlxsys::mlx_optional_dtype {
+            value: mlxsys::mlx_dtype__MLX_BOOL,
+            has_value: false,
+        };
         self.emit(|res, stream| unsafe {
-            mlxsys::mlx_cumprod(res, a, axis, reverse, inclusive, stream)
+            mlxsys::mlx_cumprod_axis(res, a, axis, reverse, inclusive, dtype, stream)
         })
     }
 

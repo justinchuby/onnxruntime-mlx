@@ -79,3 +79,4 @@ exclude = [
 "../rust/src" = "rust/src"
 "../rust/wrapper_mlx.h" = "rust/wrapper_mlx.h"
 "../rust/wrapper_ort.h" = "rust/wrapper_ort.h"
+"../rust/scripts/setup_mlx.sh" = "scripts/setup_mlx.sh"

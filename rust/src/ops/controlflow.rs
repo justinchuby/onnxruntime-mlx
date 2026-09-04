@@ -632,7 +632,7 @@ pub fn register(registry: &mut OpRegistry) {
         "Scan",
         scan_op,
         scan_claim,
-        "emits MLX Slice and, for fused selective scans, CustomKernel; neither implements Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX Slice and, for fused selective scans, CustomKernel; neither implements Primitive::output_shapes in MLX 0.32.2",
     );
     shapeless(registry, "Loop", loop_op, loop_claim);
 }

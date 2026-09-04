@@ -146,6 +146,7 @@ fn sdpa(
             mode,
             mask,
             empty_array(),
+            false,
             s,
         )
     })
@@ -3069,7 +3070,7 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         paged_attention_op,
         paged_attention_claim,
-        "emits MLX Slice and Scatter, which lack Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX Slice and Scatter, which lack Primitive::output_shapes in MLX 0.32.2",
     );
     // Non-sliding, no-bias GQA uses the slice-free compiled decode route. Sliding-window and
     // attention-bias forms emit Slice and remain eager; unsupported forms are conservative too.

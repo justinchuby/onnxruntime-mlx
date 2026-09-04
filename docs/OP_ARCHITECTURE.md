@@ -362,10 +362,12 @@ Current post-pivot baseline:
 
 ## 8. Build and dependency implications
 
-`mlx-c` is a hard dependency:
+`mlx-c` is a hard dependency. Build the pinned MLX/mlx-c pair:
 
 ```sh
-brew install mlx-c
+rust/scripts/setup_mlx.sh "$PWD/.deps/mlx-0.32.2"
+export MLX_PREFIX="$PWD/.deps/mlx-0.32.2"
+export MLXC_PREFIX="$MLX_PREFIX"
 ```
 
 Build with Cargo from the Rust crate:

@@ -2526,7 +2526,7 @@ pub fn register(registry: &mut OpRegistry) {
         "CenterCropPad",
         center_crop_pad_op,
         center_crop_pad_claim,
-        "emits MLX Slice and Pad, which lack Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX Slice and Pad, which lack Primitive::output_shapes in MLX 0.32.2",
     );
     shapeless(registry, "Compress", compress_op, compress_claim);
     shapeless(

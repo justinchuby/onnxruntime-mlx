@@ -66,7 +66,7 @@ There is no unclassified registration API. `NodeDesc` stores the resulting decis
 so decoder partition colouring and every compiled execution route consume the same proof. Eager MLX
 execution is unaffected.
 
-The MLX 0.32.1 audit found these missing-`output_shapes` primitives in current lowerings:
+The MLX 0.32.2 audit found these missing-`output_shapes` primitives in current lowerings:
 
 | MLX primitive | Registered lowerings that can emit it |
 |---|---|
