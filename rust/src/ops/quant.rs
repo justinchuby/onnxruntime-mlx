@@ -125,19 +125,108 @@ fn align_per_axis(
     ctx.reshape(param, &shape)
 }
 
-fn norm_axis(n: &NodeDesc, rank: usize) -> usize {
-    let mut axis = n.ints.get("axis").copied().unwrap_or(1);
+fn quant_axis(rank: usize, mut axis: i64) -> Option<usize> {
+    if rank == 0 {
+        return None;
+    }
     let r = rank as i64;
     if axis < 0 {
         axis += r;
     }
-    if axis < 0 {
-        axis = 0;
+    (0..r).contains(&axis).then_some(axis as usize)
+}
+
+fn node_quant_axis(n: &NodeDesc, rank: usize) -> Result<usize, MlxError> {
+    // ONNX uses axis=1 as the default even though rank-one inputs are always per-tensor.
+    if rank == 1 {
+        return Ok(0);
     }
-    if axis >= r {
-        axis = if r > 0 { r - 1 } else { 0 };
+    quant_axis(rank, n.ints.get("axis").copied().unwrap_or(1)).ok_or_else(|| {
+        format!(
+            "{}: axis {} is outside [-{rank}, {}]",
+            n.op_type,
+            n.ints.get("axis").copied().unwrap_or(1),
+            rank.saturating_sub(1)
+        )
+    })
+}
+
+/// Expand a validated blocked scale/zero-point tensor. The last block may overhang the input axis;
+/// ONNX specifies that its unused elements are discarded.
+fn align_quant_param(
+    ctx: &mut TranslationContext,
+    param: mlx::mlx_array,
+    data_shape: &[i32],
+    axis: usize,
+    block_size: i64,
+) -> Result<mlx::mlx_array, MlxError> {
+    if block_size == 0 {
+        return align_per_axis(ctx, param, data_shape.len(), axis);
     }
-    axis as usize
+
+    let param_shape = ctx.shape_of(param);
+    let block = i32::try_from(block_size)
+        .map_err(|_| format!("QuantizeLinear: block_size {block_size} exceeds MLX limits"))?;
+    let expanded_axis = param_shape[axis]
+        .checked_mul(block)
+        .ok_or_else(|| "QuantizeLinear: expanded block axis exceeds MLX limits".to_string())?;
+    let mut grouped_shape = param_shape.clone();
+    grouped_shape.insert(axis + 1, 1);
+    let grouped = ctx.reshape(param, &grouped_shape)?;
+    grouped_shape[axis + 1] = block;
+    let grouped = ctx.emit(|res, s| unsafe {
+        mlx::mlx_broadcast_to(res, grouped, grouped_shape.as_ptr(), grouped_shape.len(), s)
+    })?;
+
+    let mut expanded_shape = data_shape.to_vec();
+    expanded_shape[axis] = expanded_axis;
+    let expanded = ctx.reshape(grouped, &expanded_shape)?;
+    if expanded_axis == data_shape[axis] {
+        Ok(expanded)
+    } else {
+        ctx.slice(expanded, &vec![0; data_shape.len()], data_shape)
+    }
+}
+
+fn mlx_float_dtype(t: ort::ONNXTensorElementDataType) -> Option<mlx::mlx_dtype> {
+    use ort::*;
+    #[allow(non_upper_case_globals)]
+    match t {
+        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT => {
+            Some(mlx::mlx_dtype__MLX_FLOAT32)
+        }
+        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16 => {
+            Some(mlx::mlx_dtype__MLX_FLOAT16)
+        }
+        ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16 => {
+            Some(mlx::mlx_dtype__MLX_BFLOAT16)
+        }
+        _ => None,
+    }
+}
+
+fn quant_precision(
+    ctx: &TranslationContext,
+    n: &NodeDesc,
+    scale: mlx::mlx_array,
+) -> Result<mlx::mlx_dtype, MlxError> {
+    let precision = n.ints.get("precision").copied().unwrap_or(0);
+    let dtype = if precision == 0 {
+        ctx.dtype_of(scale)
+    } else {
+        return mlx_float_dtype(precision as ort::ONNXTensorElementDataType).ok_or_else(|| {
+            format!("QuantizeLinear: precision {precision} must be float32, float16, or bfloat16")
+        });
+    };
+    match dtype {
+        t if t == mlx::mlx_dtype__MLX_FLOAT32
+            || t == mlx::mlx_dtype__MLX_FLOAT16
+            || t == mlx::mlx_dtype__MLX_BFLOAT16 =>
+        {
+            Ok(t)
+        }
+        _ => Err("QuantizeLinear: scale dtype must be float32, float16, or bfloat16 when precision is omitted".to_string()),
+    }
 }
 
 /// The integer range and MLX dtype for a quantized ONNX element type.
@@ -1203,20 +1292,32 @@ fn gather_block_quantized_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resu
 
 fn quantize_linear_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x0 = ctx.resolve(&n.inputs[0])?;
-    let x = ctx.astype(x0, mlx::mlx_dtype__MLX_FLOAT32)?;
     let s0 = ctx.resolve(&n.inputs[1])?;
-    let mut scale = ctx.astype(s0, mlx::mlx_dtype__MLX_FLOAT32)?;
-
-    let rank = ctx.shape_of(x).len();
-    let axis = norm_axis(n, rank);
-    scale = align_per_axis(ctx, scale, rank, axis)?;
-
+    let data_shape = ctx.shape_of(x0);
+    let axis = node_quant_axis(n, data_shape.len())?;
+    let precision = quant_precision(ctx, n, s0)?;
+    let x = ctx.astype(x0, precision)?;
+    let scale = ctx.astype(s0, precision)?;
+    let scale = align_quant_param(
+        ctx,
+        scale,
+        &data_shape,
+        axis,
+        n.ints.get("block_size").copied().unwrap_or(0),
+    )?;
     let d = div(ctx, x, scale)?;
-    let mut q = round_e(ctx, d)?;
+    let q = round_e(ctx, d)?;
+    let mut q = ctx.astype(q, mlx::mlx_dtype__MLX_FLOAT32)?;
     if present(n, 2) {
         let z0 = ctx.resolve(&n.inputs[2])?;
         let zp = ctx.astype(z0, mlx::mlx_dtype__MLX_FLOAT32)?;
-        let zp = align_per_axis(ctx, zp, rank, axis)?;
+        let zp = align_quant_param(
+            ctx,
+            zp,
+            &data_shape,
+            axis,
+            n.ints.get("block_size").copied().unwrap_or(0),
+        )?;
         q = add(ctx, q, zp)?;
     }
     let (lo, hi, dt) = range_for(n.outputs[0].otype).ok_or("QuantizeLinear: bad output dtype")?;
@@ -1234,18 +1335,33 @@ fn dequantize_linear_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<()
     let x0 = ctx.resolve(&n.inputs[0])?;
     let mut x = ctx.astype(x0, mlx::mlx_dtype__MLX_FLOAT32)?;
     let s0 = ctx.resolve(&n.inputs[1])?;
-    let mut scale = ctx.astype(s0, mlx::mlx_dtype__MLX_FLOAT32)?;
-
-    let rank = ctx.shape_of(x).len();
-    let axis = norm_axis(n, rank);
+    let data_shape = ctx.shape_of(x);
+    let axis = node_quant_axis(n, data_shape.len())?;
+    let output_dtype = mlx_float_dtype(n.outputs[0].otype).ok_or_else(|| {
+        "DequantizeLinear: output must be float32, float16, or bfloat16".to_string()
+    })?;
+    let scale = ctx.astype(s0, output_dtype)?;
 
     if present(n, 2) {
         let z0 = ctx.resolve(&n.inputs[2])?;
         let zp = ctx.astype(z0, mlx::mlx_dtype__MLX_FLOAT32)?;
-        let zp = align_per_axis(ctx, zp, rank, axis)?;
+        let zp = align_quant_param(
+            ctx,
+            zp,
+            &data_shape,
+            axis,
+            n.ints.get("block_size").copied().unwrap_or(0),
+        )?;
         x = sub(ctx, x, zp)?;
     }
-    scale = align_per_axis(ctx, scale, rank, axis)?;
+    let scale = align_quant_param(
+        ctx,
+        scale,
+        &data_shape,
+        axis,
+        n.ints.get("block_size").copied().unwrap_or(0),
+    )?;
+    let x = ctx.astype(x, output_dtype)?;
     let out = mul(ctx, x, scale)?;
     ctx.bind(&n.outputs[0], out);
     Ok(())
@@ -1609,7 +1725,7 @@ fn is_uint8(t: ort::ONNXTensorElementDataType) -> bool {
     t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8
 }
 fn is_float(t: ort::ONNXTensorElementDataType) -> bool {
-    t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
+    mlx_float_dtype(t).is_some()
 }
 fn is_int8or(t: ort::ONNXTensorElementDataType) -> bool {
     t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8
@@ -1623,6 +1739,69 @@ fn is_quant_output(t: ort::ONNXTensorElementDataType) -> bool {
 }
 fn is_dequant_input(t: ort::ONNXTensorElementDataType) -> bool {
     is_quant_output(t) || t == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+}
+
+fn block_shape_ok(data: &[i64], param: &[i64], axis: usize, block_size: i64) -> bool {
+    if block_size <= 0 || data.len() != param.len() || data.iter().any(|&d| d <= 0) {
+        return false;
+    }
+    if data
+        .iter()
+        .zip(param)
+        .enumerate()
+        .any(|(i, (&d, &p))| p <= 0 || (i != axis && p != d))
+    {
+        return false;
+    }
+    let d = data[axis];
+    let scales = param[axis];
+    scales
+        .checked_mul(block_size)
+        .is_some_and(|upper| d <= upper)
+        && (scales - 1)
+            .checked_mul(block_size)
+            .is_some_and(|lower| lower < d)
+}
+
+fn quant_param_shape_ok(data: &[i64], param: &[i64], axis: usize, block_size: i64) -> bool {
+    match block_size {
+        0 => {
+            param.is_empty()
+                || param == [1]
+                || (data.len() > 1 && param.len() == 1 && param[0] == data[axis])
+        }
+        _ => block_shape_ok(data, param, axis, block_size),
+    }
+}
+
+fn claim_quant_axis(rank: usize, axis: i64, param_shape: &[i64]) -> Option<usize> {
+    if rank == 1 && (param_shape.is_empty() || param_shape == [1]) {
+        // ONNX's default axis is 1, but rank-one inputs only admit per-tensor quantization.
+        Some(0)
+    } else {
+        quant_axis(rank, axis)
+    }
+}
+
+fn output_dtype_matches(node: &NodeView, actual: ort::ONNXTensorElementDataType) -> bool {
+    let requested = node.int_attr("output_dtype", 0);
+    requested == 0 || requested == actual as i64
+}
+
+const QUANT_BLOCKED_SHAPE_REASON: &str = "blocked quantization expands scale blocks with static geometry that lacks Primitive::output_shapes";
+
+fn quantize_linear_compile_shape_safety(node: &NodeView) -> crate::registry::CompileShapeSafety {
+    if node.int_attr("block_size", 0) != 0 {
+        crate::registry::CompileShapeSafety::ShapeKeyedOnly {
+            reason: QUANT_BLOCKED_SHAPE_REASON,
+        }
+    } else {
+        crate::registry::CompileShapeSafety::Shapeless
+    }
+}
+
+fn dequantize_linear_compile_shape_safety(node: &NodeView) -> crate::registry::CompileShapeSafety {
+    quantize_linear_compile_shape_safety(node)
 }
 
 /// A zero-point / scale parameter is claimable when absent, or present with dtype `want` and shape
@@ -1869,27 +2048,73 @@ fn quantize_linear_claim(node: &NodeView) -> ClaimResult {
         (Some(x), Some(s), Some(o)) => (x, s, o),
         _ => deny!("missing tensor type/shape info on an input or the output"),
     };
-    if !is_float(x.dtype) || !is_float(s.dtype) {
+    if !is_float(x.dtype)
+        && x.dtype != ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+    {
         deny!(
-            "input and scale dtypes must be float32; got {} and {}",
+            "input dtype must be float32, float16, bfloat16, or int32; got {}",
             crate::registry::ort_dtype_name(x.dtype),
+        );
+    }
+    if !is_float(s.dtype)
+        && s.dtype != ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
+    {
+        deny!(
+            "scale dtype must be float32, float16, bfloat16, or int32; got {}",
             crate::registry::ort_dtype_name(s.dtype)
         );
     }
-    if s.shape.len() > 1 || !is_quant_output(o.dtype) {
+    if !is_quant_output(o.dtype) {
         deny!(
-            "scale must be scalar or rank-1 and output dtype {} must be int8, uint8, int16, or uint16",
+            "output dtype {} must be int8, uint8, int16, or uint16; packed and float8 outputs fall back",
+            crate::registry::ort_dtype_name(o.dtype)
+        );
+    }
+    let axis = match claim_quant_axis(x.shape.len(), node.int_attr("axis", 1), &s.shape) {
+        Some(axis) => axis,
+        None => deny!(
+            "axis must be within [-rank, rank-1] for rank {}",
+            x.shape.len()
+        ),
+    };
+    let block_size = node.int_attr("block_size", 0);
+    if !quant_param_shape_ok(&x.shape, &s.shape, axis, block_size) {
+        deny!(
+            "scale shape {:?} is invalid for input {:?}, axis {axis}, block_size {block_size}",
+            s.shape,
+            x.shape
+        );
+    }
+    let precision = node.int_attr("precision", 0);
+    let precision_type = if precision == 0 {
+        s.dtype
+    } else {
+        precision as _
+    };
+    if !is_float(precision_type) {
+        deny!("precision must be float32, float16, or bfloat16");
+    }
+    if !output_dtype_matches(node, o.dtype) {
+        deny!(
+            "output_dtype does not match output dtype {}",
             crate::registry::ort_dtype_name(o.dtype)
         );
     }
     if node.input_present(2) {
         match node.input_info(2) {
-            Some(z) if z.dtype == o.dtype && z.shape.len() <= 1 => {}
+            Some(z)
+                if z.dtype == o.dtype
+                    && z.shape == s.shape
+                    && quant_param_shape_ok(&x.shape, &z.shape, axis, block_size) => {}
             _ => deny!(
-                "zero_point must match output dtype {} and be scalar or rank-1",
+                "zero_point must match output dtype {} and scale shape",
                 crate::registry::ort_dtype_name(o.dtype)
             ),
         }
+    } else if node.int_attr("output_dtype", 0) == 0
+        && o.dtype != ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8
+    {
+        deny!("without zero_point, output_dtype must be set unless output is uint8");
     }
     Ok(())
 }
@@ -1906,20 +2131,44 @@ fn dequantize_linear_claim(node: &NodeView) -> ClaimResult {
     };
     if !is_dequant_input(x.dtype) || !is_float(s.dtype) || !is_float(o.dtype) {
         deny!(
-            "input dtype {} must be int8, uint8, int16, uint16, or int32; scale/output must be float32 (got {} -> {})",
+            "input dtype {} must be int8, uint8, int16, uint16, or int32; scale/output must be float32, float16, or bfloat16 (got {} -> {})",
             crate::registry::ort_dtype_name(x.dtype),
             crate::registry::ort_dtype_name(s.dtype),
             crate::registry::ort_dtype_name(o.dtype)
         );
     }
-    if s.shape.len() > 1 {
-        deny!("scale must be scalar or rank-1");
+    let axis = match claim_quant_axis(x.shape.len(), node.int_attr("axis", 1), &s.shape) {
+        Some(axis) => axis,
+        None => deny!(
+            "axis must be within [-rank, rank-1] for rank {}",
+            x.shape.len()
+        ),
+    };
+    let block_size = node.int_attr("block_size", 0);
+    if !quant_param_shape_ok(&x.shape, &s.shape, axis, block_size) {
+        deny!(
+            "scale shape {:?} is invalid for input {:?}, axis {axis}, block_size {block_size}",
+            s.shape,
+            x.shape
+        );
+    }
+    if !output_dtype_matches(node, o.dtype) {
+        deny!(
+            "output_dtype does not match output dtype {}",
+            crate::registry::ort_dtype_name(o.dtype)
+        );
+    }
+    if node.int_attr("output_dtype", 0) == 0 && o.dtype != s.dtype {
+        deny!("without output_dtype, output dtype must match scale dtype");
     }
     if node.input_present(2) {
         match node.input_info(2) {
-            Some(z) if z.dtype == x.dtype && z.shape.len() <= 1 => {}
+            Some(z)
+                if z.dtype == x.dtype
+                    && z.shape == s.shape
+                    && quant_param_shape_ok(&x.shape, &z.shape, axis, block_size) => {}
             _ => deny!(
-                "zero_point must match input dtype {} and be scalar or rank-1",
+                "zero_point must match input dtype {} and scale shape",
                 crate::registry::ort_dtype_name(x.dtype)
             ),
         }
@@ -2732,19 +2981,21 @@ pub fn register(registry: &mut OpRegistry) {
         gather_block_quantized_claim,
         gather_block_quantized_compile_shape_safety,
     );
-    shapeless(
+    shape_classified(
         registry,
         "",
         "QuantizeLinear",
         quantize_linear_op,
         quantize_linear_claim,
+        quantize_linear_compile_shape_safety,
     );
-    shapeless(
+    shape_classified(
         registry,
         "",
         "DequantizeLinear",
         dequantize_linear_op,
         dequantize_linear_claim,
+        dequantize_linear_compile_shape_safety,
     );
     shapeless(
         registry,
@@ -2786,8 +3037,9 @@ pub fn register(registry: &mut OpRegistry) {
 #[cfg(test)]
 mod compile_shape_safety_tests {
     use super::{
-        block_quantized_compile_shape_safety, gather_block_quantized_compile_shape_safety_for,
-        matmulnbits_compile_shape_safety_for,
+        block_quantized_compile_shape_safety, block_shape_ok, claim_quant_axis,
+        gather_block_quantized_compile_shape_safety_for, matmulnbits_compile_shape_safety_for,
+        quant_axis, quant_param_shape_ok,
     };
     use crate::registry::CompileShapeSafety;
 
@@ -2826,5 +3078,37 @@ mod compile_shape_safety_tests {
         assert!(
             !gather_block_quantized_compile_shape_safety_for(192, 2, 128, true).allows_shapeless()
         );
+    }
+
+    #[test]
+    fn quantize_linear_block_shapes_follow_the_opset_24_contract() {
+        // A final partial block is valid: three scales, replicated by two, cover an axis of five.
+        assert!(block_shape_ok(&[2, 5], &[2, 3], 1, 2));
+        assert!(quant_param_shape_ok(&[2, 5], &[2, 3], 1, 2));
+
+        // The interval is exact: two scales cannot cover five values in blocks of two, while
+        // three scales in blocks of three leaves an unused middle-scale block.
+        assert!(!block_shape_ok(&[2, 5], &[2, 2], 1, 2));
+        assert!(!block_shape_ok(&[2, 5], &[2, 3], 1, 3));
+        assert!(!block_shape_ok(&[2, 5], &[1, 3], 1, 2));
+    }
+
+    #[test]
+    fn quantize_linear_axis_and_granularity_reject_ambiguous_forms() {
+        assert_eq!(quant_axis(3, -1), Some(2));
+        assert_eq!(quant_axis(3, -3), Some(0));
+        assert_eq!(quant_axis(3, -4), None);
+        assert_eq!(quant_axis(3, 3), None);
+
+        assert!(quant_param_shape_ok(&[2, 3], &[], 1, 0));
+        assert!(quant_param_shape_ok(&[2, 3], &[3], 1, 0));
+        assert!(!quant_param_shape_ok(&[2, 3], &[2], 1, 0));
+        // Rank-one inputs are per-tensor only; a length-one vector remains accepted for
+        // compatibility with existing ORT exporters.
+        assert!(!quant_param_shape_ok(&[3], &[3], 0, 0));
+        assert!(quant_param_shape_ok(&[3], &[1], 0, 0));
+        assert_eq!(claim_quant_axis(1, 1, &[]), Some(0));
+        assert_eq!(claim_quant_axis(1, 1, &[1]), Some(0));
+        assert_eq!(claim_quant_axis(1, 1, &[3]), None);
     }
 }

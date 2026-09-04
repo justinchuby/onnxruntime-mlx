@@ -1,4 +1,4 @@
-"""MLX EP correctness tests for the opset-17+ QUANTIZATION family (``rust/src/ops/quant.rs``).
+"""MLX EP correctness tests for the ONNX quantization family (``rust/src/ops/quant.rs``).
 
 Covers the ops registered by ``RegisterQuantizeOps``:
   * ``QuantizeLinear``        — per-tensor and per-axis scale/zero-point; int8/uint8/int16/uint16
@@ -202,6 +202,87 @@ def test_quantize_linear_no_zero_point() -> None:
     check(model, {"x": x})
 
 
+def test_quantize_linear_honors_float16_precision() -> None:
+    """The opset-24 precision attribute applies to division, not the final integer clamp."""
+    x = np.array([2049.0, -2049.0, 3.25], np.float32)
+    scale = initz("scale", np.array(1.0, np.float32))
+    zp = initz("zp", np.array(0, np.int16))
+    model = build(
+        "QuantizeLinear",
+        [m.tensor("x", DT.FLOAT, [3]), scale, zp],
+        [m.tensor("y", DT.INT16, [3])],
+        inits=(scale, zp),
+        attrs=[ir.AttrInt64("precision", int(DT.FLOAT16))],
+    )
+    assert_mlx_claims(model, {"x": x})
+    (actual,) = m.run_mlx(model, {"x": x})
+    expected = np.rint(x.astype(np.float16)).astype(np.int16)
+    np.testing.assert_array_equal(actual, expected)
+
+
+def _round_to_bfloat16(x: np.ndarray) -> np.ndarray:
+    """Round fp32 values to bfloat16, returned as fp32 for NumPy reference arithmetic."""
+    bits = x.astype(np.float32).view(np.uint32)
+    rounded = bits + np.uint32(0x7FFF) + ((bits >> np.uint32(16)) & np.uint32(1))
+    return (rounded & np.uint32(0xFFFF0000)).view(np.float32)
+
+
+def test_quantize_linear_bfloat16_inputs() -> None:
+    """Bfloat16 x/scale use bfloat16 division precision, including the in-graph Cast boundary."""
+    x = np.array([[1.01, -0.99, 2.49], [3.51, -2.51, 0.49]], np.float32)
+    scale = np.array(0.2, np.float32)
+    x_v = m.tensor("x", DT.FLOAT, [2, 3])
+    scale_v = m.tensor("scale", DT.FLOAT, [])
+    x_bf = m.tensor("x_bf", DT.BFLOAT16, [2, 3])
+    scale_bf = m.tensor("scale_bf", DT.BFLOAT16, [])
+    y = m.tensor("y", DT.INT8, [2, 3])
+    graph = ir.Graph(
+        [x_v, scale_v],
+        [y],
+        nodes=[
+            ir.node("Cast", [x_v], attributes={"to": int(DT.BFLOAT16)}, outputs=[x_bf]),
+            ir.node("Cast", [scale_v], attributes={"to": int(DT.BFLOAT16)}, outputs=[scale_bf]),
+            ir.node(
+                "QuantizeLinear",
+                [x_bf, scale_bf],
+                attributes={"output_dtype": int(DT.INT8)},
+                outputs=[y],
+            ),
+        ],
+        opset_imports={"": 24},
+        name="mlx_bfloat16_quantize",
+    )
+    model = ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
+    feeds = {"x": x, "scale": scale}
+    assert_mlx_claims(model, feeds)
+    (actual,) = m.run_mlx(model, feeds)
+    expected = np.clip(
+        np.rint(_round_to_bfloat16(x) / _round_to_bfloat16(scale)), -128, 127
+    ).astype(np.int8)
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_quantize_linear_blocked_partial_final_block() -> None:
+    """Opset-24 blocked scales are repeated by block_size, then trimmed at the input edge."""
+    x = np.array([[0.4, 1.1, -0.4, 2.2, -1.4], [1.0, -0.8, 0.6, -1.2, 2.4]], np.float32)
+    scale_np = np.array([[0.2, 0.5, 0.7], [0.4, 0.25, 0.6]], np.float32)
+    zp_np = np.array([[3, -2, 7], [4, 1, -5]], np.int16)
+    scale, zp = initz("scale", scale_np), initz("zp", zp_np)
+    model = build(
+        "QuantizeLinear",
+        [m.tensor("x", DT.FLOAT, [2, 5]), scale, zp],
+        [m.tensor("y", DT.INT16, [2, 5])],
+        inits=(scale, zp),
+        attrs=[ir.AttrInt64("axis", 1), ir.AttrInt64("block_size", 2)],
+    )
+    assert_mlx_claims(model, {"x": x})
+    (actual,) = m.run_mlx(model, {"x": x})
+    scale_full = np.repeat(scale_np, 2, axis=1)[:, :5]
+    zp_full = np.repeat(zp_np, 2, axis=1)[:, :5]
+    expected = np.clip(np.rint(x / scale_full) + zp_full, -32768, 32767).astype(np.int16)
+    np.testing.assert_array_equal(actual, expected)
+
+
 # --- DequantizeLinear ---------------------------------------------------------------------------
 # id, input dtype, zero-point value(s), axis (None => per-tensor)
 _DQLINEAR = [
@@ -253,6 +334,31 @@ def test_dequantize_linear_no_zero_point() -> None:
         inits=(scale,),
     )
     check(model, {"x": x})
+
+
+def test_dequantize_linear_blocked_float16_output() -> None:
+    """Blocked dequantization uses the output dtype as multiplication precision."""
+    x = np.array([[13, -7, 3, 19, -11], [8, -5, 17, -9, 4]], np.int16)
+    scale_np = np.array([[0.2, 0.5, 0.7], [0.4, 0.25, 0.6]], np.float32)
+    zp_np = np.array([[3, -2, 7], [4, 1, -5]], np.int16)
+    scale, zp = initz("scale", scale_np), initz("zp", zp_np)
+    model = build(
+        "DequantizeLinear",
+        [m.tensor("x", DT.INT16, [2, 5]), scale, zp],
+        [m.tensor("y", DT.FLOAT16, [2, 5])],
+        inits=(scale, zp),
+        attrs=[
+            ir.AttrInt64("axis", 1),
+            ir.AttrInt64("block_size", 2),
+            ir.AttrInt64("output_dtype", int(DT.FLOAT16)),
+        ],
+    )
+    assert_mlx_claims(model, {"x": x})
+    (actual,) = m.run_mlx(model, {"x": x})
+    scale_full = np.repeat(scale_np, 2, axis=1)[:, :5]
+    zp_full = np.repeat(zp_np, 2, axis=1)[:, :5]
+    expected = (x - zp_full).astype(np.float16) * scale_full.astype(np.float16)
+    np.testing.assert_array_equal(actual, expected)
 
 
 # --- DynamicQuantizeLinear ----------------------------------------------------------------------

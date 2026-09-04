@@ -47,9 +47,25 @@ def _declined_ms_model() -> bytes:
     )
 
 
+def _declined_float8_quant_model() -> bytes:
+    """A future-schema float8 output the EP deliberately leaves to its producer/CPU path."""
+    return m.make_model(
+        "QuantizeLinear",
+        [m.tensor("x", DataType.FLOAT, [2]), m.tensor("scale", DataType.FLOAT, [])],
+        [m.tensor("out", DataType.FLOAT8E4M3FN, [2])],
+        attributes={"output_dtype": int(DataType.FLOAT8E4M3FN)},
+        opset=24,
+    )
+
+
 def test_build_declined_session() -> None:
     """Child of the test below: creating the session is what runs GetCapability."""
     m._session(_declined_ms_model(), m.EP_PROVIDERS)
+
+
+def test_build_declined_float8_quant_session() -> None:
+    """Child of the test below: GetCapability records the deliberate float8 fallback."""
+    m._session(_declined_float8_quant_model(), m.EP_PROVIDERS)
 
 
 @pytest.mark.skipif(
@@ -91,6 +107,33 @@ def test_declined_op_is_reported_with_its_domain(tmp_path) -> None:
     )
     assert "MatMulNBits" not in declined, (
         "the bare op type must not be used as the key for a custom-domain op"
+    )
+
+
+@pytest.mark.skipif(
+    os.environ.get(_CHILD_ENV) == "1",
+    reason="child process: it builds the session, it does not spawn another",
+)
+def test_float8_quantization_fallback_is_reported(tmp_path) -> None:
+    trace = tmp_path / "trace.json"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            f"{Path(__file__).name}::test_build_declined_float8_quant_session",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ],
+        check=True,
+        env={**os.environ, "ONNXRUNTIME_EP_MLX_TRACE": str(trace), _CHILD_ENV: "1"},
+        cwd=str(Path(__file__).parent),
+        timeout=300,
+    )
+    claims = [event for event in json.loads(trace.read_text()) if event.get("cat") == "ep.claim"]
+    assert any("fallback_QuantizeLinear" in event["args"] for event in claims), (
+        "unsupported float8 QuantizeLinear must be reported as a fallback"
     )
 
 
