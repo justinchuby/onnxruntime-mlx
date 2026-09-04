@@ -237,7 +237,9 @@ Removed historical paths are listed in §8.
 `mlx-c` is a **hard build dependency**:
 
 ```sh
-brew install mlx-c
+rust/scripts/setup_mlx.sh "$PWD/.deps/mlx-0.32.2"
+export MLX_PREFIX="$PWD/.deps/mlx-0.32.2"
+export MLXC_PREFIX="$MLX_PREFIX"
 ```
 
 Build the EP with Cargo from the Rust crate:

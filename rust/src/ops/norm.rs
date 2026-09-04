@@ -956,7 +956,7 @@ pub fn register_norm(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         lrn_op,
         lrn_claim,
-        "emits MLX Pad and Slice, which lack Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX Pad and Slice, which lack Primitive::output_shapes in MLX 0.32.2",
     );
     shapeless(
         registry,

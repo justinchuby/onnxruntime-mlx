@@ -1304,7 +1304,7 @@ pub fn register(registry: &mut OpRegistry) {
             handler: linear_attention_op as OpHandler,
             claim: linear_attention_claim as ClaimPredicate,
         },
-        "emits MLX Slice, Pad, and Scan, which lack Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX Slice, Pad, and Scan, which lack Primitive::output_shapes in MLX 0.32.2",
     );
     registry.register_shape_keyed(
         OpRegistration {
@@ -1315,7 +1315,7 @@ pub fn register(registry: &mut OpRegistry) {
             handler: linear_attention_op as OpHandler,
             claim: linear_attention_standard_claim as ClaimPredicate,
         },
-        "emits MLX Slice, Pad, and Scan, which lack Primitive::output_shapes in MLX 0.32.1",
+        "emits MLX Slice, Pad, and Scan, which lack Primitive::output_shapes in MLX 0.32.2",
     );
     for (op_type, handler, claim) in [
         (

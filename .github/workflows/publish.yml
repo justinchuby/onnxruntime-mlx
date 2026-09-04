@@ -26,17 +26,17 @@ jobs:
     runs-on: macos-14
     env:
       ORT_VERSION: "1.29.0"
-      MLX_VERSION: "0.32.1"
-      MLXC_VERSION: "0.6.0_4"
+      MLX_VERSION: "0.32.2"
+      MLX_COMMIT: "1f8e74e3f12f31365464a6867c6579f0e9b29d85"
+      MLXC_COMMIT: "c74db5307cc8ce122f48d97ef951b30578674e7f"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install mlx-c (hard dependency)
-        run: |
-          brew update
-          brew install mlx-c
-          test "$(brew list --versions mlx | awk '{print $2}')" = "$MLX_VERSION"
-          test "$(brew list --versions mlx-c | awk '{print $2}')" = "$MLXC_VERSION"
+      - uses: ./.github/actions/setup-mlx
+        with:
+          mlx-version: ${{ env.MLX_VERSION }}
+          mlx-commit: ${{ env.MLX_COMMIT }}
+          mlxc-commit: ${{ env.MLXC_COMMIT }}
 
       - name: Install Rust toolchain (rustup — no third-party action, supply-chain hardening)
         run: |
@@ -135,17 +135,17 @@ jobs:
       id-token: write # required for the OIDC token exchange with crates.io
     env:
       ORT_VERSION: "1.29.0"
-      MLX_VERSION: "0.32.1"
-      MLXC_VERSION: "0.6.0_4"
+      MLX_VERSION: "0.32.2"
+      MLX_COMMIT: "1f8e74e3f12f31365464a6867c6579f0e9b29d85"
+      MLXC_COMMIT: "c74db5307cc8ce122f48d97ef951b30578674e7f"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install mlx-c (hard dependency)
-        run: |
-          brew update
-          brew install mlx-c
-          test "$(brew list --versions mlx | awk '{print $2}')" = "$MLX_VERSION"
-          test "$(brew list --versions mlx-c | awk '{print $2}')" = "$MLXC_VERSION"
+      - uses: ./.github/actions/setup-mlx
+        with:
+          mlx-version: ${{ env.MLX_VERSION }}
+          mlx-commit: ${{ env.MLX_COMMIT }}
+          mlxc-commit: ${{ env.MLXC_COMMIT }}
 
       - name: Install Rust toolchain (rustup — no third-party action, supply-chain hardening)
         run: |
