@@ -10,7 +10,7 @@ on:
 # being used. If a job flakes on exit 134 with a green test summary, that is ORT's telemetry
 # worker aborting at teardown -- set ORT_DISABLE_TELEMETRY: "1" on the affected job or step
 # rather than debugging the PR under test.
-# Apple Silicon only: the MLX EP requires Metal + mlx-c (macos-14 runners are arm64).
+# Apple Silicon only: the MLX EP requires Metal + mlx-c (macos-15 runners are arm64).
 jobs:
   # Layout only, so this needs neither Metal nor ONNX Runtime: rustfmt parses
   # the sources and never builds them. Kept off the macOS job so a formatting
@@ -32,7 +32,7 @@ jobs:
 
   build-test:
     name: Build + op tests (macOS arm64)
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       ORT_VERSION: "1.29.0"
       MLX_VERSION: "0.32.2"
@@ -126,7 +126,7 @@ jobs:
 
   python-wheel:
     name: Python package smoke (macOS arm64)
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       ORT_VERSION: "1.29.0"
       MLX_VERSION: "0.32.2"
