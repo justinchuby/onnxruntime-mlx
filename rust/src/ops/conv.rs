@@ -1548,13 +1548,13 @@ fn global_lp_pool_claim(node: &NodeView) -> ClaimResult {
 
 // ---- registration -------------------------------------------------------------------------------
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset: K_ANY_OPSET,
@@ -1564,38 +1564,79 @@ fn reg(
     });
 }
 
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
 pub fn register_conv(registry: &mut OpRegistry) {
-    reg(registry, "Conv", conv_op, conv_claim);
-    registry.register(OpRegistration {
-        domain: "",
-        op_type: "DeformConv",
-        min_opset: 22,
-        max_opset: K_ANY_OPSET,
-        handler: deform_conv_op,
-        claim: deform_conv_claim,
-    });
-    reg(
+    shapeless(registry, "Conv", conv_op, conv_claim);
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type: "DeformConv",
+            min_opset: 22,
+            max_opset: K_ANY_OPSET,
+            handler: deform_conv_op,
+            claim: deform_conv_claim,
+        },
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
+    shapeless(
         registry,
         "ConvTranspose",
         conv_transpose_op,
         conv_transpose_claim,
     );
-    reg(registry, "AveragePool", average_pool_op, average_pool_claim);
-    reg(registry, "MaxPool", max_pool_op, max_pool_claim);
-    reg(
+    shape_keyed(
+        registry,
+        "AveragePool",
+        average_pool_op,
+        average_pool_claim,
+        "emits MLX AsStrided and may emit Pad; neither implements Primitive::output_shapes in MLX 0.32.1",
+    );
+    shape_keyed(
+        registry,
+        "MaxPool",
+        max_pool_op,
+        max_pool_claim,
+        "emits MLX AsStrided and may emit Pad; neither implements Primitive::output_shapes in MLX 0.32.1",
+    );
+    shapeless(
         registry,
         "GlobalAveragePool",
         global_average_pool_op,
         global_pool_claim,
     );
-    reg(
+    shapeless(
         registry,
         "GlobalMaxPool",
         global_max_pool_op,
         global_pool_claim,
     );
-    reg(registry, "LpPool", lp_pool_op, lp_pool_claim);
-    reg(
+    shape_keyed(
+        registry,
+        "LpPool",
+        lp_pool_op,
+        lp_pool_claim,
+        "emits MLX AsStrided and may emit Pad; neither implements Primitive::output_shapes in MLX 0.32.1",
+    );
+    shapeless(
         registry,
         "GlobalLpPool",
         global_lp_pool_op,

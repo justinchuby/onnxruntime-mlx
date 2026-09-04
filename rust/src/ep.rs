@@ -20,7 +20,7 @@ use crate::engine::{
 };
 use crate::factory::ORT_API_VERSION;
 use crate::mlx::Stream;
-use crate::registry::{NodeView, claimable};
+use crate::registry::{CompilePartitionClass, NodeView, claimable};
 use crate::sys::{mlx, ort};
 
 fn use_dedicated_decode_stream(enabled: bool, seq_len: Option<i32>) -> bool {
@@ -245,6 +245,24 @@ unsafe fn get_capability_impl(
                 crate::registry::node_uses_float64(&view)
             })
             .collect();
+        // In a decoder graph, colour each node by the registry's strongest allowed route:
+        // shapeless, shape-keyed-only, or eager-only. A stricter node cannot poison compilation for
+        // a more capable neighbour. Non-decoder graphs use only the general route, so splitting
+        // them would add boundaries for no benefit.
+        let decoder_graph = nodes
+            .iter()
+            .any(|&node| is_decoder_attention_anchor(&NodeView::new(ep.ort_api, node)));
+        let compile_class: Vec<CompilePartitionClass> = nodes
+            .iter()
+            .map(|&node| {
+                let view = NodeView::new(ep.ort_api, node);
+                if decoder_graph {
+                    crate::registry::compile_shape_safety(&view).partition_class()
+                } else {
+                    CompilePartitionClass::Shapeless
+                }
+            })
+            .collect();
 
         // Claiming view: build the per-op fallback reasons for the declined nodes (only when
         // observability is active, so this extra FFI never touches the traced-off fast path). The
@@ -304,9 +322,9 @@ unsafe fn get_capability_impl(
         // every node that could lie between two members is included, while still avoiding the
         // thousands of singleton partitions previously used for this graph.
         let clusters = if mixed_vision_quant_graph {
-            build_contiguous_clusters(&supported, &float64)
+            build_contiguous_clusters(&supported, &float64, &compile_class)
         } else {
-            build_convex_clusters(api, &nodes, &supported, &float64)
+            build_convex_clusters(api, &nodes, &supported, &float64, &compile_class)
         };
         let layer_boundary_outputs = if in_cf_body {
             HashSet::new()
@@ -586,7 +604,11 @@ mod layer_partition_tests {
     }
 }
 
-fn build_contiguous_clusters(supported: &[bool], float64: &[bool]) -> Vec<Vec<usize>> {
+fn build_contiguous_clusters(
+    supported: &[bool],
+    float64: &[bool],
+    compile_class: &[CompilePartitionClass],
+) -> Vec<Vec<usize>> {
     let mut clusters = Vec::new();
     let mut start = 0usize;
     while start < supported.len() {
@@ -597,9 +619,14 @@ fn build_contiguous_clusters(supported: &[bool], float64: &[bool]) -> Vec<Vec<us
             break;
         }
         let mut end = start + 1;
-        // An fp64 run and an fp32 run never share a cluster: the fp64 side must run on an MLX CPU
-        // stream, and merging them would drag the fp32 work off the GPU.
-        while end < supported.len() && supported[end] && float64[end] == float64[start] {
+        // Different execution colours never share a cluster: fp64 needs the MLX CPU stream, while
+        // Nodes with different compile classes must not share a partition: shapeless,
+        // shape-keyed, and eager-only plans have different execution guarantees.
+        while end < supported.len()
+            && supported[end]
+            && float64[end] == float64[start]
+            && compile_class[end] == compile_class[start]
+        {
             end += 1;
         }
         clusters.push((start..end).collect());
@@ -713,11 +740,15 @@ unsafe fn graph_metadata_value(
 /// cluster. MLX cannot run float64 on Metal, so an fp64 cluster is executed on an MLX CPU stream;
 /// without this rule the maximal-cluster search would happily absorb neighbouring fp32 nodes
 /// (they are graph-connected through `Cast`) and silently move GPU work onto the CPU.
+///
+/// `compile_class` is a second colour: shapeless, shape-keyed-only, and eager-only nodes remain in
+/// separate clusters, so a stricter node cannot disable compilation for a more capable neighbour.
 fn build_convex_clusters(
     api: &ort::OrtApi,
     nodes: &[*const ort::OrtNode],
     supported: &[bool],
     float64: &[bool],
+    compile_class: &[CompilePartitionClass],
 ) -> Vec<Vec<usize>> {
     let n = nodes.len();
 
@@ -750,7 +781,7 @@ fn build_convex_clusters(
         }
     }
 
-    cluster_edges(n, supported, float64, &succ, &pred)
+    cluster_edges(n, supported, float64, compile_class, &succ, &pred)
 }
 
 /// The pure graph half of [`build_convex_clusters`], over an explicit adjacency (no ORT FFI) so the
@@ -759,6 +790,7 @@ fn cluster_edges(
     n: usize,
     supported: &[bool],
     float64: &[bool],
+    compile_class: &[CompilePartitionClass],
     succ: &[Vec<usize>],
     pred: &[Vec<usize>],
 ) -> Vec<Vec<usize>> {
@@ -802,15 +834,16 @@ fn cluster_edges(
         }
     }
 
-    // Candidate merge edges: direct data edges between two supported nodes OF THE SAME fp64 colour.
-    // Withholding the mixed-colour edges is what makes an fp64 region its own cluster.
+    // Candidate merge edges: direct data edges between two supported nodes OF THE SAME execution
+    // colour. Withholding mixed fp64 or shape-specialization edges keeps each required route in its
+    // own cluster.
     let mut edges: Vec<(usize, usize)> = Vec::new();
     for u in 0..n {
         if !supported[u] {
             continue;
         }
         for &v in &succ[u] {
-            if supported[v] && float64[u] == float64[v] {
+            if supported[v] && float64[u] == float64[v] && compile_class[u] == compile_class[v] {
                 edges.push((u, v));
             }
         }
@@ -1078,7 +1111,13 @@ unsafe fn build_plan(
             let op_type = node_op_type(api, node);
             let domain = node_domain(api, node);
             let since_version = node_since_version(api, node);
-            let mut nd = NodeDesc::new(op_type, domain, since_version);
+            let view = NodeView::new(api, node);
+            let mut nd = NodeDesc::new(
+                op_type,
+                domain,
+                since_version,
+                crate::registry::compile_shape_safety(&view),
+            );
             let tr = crate::trace::tracer();
             if tr.is_enabled() {
                 nd.node_id = node_id(api, node);
@@ -1231,13 +1270,11 @@ unsafe fn build_plan(
                     || n.subgraphs.iter().any(|sg| any_control_flow(&sg.nodes))
             })
         }
-        // The 11-input GQA form carries a runtime attention-bias tensor. Its eager translation is
-        // correct, but the compiled route does not currently preserve its bias semantics. Keep
-        // this form eager without blocking the 7-input external-RoPE decoder.
+        // PackedMultiHeadAttention has a separate compile-time semantic restriction. Per-form GQA
+        // eligibility is carried by NodeDesc::compile_shape_safety from the registry classifier.
         fn has_compile_barrier(nodes: &[NodeDesc]) -> bool {
             nodes.iter().any(|n| {
                 n.op_type == "PackedMultiHeadAttention"
-                    || (n.op_type == "GroupQueryAttention" && n.inputs.len() == 11)
                     || n.subgraphs.iter().any(|sg| has_compile_barrier(&sg.nodes))
             })
         }
@@ -1253,7 +1290,7 @@ unsafe fn build_plan(
             plan.dedicated_decode_stream = false;
         }
         plan.compiled.enabled =
-            crate::compiled::compile_enabled(has_control_flow || has_compile_barrier);
+            crate::compiled::decode_enabled(has_control_flow || has_compile_barrier, &plan.nodes);
         plan.prefill.enabled =
             crate::compiled::prefill_enabled(has_control_flow || has_compile_barrier, &plan.nodes);
         plan.general.enabled = crate::compiled::general_enabled(has_compile_barrier, &plan.nodes);
@@ -1566,10 +1603,12 @@ unsafe fn build_subgraphs(
             let trace_on = crate::trace::tracer().is_enabled();
             for &idx in &order {
                 let node = bnodes[idx];
+                let view = NodeView::new(api, node);
                 let mut mnd = NodeDesc::new(
                     node_op_type(api, node),
                     node_domain(api, node),
                     node_since_version(api, node),
+                    crate::registry::compile_shape_safety(&view),
                 );
                 if trace_on {
                     mnd.node_id = node_id(api, node);
@@ -2183,7 +2222,7 @@ unsafe fn compute_impl(
                         crate::trace::ComputePath::Decode,
                         cache,
                         "",
-                        node_count,
+                        &(*plan_ptr).nodes,
                     );
                     return ptr::null_mut();
                 }
@@ -2216,7 +2255,7 @@ unsafe fn compute_impl(
                         crate::trace::ComputePath::Prefill,
                         cache,
                         &key,
-                        node_count,
+                        &(*plan_ptr).nodes,
                     );
                     return ptr::null_mut();
                 }
@@ -2261,7 +2300,7 @@ unsafe fn compute_impl(
                         crate::trace::ComputePath::General,
                         cache,
                         &key,
-                        node_count,
+                        &(*plan_ptr).nodes,
                     );
                     return ptr::null_mut();
                 }
@@ -2281,7 +2320,7 @@ unsafe fn compute_impl(
                     crate::trace::ComputePath::Eager,
                     crate::trace::CacheState::Na,
                     "",
-                    node_count,
+                    &(*plan_ptr).nodes,
                 );
                 ptr::null_mut()
             }
@@ -2355,6 +2394,7 @@ mod tests {
 #[cfg(test)]
 mod float64_cluster_tests {
     use super::{build_contiguous_clusters, cluster_edges};
+    use crate::registry::CompilePartitionClass::{Eager, ShapeKeyed, Shapeless};
 
     /// Build `(succ, pred)` for a straight chain `0 -> 1 -> ... -> n-1`.
     fn chain(n: usize) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
@@ -2380,8 +2420,9 @@ mod float64_cluster_tests {
         let (succ, pred) = chain(n);
         let supported = vec![true; n];
         let float64 = vec![false, false, true, true, true, true, false, false];
+        let compile_class = vec![Shapeless; n];
 
-        let clusters = cluster_edges(n, &supported, &float64, &succ, &pred);
+        let clusters = cluster_edges(n, &supported, &float64, &compile_class, &succ, &pred);
 
         assert_eq!(
             clusters,
@@ -2395,7 +2436,14 @@ mod float64_cluster_tests {
     fn all_float32_still_forms_one_maximal_cluster() {
         let n = 8;
         let (succ, pred) = chain(n);
-        let clusters = cluster_edges(n, &vec![true; n], &vec![false; n], &succ, &pred);
+        let clusters = cluster_edges(
+            n,
+            &vec![true; n],
+            &vec![false; n],
+            &vec![Shapeless; n],
+            &succ,
+            &pred,
+        );
         assert_eq!(clusters, vec![(0..n).collect::<Vec<_>>()]);
     }
 
@@ -2411,8 +2459,43 @@ mod float64_cluster_tests {
         let n = 4;
         let succ = vec![vec![1, 2], vec![3], vec![3], vec![]];
         let pred = vec![vec![], vec![0], vec![0], vec![1, 2]];
-        let clusters = cluster_edges(n, &vec![true; n], &vec![true; n], &succ, &pred);
+        let clusters = cluster_edges(
+            n,
+            &vec![true; n],
+            &vec![true; n],
+            &vec![Shapeless; n],
+            &succ,
+            &pred,
+        );
         assert_eq!(clusters, vec![vec![0, 1, 2, 3]]);
+    }
+
+    /// A shape-preserving CumSum still needs its own shape-keyed cluster because the linked MLX
+    /// Scan primitive cannot provide `output_shapes` to a shapeless decoder closure.
+    #[test]
+    fn shape_specialized_node_forms_its_own_cluster() {
+        let n = 5;
+        let (succ, pred) = chain(n);
+        let supported = vec![true; n];
+        let float64 = vec![false; n];
+        let compile_class = vec![Shapeless, Shapeless, ShapeKeyed, Shapeless, Shapeless];
+        assert_eq!(
+            cluster_edges(n, &supported, &float64, &compile_class, &succ, &pred,),
+            vec![vec![0, 1], vec![2], vec![3, 4]]
+        );
+    }
+
+    #[test]
+    fn eager_only_node_does_not_merge_with_shape_keyed_neighbours() {
+        let n = 5;
+        let (succ, pred) = chain(n);
+        let supported = vec![true; n];
+        let float64 = vec![false; n];
+        let compile_class = vec![Shapeless, ShapeKeyed, Eager, ShapeKeyed, Shapeless];
+        assert_eq!(
+            cluster_edges(n, &supported, &float64, &compile_class, &succ, &pred),
+            vec![vec![0], vec![1], vec![2], vec![3], vec![4]]
+        );
     }
 
     /// The contiguous-cluster fallback (used for the mixed vision/quant export) applies the same
@@ -2422,8 +2505,19 @@ mod float64_cluster_tests {
         let supported = vec![true, true, true, true, true];
         let float64 = vec![false, false, true, true, false];
         assert_eq!(
-            build_contiguous_clusters(&supported, &float64),
+            build_contiguous_clusters(&supported, &float64, &vec![Shapeless; supported.len()]),
             vec![vec![0, 1], vec![2, 3], vec![4]]
+        );
+    }
+
+    #[test]
+    fn contiguous_clusters_split_on_shape_specialization_boundary() {
+        let supported = vec![true; 5];
+        let float64 = vec![false; 5];
+        let compile_class = vec![Shapeless, ShapeKeyed, ShapeKeyed, Shapeless, Shapeless];
+        assert_eq!(
+            build_contiguous_clusters(&supported, &float64, &compile_class),
+            vec![vec![0], vec![1, 2], vec![3, 4]]
         );
     }
 }
@@ -2434,7 +2528,12 @@ mod float64_plan_tests {
     use crate::sys::ort;
 
     fn node_with_output(otype: ort::ONNXTensorElementDataType) -> NodeDesc {
-        let mut node = NodeDesc::new("Elu".to_string(), String::new(), 6);
+        let mut node = NodeDesc::new(
+            "Elu".to_string(),
+            String::new(),
+            6,
+            crate::registry::CompileShapeSafety::Shapeless,
+        );
         node.outputs.push(OutRef {
             name: "y".to_string(),
             external: true,

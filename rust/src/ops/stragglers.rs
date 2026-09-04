@@ -136,7 +136,7 @@ fn mean_variance_normalization_claim(node: &NodeView) -> ClaimResult {
 }
 
 pub fn register(registry: &mut OpRegistry) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "Dropout",
         min_opset: K_ANY_OPSET,
@@ -144,7 +144,7 @@ pub fn register(registry: &mut OpRegistry) {
         handler: dropout_op,
         claim: dropout_claim,
     });
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "MeanVarianceNormalization",
         min_opset: K_ANY_OPSET,

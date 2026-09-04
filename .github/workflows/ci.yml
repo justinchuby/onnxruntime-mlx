@@ -77,6 +77,12 @@ jobs:
           ORT_INCLUDE_DIR="$ORT_HOME/include" RUSTFLAGS="-D warnings" cargo build --release
           test -f target/release/libonnxruntime_mlx_ep.dylib
 
+      - name: Rust library unit tests
+        run: |
+          cd rust
+          export DYLD_LIBRARY_PATH="$ORT_HOME/lib"
+          ORT_INCLUDE_DIR="$ORT_HOME/include" RUSTFLAGS="-D warnings" cargo test --release --lib
+
       - name: Op-correctness tests (pytest, MLX vs ORT CPU)
         run: |
           export ONNXRUNTIME_MLX_EP_LIB="$PWD/rust/target/release/libonnxruntime_mlx_ep.dylib"

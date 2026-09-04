@@ -128,7 +128,7 @@ fn image_decoder_claim(node: &NodeView) -> ClaimResult {
 }
 
 pub fn register(registry: &mut OpRegistry) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "ImageDecoder",
         min_opset: 20,

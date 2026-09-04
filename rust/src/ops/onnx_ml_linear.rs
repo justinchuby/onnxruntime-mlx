@@ -863,10 +863,9 @@ pub fn register(registry: &mut OpRegistry) {
             linear_regressor_op,
             linear_regressor_claim,
         ),
-        ("SVMClassifier", svm_classifier_op, svm_classifier_claim),
         ("SVMRegressor", svm_regressor_op, svm_regressor_claim),
     ] {
-        registry.register(OpRegistration {
+        registry.register_shapeless(OpRegistration {
             domain: "ai.onnx.ml",
             op_type,
             min_opset: 1,
@@ -875,4 +874,15 @@ pub fn register(registry: &mut OpRegistry) {
             claim,
         });
     }
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "ai.onnx.ml",
+            op_type: "SVMClassifier",
+            min_opset: 1,
+            max_opset: K_ANY_OPSET,
+            handler: svm_classifier_op,
+            claim: svm_classifier_claim,
+        },
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
 }

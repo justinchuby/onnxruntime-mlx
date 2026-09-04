@@ -2469,13 +2469,13 @@ fn where_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset: K_ANY_OPSET,
@@ -2485,72 +2485,118 @@ fn reg(
     });
 }
 
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
-    reg(registry, "Gather", gather_op, gather_like_claim);
-    reg(registry, "GatherND", gathernd_op, gathernd_claim);
-    reg(
+    shapeless(registry, "Gather", gather_op, gather_like_claim);
+    shapeless(registry, "GatherND", gathernd_op, gathernd_claim);
+    shapeless(
         registry,
         "GatherElements",
         gather_elements_op,
         gather_like_claim,
     );
-    reg(
+    shape_keyed(
         registry,
         "ScatterElements",
         scatter_elements_op,
         scatter_elements_claim,
+        crate::registry::MLX_SCATTER_SHAPE_REASON,
     );
-    reg(
+    shape_keyed(
         registry,
         "CenterCropPad",
         center_crop_pad_op,
         center_crop_pad_claim,
+        "emits MLX Slice and Pad, which lack Primitive::output_shapes in MLX 0.32.1",
     );
-    reg(registry, "Compress", compress_op, compress_claim);
-    reg(
+    shapeless(registry, "Compress", compress_op, compress_claim);
+    shapeless(
         registry,
         "DepthToSpace",
         depth_to_space_op,
         depth_to_space_claim,
     );
-    reg(registry, "EyeLike", eye_like_op, eye_like_claim);
-    reg(
+    shapeless(registry, "EyeLike", eye_like_op, eye_like_claim);
+    shapeless(
         registry,
         "ReverseSequence",
         reverse_sequence_op,
         reverse_sequence_claim,
     );
-    reg(registry, "ScatterND", scatter_nd_op, scatter_nd_claim);
-    reg(
+    shape_keyed(
+        registry,
+        "ScatterND",
+        scatter_nd_op,
+        scatter_nd_claim,
+        crate::registry::MLX_SCATTER_SHAPE_REASON,
+    );
+    shapeless(
         registry,
         "SpaceToDepth",
         space_to_depth_op,
         space_to_depth_claim,
     );
-    reg(registry, "Concat", concat_op, concat_claim);
-    reg(registry, "Reshape", reshape_op, reshape_claim);
-    reg(registry, "Transpose", transpose_op, transpose_claim);
-    reg(registry, "Unsqueeze", unsqueeze_op, unsqueeze_claim);
-    reg(registry, "Squeeze", squeeze_op, squeeze_claim);
-    reg(registry, "Flatten", flatten_op, flatten_claim);
-    reg(registry, "Expand", expand_op, expand_claim);
-    reg(registry, "Slice", slice_op, slice_claim);
-    reg(registry, "Split", split_op, split_claim);
-    reg(registry, "Tile", tile_op, tile_claim);
-    reg(registry, "Pad", pad_op, pad_claim);
-    reg(registry, "Identity", identity_op, identity_claim);
-    reg(registry, "Range", range_op, range_claim);
-    reg(registry, "Shape", shape_op, shape_claim);
-    reg(registry, "Size", size_op, size_claim);
-    reg(
+    shapeless(registry, "Concat", concat_op, concat_claim);
+    shapeless(registry, "Reshape", reshape_op, reshape_claim);
+    shapeless(registry, "Transpose", transpose_op, transpose_claim);
+    shapeless(registry, "Unsqueeze", unsqueeze_op, unsqueeze_claim);
+    shapeless(registry, "Squeeze", squeeze_op, squeeze_claim);
+    shapeless(registry, "Flatten", flatten_op, flatten_claim);
+    shapeless(registry, "Expand", expand_op, expand_claim);
+    shape_keyed(
+        registry,
+        "Slice",
+        slice_op,
+        slice_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
+    shape_keyed(
+        registry,
+        "Split",
+        split_op,
+        split_claim,
+        crate::registry::MLX_SPLIT_SHAPE_REASON,
+    );
+    shapeless(registry, "Tile", tile_op, tile_claim);
+    shape_keyed(
+        registry,
+        "Pad",
+        pad_op,
+        pad_claim,
+        crate::registry::MLX_PAD_SHAPE_REASON,
+    );
+    shapeless(registry, "Identity", identity_op, identity_claim);
+    shapeless(registry, "Range", range_op, range_claim);
+    shapeless(registry, "Shape", shape_op, shape_claim);
+    shapeless(registry, "Size", size_op, size_claim);
+    shapeless(
         registry,
         "ConstantOfShape",
         constant_of_shape_op,
         constant_of_shape_claim,
     );
-    reg(registry, "Where", where_handler, where_claim);
-    reg(registry, "Resize", resize_op, resize_claim);
-    registry.register(OpRegistration {
+    shapeless(registry, "Where", where_handler, where_claim);
+    shapeless(registry, "Resize", resize_op, resize_claim);
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "Upsample",
         min_opset: 9,

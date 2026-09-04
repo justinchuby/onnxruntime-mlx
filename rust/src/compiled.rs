@@ -37,6 +37,7 @@ use crate::engine::{
     dim_i32, is_separate_qkv_attention, mlx_dtype_from_onnx, read_ctx_input_raw, rope_row_key,
 };
 use crate::mlx::{self, Array, Closure, VectorArray};
+use crate::registry::CompileShapeSafety;
 use crate::sys::mlx as mlxsys;
 use crate::sys::ort;
 
@@ -48,6 +49,29 @@ pub fn compile_enabled(has_control_flow: bool) -> bool {
         .map(|v| v != "0" && !v.is_empty())
         .unwrap_or(false);
     !has_control_flow && !killed
+}
+
+fn node_compile_shape_safety(node: &NodeDesc) -> CompileShapeSafety {
+    node.compile_shape_safety
+}
+
+fn compile_shape_mode_supported(nodes: &[NodeDesc], shapeless: bool) -> bool {
+    nodes.iter().all(|node| {
+        (if shapeless {
+            node_compile_shape_safety(node).allows_shapeless()
+        } else {
+            node_compile_shape_safety(node).allows_shape_keyed()
+        }) && node
+            .subgraphs
+            .iter()
+            .all(|subgraph| compile_shape_mode_supported(&subgraph.nodes, shapeless))
+    })
+}
+
+/// Decode uses `mlx_compile(..., shapeless=true)`, so plans containing a primitive without MLX
+/// output-shape inference must use their shape-keyed/eager route instead.
+pub fn decode_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
+    compile_enabled(has_control_flow) && compile_shape_mode_supported(nodes, true)
 }
 
 /// Op types whose subgraphs keep their existing (eager / compiled-decode) routes because they are
@@ -82,14 +106,17 @@ fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
 /// containing an op that is unsafe to trace (see [`is_general_compile_unsafe`]). An
 /// extra kill-switch `ONNXRUNTIME_EP_MLX_NO_GENERAL_COMPILE` forces eager for A/B numerical validation without
 /// touching the decode path.
-/// A node that would read a DATA-DEPENDENT runtime shape/scalar (a reshape/expand/slice/range target
-/// that is neither constant nor shape-const). Reading it needs a mid-graph eval that is illegal in a
-/// shapeless `mlx_compile` trace, so such a subgraph must run eager. Shape-const runtime targets
-/// (derived from `Shape`/`Size`) are compile-safe and do NOT trip this.
-fn reads_data_dependent_shape(n: &NodeDesc) -> bool {
+/// A node that would read a DATA-DEPENDENT runtime shape/scalar while translating the graph.
+///
+/// Shape-keyed MLX caches observe tensor shapes/dtypes, not tensor values. A direct runtime
+/// Reshape/Expand/Slice/Range parameter or CumSum axis would otherwise be read from the live
+/// `OrtKernelContext` during the first trace and silently baked into every later call with the same
+/// input shapes. Initializers and shape-const intermediates (derived from `Shape`/`Size`) are safe:
+/// their value is fixed, or changes exactly when the shape key changes.
+fn reads_data_dependent_parameter(n: &NodeDesc) -> bool {
     if n.subgraphs
         .iter()
-        .any(|sg| sg.nodes.iter().any(reads_data_dependent_shape))
+        .any(|sg| sg.nodes.iter().any(reads_data_dependent_parameter))
     {
         return true;
     }
@@ -97,12 +124,13 @@ fn reads_data_dependent_shape(n: &NodeDesc) -> bool {
         "Reshape" | "Expand" => &[1],
         "Slice" => &[1, 2, 3, 4],
         "Range" => &[0, 1, 2],
+        "CumSum" => &[1],
         _ => return false,
     };
     idx.iter().any(|&i| {
-        n.inputs
-            .get(i)
-            .is_some_and(|tr| matches!(tr.source, Src::Intermediate) && !tr.shape_const)
+        n.inputs.get(i).is_some_and(|tr| {
+            !matches!(tr.source, Src::Initializer | Src::Absent) && !tr.constant && !tr.shape_const
+        })
     })
 }
 
@@ -118,7 +146,8 @@ pub fn general_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     }
     !nodes
         .iter()
-        .any(|n| is_general_compile_unsafe(n) || reads_data_dependent_shape(n))
+        .any(|n| is_general_compile_unsafe(n) || reads_data_dependent_parameter(n))
+        && compile_shape_mode_supported(nodes, false)
 }
 
 fn host_scalar_i64(
@@ -262,10 +291,9 @@ pub fn prefill_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     {
         return false;
     }
-    nodes.iter().any(|n| {
-        n.op_type == "GroupQueryAttention"
-            && n.ints.get("sliding_window_cache").copied().unwrap_or(0) == 0
-    })
+    compile_shape_mode_supported(nodes, false)
+        && !nodes.iter().any(reads_data_dependent_parameter)
+        && nodes.iter().any(|n| n.op_type == "GroupQueryAttention")
 }
 
 /// Query sequence length S = trailing dim of the `input_ids` dynamic ctx input (decode => 1, prefill
@@ -837,13 +865,13 @@ fn build_closure(
     kctx: *mut ort::OrtKernelContext,
     stream: mlxsys::mlx_stream,
 ) -> bool {
-    if unsafe { &*plan_ptr }.nodes.iter().any(|n| {
-        n.op_type == "GroupQueryAttention"
-            && n.ints.get("sliding_window_cache").copied().unwrap_or(0) != 0
-    }) {
+    let cfg = slot.get(unsafe { &*plan_ptr }).config;
+    if !compile_shape_mode_supported(
+        &unsafe { &*plan_ptr }.nodes,
+        cfg.shape_mode == ShapeMode::Shapeless,
+    ) {
         return true;
     }
-    let cfg = slot.get(unsafe { &*plan_ptr }).config;
 
     let mut dyn_inputs: Vec<DynInput> = Vec::new();
     let mut ext_outputs: Vec<OutRef> = Vec::new();
@@ -1200,4 +1228,149 @@ fn trace_body(
         *out = res_raw;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod shape_inference_tests {
+    use super::*;
+    use crate::engine::TensorRef;
+
+    fn input(name: &str, source: Src) -> TensorRef {
+        TensorRef {
+            name: name.to_string(),
+            source,
+            ctx_index: 0,
+            constant: false,
+            shape_const: false,
+            init: None,
+        }
+    }
+
+    fn cumsum(axis_source: Src) -> NodeDesc {
+        let mut node = NodeDesc::new(
+            "CumSum".to_string(),
+            String::new(),
+            14,
+            CompileShapeSafety::ShapeKeyedOnly {
+                reason: crate::registry::MLX_SCAN_SHAPE_REASON,
+            },
+        );
+        node.inputs = vec![input("data", Src::CtxInput), input("axis", axis_source)];
+        node
+    }
+
+    #[test]
+    fn missing_output_shape_emitters_require_shape_specialized_compile() {
+        for node in [
+            NodeDesc::new(
+                "CumSum".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SCAN_SHAPE_REASON,
+                },
+            ),
+            NodeDesc::new(
+                "Slice".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SLICE_SHAPE_REASON,
+                },
+            ),
+            NodeDesc::new(
+                "LinearAttention".to_string(),
+                "com.microsoft".to_string(),
+                1,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: "emits MLX Slice, Pad, and Scan",
+                },
+            ),
+            NodeDesc::new(
+                "QMoE".to_string(),
+                "com.microsoft".to_string(),
+                1,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SLICE_SHAPE_REASON,
+                },
+            ),
+        ] {
+            assert!(!node_compile_shape_safety(&node).allows_shapeless());
+        }
+        assert!(
+            node_compile_shape_safety(&NodeDesc::new(
+                "Add".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::Shapeless,
+            ))
+            .allows_shapeless()
+        );
+        assert!(compile_shape_mode_supported(
+            &[NodeDesc::new(
+                "CumSum".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SCAN_SHAPE_REASON,
+                },
+            )],
+            false
+        ));
+        assert!(!compile_shape_mode_supported(
+            &[NodeDesc::new(
+                "CumSum".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SCAN_SHAPE_REASON,
+                },
+            )],
+            true
+        ));
+        let eager_only_gqa = NodeDesc::new(
+            "GroupQueryAttention".to_string(),
+            "com.microsoft".to_string(),
+            1,
+            CompileShapeSafety::EagerOnly {
+                reason: "attention-bias form",
+            },
+        );
+        assert!(!compile_shape_mode_supported(
+            std::slice::from_ref(&eager_only_gqa),
+            false
+        ));
+        assert!(!compile_shape_mode_supported(&[eager_only_gqa], true));
+    }
+
+    #[test]
+    fn runtime_cumsum_axis_is_not_a_shape_key() {
+        assert!(
+            reads_data_dependent_parameter(&cumsum(Src::CtxInput)),
+            "a runtime axis value must not be baked into a shape-keyed closure"
+        );
+        assert!(
+            !reads_data_dependent_parameter(&cumsum(Src::Initializer)),
+            "an initializer axis is compile-time data"
+        );
+    }
+
+    #[test]
+    fn direct_runtime_shape_parameter_is_data_dependent() {
+        let mut reshape = NodeDesc::new(
+            "Reshape".to_string(),
+            String::new(),
+            14,
+            CompileShapeSafety::Shapeless,
+        );
+        reshape.inputs = vec![input("data", Src::CtxInput), input("shape", Src::CtxInput)];
+        assert!(reads_data_dependent_parameter(&reshape));
+
+        reshape.inputs[1].source = Src::Intermediate;
+        reshape.inputs[1].shape_const = true;
+        assert!(
+            !reads_data_dependent_parameter(&reshape),
+            "Shape/Size-derived parameters change with the shape-keyed cache key"
+        );
+    }
 }

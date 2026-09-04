@@ -316,9 +316,23 @@ fn cumsum_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
     let reverse = n.ints.get("reverse").copied().unwrap_or(0) != 0;
     let inclusive = n.ints.get("exclusive").copied().unwrap_or(0) == 0;
     let axis = axis as i32;
-    let out = ctx.emit(|res, s| unsafe { mlx::mlx_cumsum(res, x, axis, reverse, inclusive, s) })?;
+    let out = ctx.cumsum(x, axis, reverse, inclusive)?;
     ctx.bind(&n.outputs[0], out);
     Ok(())
+}
+
+/// ONNX CumSum changes values, never extents: axis/exclusive/reverse do not participate in shape
+/// inference, and symbolic dimensions pass through unchanged.
+fn infer_cumsum_output_shape(data_shape: &[i64]) -> Vec<i64> {
+    data_shape.to_vec()
+}
+
+fn shape_metadata_compatible(expected: &[i64], actual: &[i64]) -> bool {
+    expected.len() == actual.len()
+        && expected
+            .iter()
+            .zip(actual)
+            .all(|(&want, &got)| want < 0 || got < 0 || want == got)
 }
 
 // ---- CumProd -----------------------------------------------------------------------------------
@@ -658,17 +672,47 @@ fn cumsum_claim(node: &NodeView) -> ClaimResult {
         crate::registry::ort_dtype_name(x.dtype),
         crate::registry::ort_dtype_name(out.dtype)
     );
+    let expected_shape = infer_cumsum_output_shape(&x.shape);
+    require!(
+        shape_metadata_compatible(&expected_shape, &out.shape),
+        "output shape must equal the data input shape, got {:?} -> {:?}",
+        x.shape,
+        out.shape
+    );
     require!(
         axis.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
             || axis.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64,
         "axis input must be int32 or int64, got {}",
         crate::registry::ort_dtype_name(axis.dtype)
     );
+    // ONNX specifies a scalar. ORT also accepts a one-element vector, so retain that compatibility
+    // form while keeping it distinct in the regression suite.
     require!(
         axis.shape.is_empty() || (axis.shape.len() == 1 && axis.shape[0] == 1),
         "axis input must be scalar or shape [1], got {:?}",
         axis.shape
     );
+    require!(
+        node.input_is_host_readable(1),
+        "axis must be a graph input or constant initializer readable at execution time"
+    );
+    if let Some(axis_values) = node.read_const_ints_any(1) {
+        require!(
+            axis_values.len() == 1,
+            "axis initializer must contain exactly one value"
+        );
+        let raw_axis = axis_values[0];
+        let normalized = if raw_axis < 0 {
+            raw_axis + x.shape.len() as i64
+        } else {
+            raw_axis
+        };
+        require!(
+            (0..x.shape.len() as i64).contains(&normalized),
+            "axis initializer {raw_axis} is out of range for rank {}",
+            x.shape.len()
+        );
+    }
     let exclusive = node.int_attr("exclusive", 0);
     let reverse = node.int_attr("reverse", 0);
     require!(
@@ -880,14 +924,14 @@ fn topk_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     min_opset: i32,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset,
@@ -897,81 +941,124 @@ fn reg(
     });
 }
 
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    min_opset: i32,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        crate::registry::MLX_SCAN_SHAPE_REASON,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
-    reg(
+    shapeless(
         registry,
         "ReduceSum",
         K_ANY_OPSET,
         reduce_sum_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceMax",
         K_ANY_OPSET,
         reduce_max_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceMean",
         K_ANY_OPSET,
         reduce_mean_op,
         reduce_float_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceMin",
         K_ANY_OPSET,
         reduce_min_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceProd",
         K_ANY_OPSET,
         reduce_prod_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceSumSquare",
         K_ANY_OPSET,
         reduce_sumsquare_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceL1",
         K_ANY_OPSET,
         reduce_l1_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceL2",
         K_ANY_OPSET,
         reduce_l2_op,
         reduce_float_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceLogSum",
         K_ANY_OPSET,
         reduce_logsum_op,
         reduce_float_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceLogSumExp",
         K_ANY_OPSET,
         reduce_logsumexp_op,
         reduce_float_claim,
     );
-    reg(registry, "ArgMax", K_ANY_OPSET, argmax_op, argminmax_claim);
-    reg(registry, "ArgMin", K_ANY_OPSET, argmin_op, argminmax_claim);
-    reg(registry, "CumSum", 11, cumsum_op, cumsum_claim);
-    reg(registry, "CumProd", 26, cumprod_op, cumprod_claim);
-    reg(registry, "Hardmax", K_ANY_OPSET, hardmax_op, hardmax_claim);
-    reg(registry, "TopK", 10, topk_op, topk_claim);
+    shapeless(registry, "ArgMax", K_ANY_OPSET, argmax_op, argminmax_claim);
+    shapeless(registry, "ArgMin", K_ANY_OPSET, argmin_op, argminmax_claim);
+    shape_keyed(registry, "CumSum", 11, cumsum_op, cumsum_claim);
+    shapeless(registry, "CumProd", 26, cumprod_op, cumprod_claim);
+    shapeless(registry, "Hardmax", K_ANY_OPSET, hardmax_op, hardmax_claim);
+    shapeless(registry, "TopK", 10, topk_op, topk_claim);
+}
+
+#[cfg(test)]
+mod cumsum_shape_tests {
+    use super::{infer_cumsum_output_shape, shape_metadata_compatible};
+
+    #[test]
+    fn output_shape_is_the_data_shape_for_static_and_dynamic_dims() {
+        assert_eq!(infer_cumsum_output_shape(&[2, 3, 4]), vec![2, 3, 4]);
+        assert_eq!(
+            infer_cumsum_output_shape(&[-1, 1, -1]),
+            vec![-1, 1, -1],
+            "symbolic extents must be preserved without reading axis data"
+        );
+    }
+
+    #[test]
+    fn output_metadata_accepts_unknown_extents_but_not_rank_or_known_dim_changes() {
+        assert!(shape_metadata_compatible(&[-1, 3], &[2, 3]));
+        assert!(shape_metadata_compatible(&[2, 3], &[-1, 3]));
+        assert!(!shape_metadata_compatible(&[2, 3], &[2, 4]));
+        assert!(!shape_metadata_compatible(&[2, 3], &[6]));
+    }
 }

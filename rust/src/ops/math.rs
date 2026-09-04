@@ -730,13 +730,13 @@ fn clip_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset: K_ANY_OPSET,
@@ -746,14 +746,14 @@ fn reg(
     });
 }
 
-fn reg_since(
+fn shapeless_since(
     registry: &mut OpRegistry,
     op_type: &'static str,
     min_opset: i32,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset,
@@ -763,14 +763,14 @@ fn reg_since(
     });
 }
 
-fn reg_dom(
+fn shapeless_dom(
     registry: &mut OpRegistry,
     domain: &'static str,
     op_type: &'static str,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain,
         op_type,
         min_opset: K_ANY_OPSET,
@@ -781,66 +781,66 @@ fn reg_dom(
 }
 
 pub fn register(registry: &mut OpRegistry) {
-    reg(registry, "Div", div_op, div_claim);
-    reg(registry, "Pow", pow_op, pow_claim);
-    reg(registry, "Relu", relu_op, relu_claim);
-    reg(registry, "Tanh", tanh_op, tanh_claim);
-    reg(registry, "Exp", exp_op, float_unary_claim);
-    reg(registry, "Log", log_op, fp64_unary_claim);
-    reg(registry, "Sqrt", sqrt_op, fp64_unary_claim);
-    reg(registry, "Neg", neg_op, signed_numeric_unary_claim);
-    reg(registry, "Abs", abs_op, signed_numeric_unary_claim);
+    shapeless(registry, "Div", div_op, div_claim);
+    shapeless(registry, "Pow", pow_op, pow_claim);
+    shapeless(registry, "Relu", relu_op, relu_claim);
+    shapeless(registry, "Tanh", tanh_op, tanh_claim);
+    shapeless(registry, "Exp", exp_op, float_unary_claim);
+    shapeless(registry, "Log", log_op, fp64_unary_claim);
+    shapeless(registry, "Sqrt", sqrt_op, fp64_unary_claim);
+    shapeless(registry, "Neg", neg_op, signed_numeric_unary_claim);
+    shapeless(registry, "Abs", abs_op, signed_numeric_unary_claim);
 
     // Unary math / rounding.
-    reg(registry, "Sign", sign_op, signed_numeric_unary_claim);
-    reg(registry, "Reciprocal", reciprocal_op, fp64_unary_claim);
-    reg(registry, "Ceil", ceil_op, fp64_unary_claim);
-    reg(registry, "Floor", floor_op, fp64_unary_claim);
-    reg(registry, "Round", round_op, fp64_unary_claim);
-    reg(registry, "Erf", erf_op, float_unary_claim);
+    shapeless(registry, "Sign", sign_op, signed_numeric_unary_claim);
+    shapeless(registry, "Reciprocal", reciprocal_op, fp64_unary_claim);
+    shapeless(registry, "Ceil", ceil_op, fp64_unary_claim);
+    shapeless(registry, "Floor", floor_op, fp64_unary_claim);
+    shapeless(registry, "Round", round_op, fp64_unary_claim);
+    shapeless(registry, "Erf", erf_op, float_unary_claim);
 
     // Trigonometric / hyperbolic.
-    reg(registry, "Sin", sin_op, float_unary_claim);
-    reg(registry, "Cos", cos_op, float_unary_claim);
-    reg(registry, "Tan", tan_op, float_unary_claim);
-    reg(registry, "Sinh", sinh_op, float_unary_claim);
-    reg(registry, "Cosh", cosh_op, float_unary_claim);
-    reg(registry, "Asin", asin_op, float_unary_claim);
-    reg(registry, "Acos", acos_op, float_unary_claim);
-    reg(registry, "Atan", atan_op, float_unary_claim);
-    reg_since(registry, "Asinh", 9, asinh_op, float_unary_claim);
-    reg_since(registry, "Acosh", 9, acosh_op, float_unary_claim);
-    reg_since(registry, "Atanh", 9, atanh_op, float_unary_claim);
+    shapeless(registry, "Sin", sin_op, float_unary_claim);
+    shapeless(registry, "Cos", cos_op, float_unary_claim);
+    shapeless(registry, "Tan", tan_op, float_unary_claim);
+    shapeless(registry, "Sinh", sinh_op, float_unary_claim);
+    shapeless(registry, "Cosh", cosh_op, float_unary_claim);
+    shapeless(registry, "Asin", asin_op, float_unary_claim);
+    shapeless(registry, "Acos", acos_op, float_unary_claim);
+    shapeless(registry, "Atan", atan_op, float_unary_claim);
+    shapeless_since(registry, "Asinh", 9, asinh_op, float_unary_claim);
+    shapeless_since(registry, "Acosh", 9, acosh_op, float_unary_claim);
+    shapeless_since(registry, "Atanh", 9, atanh_op, float_unary_claim);
 
     // Activations (unary + attrs).
-    reg(registry, "LeakyRelu", leaky_relu_op, fp64_unary_claim);
-    reg(registry, "Elu", elu_op, fp64_unary_claim);
-    reg(registry, "Selu", selu_op, fp64_unary_claim);
-    reg(registry, "Celu", celu_op, fp64_unary_claim);
-    reg(registry, "HardSigmoid", hard_sigmoid_op, fp64_unary_claim);
-    reg_since(registry, "HardSwish", 14, hard_swish_op, fp64_unary_claim);
-    reg_since(registry, "Mish", 18, mish_op, float_unary_claim);
-    reg_since(registry, "PRelu", 1, prelu_op, prelu_claim);
-    reg_since(registry, "Shrink", 9, shrink_op, shrink_claim);
-    reg(registry, "Swish", swish_op, float_unary_claim);
-    reg(
+    shapeless(registry, "LeakyRelu", leaky_relu_op, fp64_unary_claim);
+    shapeless(registry, "Elu", elu_op, fp64_unary_claim);
+    shapeless(registry, "Selu", selu_op, fp64_unary_claim);
+    shapeless(registry, "Celu", celu_op, fp64_unary_claim);
+    shapeless(registry, "HardSigmoid", hard_sigmoid_op, fp64_unary_claim);
+    shapeless_since(registry, "HardSwish", 14, hard_swish_op, fp64_unary_claim);
+    shapeless_since(registry, "Mish", 18, mish_op, float_unary_claim);
+    shapeless_since(registry, "PRelu", 1, prelu_op, prelu_claim);
+    shapeless_since(registry, "Shrink", 9, shrink_op, shrink_claim);
+    shapeless(registry, "Swish", swish_op, float_unary_claim);
+    shapeless(
         registry,
         "ThresholdedRelu",
         thresholded_relu_op,
         fp64_unary_claim,
     );
-    reg(registry, "Softplus", softplus_op, float_unary_claim);
-    reg(registry, "Softsign", softsign_op, float_unary_claim);
-    reg(registry, "Gelu", gelu_op, float_unary_claim);
+    shapeless(registry, "Softplus", softplus_op, float_unary_claim);
+    shapeless(registry, "Softsign", softsign_op, float_unary_claim);
+    shapeless(registry, "Gelu", gelu_op, float_unary_claim);
     // Gelu also ships in the com.microsoft fused-activation domain.
-    reg_dom(
+    shapeless_dom(
         registry,
         "com.microsoft",
         "Gelu",
         gelu_op,
         float_unary_claim,
     );
-    reg_dom(
+    shapeless_dom(
         registry,
         "com.microsoft",
         "BiasGelu",
@@ -849,5 +849,5 @@ pub fn register(registry: &mut OpRegistry) {
     );
 
     // Clip (min/max as optional inputs or opset<11 attrs).
-    reg(registry, "Clip", clip_op, clip_claim);
+    shapeless(registry, "Clip", clip_op, clip_claim);
 }

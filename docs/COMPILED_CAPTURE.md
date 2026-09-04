@@ -53,10 +53,43 @@ trace/apply/eval error). The compiled path never crashes and never diverges (`co
 | **`Shapeless`** | The compiled closure is shape-*agnostic*: a dimension may **grow/change every call with zero retrace**. One closure serves every step. | **decode** (growing KV length costs one compile ever, not one per token) |
 | **`ShapeKeyed`** | `mlx_compile` keys on input shapes/dtypes and **transparently retraces** (re-invokes the thunk) when they change, so a new shape recompiles rather than miscomputes. | **general** static-shape subgraphs; **prefill** (varying query length `S`) |
 
-Shapeless `mlx_compile` **cannot shape-infer a `Slice`** and cannot eval mid-trace, so a shapeless
-subgraph must contain neither. ShapeKeyed can, but pays one recompile per distinct `(shape, dtype)` tuple
-— cheap when the shape set is small and repeating (prefill prompt lengths, CNN batch sizes),
-pathological if unbounded.
+MLX 0.32's shapeless `mlx_compile` cannot shape-infer several primitives and cannot eval mid-trace.
+Every registered lowering therefore makes an explicit choice at its registration boundary:
+
+- `register_shapeless` is an affirmative promise that its **shapeless-specific** trace emits only
+  primitives implementing `Primitive::output_shapes`;
+- `register_shape_keyed` carries the exact missing-primitive reason;
+- `register_shape_classified` derives `Shapeless`, `ShapeKeyedOnly`, or the stricter `EagerOnly`
+  from concrete node properties (used by quant handlers and per-form GroupQueryAttention).
+
+There is no unclassified registration API. `NodeDesc` stores the resulting decision during Compile,
+so decoder partition colouring and every compiled execution route consume the same proof. Eager MLX
+execution is unaffected.
+
+The MLX 0.32.1 audit found these missing-`output_shapes` primitives in current lowerings:
+
+| MLX primitive | Registered lowerings that can emit it |
+|---|---|
+| `Slice` | ONNX `Slice`; QMoE; CausalConvWithState; LinearAttention; Scan; DeformConv; LRN; RNN/GRU/LSTM; DFT; `ai.onnx.ml` SVMClassifier/FeatureVectorizer; `com.microsoft` Attention/PackedMultiHeadAttention/RotaryEmbedding/MRotaryEmbedding/PagedAttention; sliding-window and attention-bias GroupQueryAttention; GridSample/RoiAlign/MaxRoiPool; conditional block-quantized matmul, MatMulNBits zero-point trim, and GatherBlockQuantized zero-point trim forms |
+| `Scan` | CumSum; internal LinearAttention cumulative gating |
+| `AsStrided` | AveragePool/MaxPool/LpPool; STFT |
+| `Pad` | AveragePool/MaxPool/LpPool; LRN; CenterCropPad; ONNX Pad; LinearAttention; conditional unaligned MatMulNBits |
+| `RandomBits` | RandomNormal/RandomNormalLike/RandomUniform/RandomUniformLike/Bernoulli/Multinomial |
+| `Scatter` | Scatter/ScatterElements/ScatterND; PagedAttention; Col2Im; MaxUnpool |
+| `Split` | ONNX Split |
+| `View` | BitCast |
+| `FFT` | DFT/STFT |
+| `CustomKernel` | the fused selective-scan branch inside ONNX Scan |
+
+`GroupQueryAttention` is classified per node. Claimable non-sliding forms without attention bias use
+the slice-free shapeless decode configuration (data-fed RoPE rows plus shape-preserving cache
+updates). Sliding-window and attention-bias forms emit `Slice` and remain `EagerOnly`; unsupported
+forms are also denied compilation conservatively.
+
+In decoder graphs, shapeless, shape-keyed-only, and eager-only nodes receive distinct partition
+colours. Stricter nodes remain claimed by MLX without disabling a more capable neighbouring
+partition. ShapeKeyed pays one recompile per distinct `(shape, dtype)` tuple — cheap when the shape
+set is small and repeating (prefill prompt lengths, CNN batch sizes), pathological if unbounded.
 
 ### Two distinct senses of "dynamic"
 
@@ -87,11 +120,12 @@ violates one falls back to eager (or, for attention, to the growing-concat route
 1. **No control flow** (`If` / `Loop` / `Scan`). The graph *structure* would depend on runtime data
    (`compile_enabled`, `compiled.rs:46-51`).
 
-2. **No data-dependent shapes.** `Reshape` / `Expand` target (input 1), `Slice` starts/ends/axes/steps
-   (1–4), and `Range` bounds (0–2) must be **constant or shape-const** (derived from `Shape`/`Size`),
-   never a plain runtime intermediate (`reads_data_dependent_shape`, `compiled.rs:84-96`). Shape-const is
-   OK because it resolves to a compile-time integer; a data-dependent value forces a mid-trace eval that
-   crashes shapeless compile. (This is exactly why runtime-bounded `Range` is deferred — see
+2. **No data-dependent translation parameters.** `Reshape` / `Expand` target (input 1), `Slice`
+   starts/ends/axes/steps (1–4), `Range` bounds (0–2), and the `CumSum` axis (1) must be **constant or
+   shape-const** (derived from `Shape`/`Size`), never plain runtime data
+   (`reads_data_dependent_parameter`). Shape-const is OK because it changes with the shape-keyed cache
+   key; an ordinary runtime tensor value does not participate in that key and would otherwise be
+   silently baked into later calls. (This is exactly why runtime-bounded `Range` is deferred — see
    `OP_ARCHITECTURE`/README Range note.)
 
 3. **No host-computed / data-dependent-output-shape ops** — `Det`, `NonZero`, `Unique` GPU-eval their

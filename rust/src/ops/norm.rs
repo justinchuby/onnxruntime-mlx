@@ -857,7 +857,7 @@ fn lrn_claim(node: &NodeView) -> ClaimResult {
 // ---- registration ------------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     domain: &'static str,
     op_type: &'static str,
@@ -865,7 +865,7 @@ fn reg(
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain,
         op_type,
         min_opset,
@@ -875,8 +875,31 @@ fn reg(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    domain: &'static str,
+    op_type: &'static str,
+    min_opset: i32,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain,
+            op_type,
+            min_opset,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
 pub fn register_norm(registry: &mut OpRegistry) {
-    reg(
+    shapeless(
         registry,
         "",
         "InstanceNormalization",
@@ -885,7 +908,7 @@ pub fn register_norm(registry: &mut OpRegistry) {
         instance_norm_claim,
     );
     // RMSNormalization entered ai.onnx at opset 23.
-    reg(
+    shapeless(
         registry,
         "",
         "RMSNormalization",
@@ -894,7 +917,7 @@ pub fn register_norm(registry: &mut OpRegistry) {
         rms_norm_claim,
     );
     // LayerNormalization entered ai.onnx at opset 17.
-    reg(
+    shapeless(
         registry,
         "",
         "LayerNormalization",
@@ -902,7 +925,7 @@ pub fn register_norm(registry: &mut OpRegistry) {
         layer_norm_op,
         layer_norm_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "GroupNormalization",
@@ -910,7 +933,7 @@ pub fn register_norm(registry: &mut OpRegistry) {
         group_norm_op,
         group_norm_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "LpNormalization",
@@ -918,7 +941,7 @@ pub fn register_norm(registry: &mut OpRegistry) {
         lp_norm_op,
         lp_norm_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "BatchNormalization",
@@ -926,8 +949,16 @@ pub fn register_norm(registry: &mut OpRegistry) {
         batch_norm_op,
         batch_norm_claim,
     );
-    reg(registry, "", "LRN", K_ANY_OPSET, lrn_op, lrn_claim);
-    reg(
+    shape_keyed(
+        registry,
+        "",
+        "LRN",
+        K_ANY_OPSET,
+        lrn_op,
+        lrn_claim,
+        "emits MLX Pad and Slice, which lack Primitive::output_shapes in MLX 0.32.1",
+    );
+    shapeless(
         registry,
         "com.microsoft",
         "SimplifiedLayerNormalization",
@@ -942,7 +973,7 @@ pub fn register_norm(registry: &mut OpRegistry) {
     // (Y = rms_norm(X) * scale over the last axis), so we register it under "" as well — otherwise
     // every one of these norms (113 in the gemma-4-E2B vision encoder) fragments the graph onto CPU.
     // This is NOT a real default-domain op; it only exists there because of that mis-stamping.
-    reg(
+    shapeless(
         registry,
         "",
         "SimplifiedLayerNormalization",
@@ -950,7 +981,7 @@ pub fn register_norm(registry: &mut OpRegistry) {
         simplified_layer_norm_op,
         simplified_layer_norm_claim,
     );
-    reg(
+    shapeless(
         registry,
         "com.microsoft",
         "SkipLayerNormalization",
@@ -958,7 +989,7 @@ pub fn register_norm(registry: &mut OpRegistry) {
         skip_layer_norm_op,
         skip_layer_norm_claim,
     );
-    reg(
+    shapeless(
         registry,
         "com.microsoft",
         "SkipSimplifiedLayerNormalization",

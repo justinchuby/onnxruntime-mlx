@@ -27,7 +27,8 @@ use std::os::raw::c_void;
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
-    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_int_index, is_mlx_float,
+    ClaimResult, CompileShapeSafety, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry,
+    is_int_index, is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -1652,6 +1653,116 @@ fn static_positive(shape: &[i64]) -> bool {
     !shape.is_empty() && shape.iter().all(|&d| d > 0)
 }
 
+const QUANT_GEOMETRY_SHAPE_REASON: &str =
+    "static quantized geometry unavailable; shapeless compile denied conservatively";
+
+fn block_quantized_compile_shape_safety(k: i64, block: i64) -> CompileShapeSafety {
+    if k <= 0 || block <= 0 {
+        return CompileShapeSafety::ShapeKeyedOnly {
+            reason: QUANT_GEOMETRY_SHAPE_REASON,
+        };
+    }
+    if k % block != 0 {
+        CompileShapeSafety::ShapeKeyedOnly {
+            reason: crate::registry::MLX_SLICE_SHAPE_REASON,
+        }
+    } else {
+        CompileShapeSafety::Shapeless
+    }
+}
+
+fn block_quantized_fp4_compile_shape_safety(node: &NodeView) -> CompileShapeSafety {
+    let k = node
+        .input_info(0)
+        .and_then(|input| input.shape.last().copied())
+        .unwrap_or(0);
+    block_quantized_compile_shape_safety(k, node.int_attr("block_size", 16))
+}
+
+fn block_quantized_fp8_compile_shape_safety(node: &NodeView) -> CompileShapeSafety {
+    let k = node
+        .input_info(0)
+        .and_then(|input| input.shape.last().copied())
+        .unwrap_or(0);
+    block_quantized_compile_shape_safety(k, node.int_attr("block_size", 128))
+}
+
+fn matmulnbits_compile_shape_safety_for(
+    k: i64,
+    block: i64,
+    bits: i64,
+    has_zero_points: bool,
+) -> CompileShapeSafety {
+    if k <= 0 || block <= 0 {
+        return CompileShapeSafety::ShapeKeyedOnly {
+            reason: QUANT_GEOMETRY_SHAPE_REASON,
+        };
+    }
+    if k % block != 0 {
+        return CompileShapeSafety::ShapeKeyedOnly {
+            reason: crate::registry::MLX_PAD_SHAPE_REASON,
+        };
+    }
+    let nblocks = k / block;
+    if has_zero_points && bits == 4 && nblocks % 2 != 0 {
+        CompileShapeSafety::ShapeKeyedOnly {
+            reason: crate::registry::MLX_SLICE_SHAPE_REASON,
+        }
+    } else {
+        CompileShapeSafety::Shapeless
+    }
+}
+
+fn matmulnbits_compile_shape_safety(node: &NodeView) -> CompileShapeSafety {
+    matmulnbits_compile_shape_safety_for(
+        node.int_attr("K", 0),
+        node.int_attr("block_size", 32),
+        node.int_attr("bits", 4),
+        node.input_present(3),
+    )
+}
+
+fn gather_block_quantized_compile_shape_safety_for(
+    packed_data: i64,
+    packed_zero_points: i64,
+    block: i64,
+    has_zero_points: bool,
+) -> CompileShapeSafety {
+    if !has_zero_points {
+        return CompileShapeSafety::Shapeless;
+    }
+    if packed_data <= 0 || packed_zero_points <= 0 || block <= 0 {
+        return CompileShapeSafety::ShapeKeyedOnly {
+            reason: QUANT_GEOMETRY_SHAPE_REASON,
+        };
+    }
+    let nblocks = (packed_data * 2) / block;
+    if packed_zero_points * 2 != nblocks {
+        CompileShapeSafety::ShapeKeyedOnly {
+            reason: crate::registry::MLX_SLICE_SHAPE_REASON,
+        }
+    } else {
+        CompileShapeSafety::Shapeless
+    }
+}
+
+fn gather_block_quantized_compile_shape_safety(node: &NodeView) -> CompileShapeSafety {
+    let packed_data = node
+        .input_info(0)
+        .and_then(|input| input.shape.last().copied())
+        .unwrap_or(0);
+    let packed_zero_points = node
+        .input_info(3)
+        .and_then(|input| input.shape.last().copied())
+        .unwrap_or(0);
+    gather_block_quantized_compile_shape_safety_for(
+        packed_data,
+        packed_zero_points,
+        node.int_attr("block_size", 32),
+        node.input_present(3),
+    )
+}
+
 fn matmulnbits_claim(node: &NodeView) -> ClaimResult {
     let nin = node.num_inputs();
     require!(node.num_outputs() >= 1, "requires at least one output");
@@ -2521,14 +2632,14 @@ fn qmoe_claim(node: &NodeView) -> ClaimResult {
 
 // ---- registration -------------------------------------------------------------------------------
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     domain: &'static str,
     op_type: &'static str,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain,
         op_type,
         min_opset: K_ANY_OPSET,
@@ -2538,83 +2649,182 @@ fn reg(
     });
 }
 
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    domain: &'static str,
+    op_type: &'static str,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain,
+            op_type,
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
+fn shape_classified(
+    registry: &mut OpRegistry,
+    domain: &'static str,
+    op_type: &'static str,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+    classifier: crate::registry::CompileShapeClassifier,
+) {
+    registry.register_shape_classified(
+        OpRegistration {
+            domain,
+            op_type,
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        classifier,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
-    reg(
+    shape_classified(
         registry,
         "com.microsoft",
         "MatMulBlockQuantizedFp4Weight",
         matmul_block_quantized_fp4_op,
         matmul_block_quantized_fp4_claim,
+        block_quantized_fp4_compile_shape_safety,
     );
-    reg(
+    shape_classified(
         registry,
         "com.microsoft",
         "MatMulBlockQuantizedFp8Weight",
         matmul_block_quantized_fp8_op,
         matmul_block_quantized_fp8_claim,
+        block_quantized_fp8_compile_shape_safety,
     );
-    reg(
+    shape_classified(
         registry,
         "com.microsoft",
         "MatMulNBits",
         matmulnbits_op,
         matmulnbits_claim,
+        matmulnbits_compile_shape_safety,
     );
-    reg(registry, "com.microsoft", "QMoE", qmoe_op, qmoe_claim);
-    reg(
+    shape_keyed(
+        registry,
+        "com.microsoft",
+        "QMoE",
+        qmoe_op,
+        qmoe_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
+    shape_classified(
         registry,
         "com.microsoft",
         "GatherBlockQuantized",
         gather_block_quantized_op,
         gather_block_quantized_claim,
+        gather_block_quantized_compile_shape_safety,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "QuantizeLinear",
         quantize_linear_op,
         quantize_linear_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "DequantizeLinear",
         dequantize_linear_op,
         dequantize_linear_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "DynamicQuantizeLinear",
         dynamic_quantize_linear_op,
         dynamic_quantize_linear_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "MatMulInteger",
         matmul_integer_op,
         matmul_integer_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "ConvInteger",
         conv_integer_op,
         conv_integer_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "QLinearMatMul",
         qlinear_matmul_op,
         qlinear_matmul_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "QLinearConv",
         qlinear_conv_op,
         qlinear_conv_claim,
     );
+}
+
+#[cfg(test)]
+mod compile_shape_safety_tests {
+    use super::{
+        block_quantized_compile_shape_safety, gather_block_quantized_compile_shape_safety_for,
+        matmulnbits_compile_shape_safety_for,
+    };
+    use crate::registry::CompileShapeSafety;
+
+    #[test]
+    fn block_quantized_matmul_is_shapeless_only_without_trim_slice() {
+        assert!(block_quantized_compile_shape_safety(64, 32).allows_shapeless());
+        assert!(!block_quantized_compile_shape_safety(48, 32).allows_shapeless());
+        assert!(!block_quantized_compile_shape_safety(0, 32).allows_shapeless());
+    }
+
+    #[test]
+    fn matmulnbits_preserves_common_decode_forms_but_rejects_pad_and_trim() {
+        assert!(
+            matmulnbits_compile_shape_safety_for(4096, 32, 4, false).allows_shapeless(),
+            "ordinary symmetric int4 decode must remain shapeless-compiled"
+        );
+        assert!(!matmulnbits_compile_shape_safety_for(65, 32, 4, false).allows_shapeless());
+        assert!(matches!(
+            matmulnbits_compile_shape_safety_for(96, 32, 4, true),
+            CompileShapeSafety::ShapeKeyedOnly {
+                reason: crate::registry::MLX_SLICE_SHAPE_REASON
+            }
+        ));
+        assert!(matmulnbits_compile_shape_safety_for(128, 32, 4, true).allows_shapeless());
+        assert!(matmulnbits_compile_shape_safety_for(96, 32, 8, true).allows_shapeless());
+    }
+
+    #[test]
+    fn gather_block_quantized_rejects_only_zero_point_trim_forms() {
+        assert!(
+            gather_block_quantized_compile_shape_safety_for(256, 0, 128, false).allows_shapeless()
+        );
+        assert!(
+            gather_block_quantized_compile_shape_safety_for(256, 2, 128, true).allows_shapeless()
+        );
+        assert!(
+            !gather_block_quantized_compile_shape_safety_for(192, 2, 128, true).allows_shapeless()
+        );
+    }
 }

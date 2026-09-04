@@ -149,7 +149,7 @@ fn gemm_claim(node: &NodeView) -> ClaimResult {
 }
 
 pub fn register(registry: &mut OpRegistry) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "MatMul",
         min_opset: K_ANY_OPSET,
@@ -157,7 +157,7 @@ pub fn register(registry: &mut OpRegistry) {
         handler: matmul_op,
         claim: matmul_claim,
     });
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "Gemm",
         min_opset: K_ANY_OPSET,

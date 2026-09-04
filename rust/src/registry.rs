@@ -27,6 +27,66 @@ pub type ClaimResult = Result<(), Cow<'static, str>>;
 /// opset) key is matched first.
 pub type ClaimPredicate = fn(&NodeView) -> ClaimResult;
 
+/// The strongest compiled shape mode an op lowering may enter for one concrete node.
+///
+/// `Shapeless` is an affirmative promise that the handler's shapeless trace emits only MLX
+/// primitives implementing `Primitive::output_shapes`. `ShapeKeyedOnly` carries the exact reason
+/// that promise cannot be made while still allowing a shape-keyed trace. `EagerOnly` is stricter:
+/// no compiled route currently preserves that concrete form's semantics (and unsupported forms
+/// use it conservatively too). Reasons stay at the registration boundary so partitioning and every
+/// compiled execution route share one authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompileShapeSafety {
+    Shapeless,
+    ShapeKeyedOnly { reason: &'static str },
+    EagerOnly { reason: &'static str },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompilePartitionClass {
+    Shapeless,
+    ShapeKeyed,
+    Eager,
+}
+
+pub const MLX_PAD_SHAPE_REASON: &str =
+    "emits MLX Pad, which lacks Primitive::output_shapes in MLX 0.32.1";
+pub const MLX_RANDOM_BITS_SHAPE_REASON: &str =
+    "emits MLX RandomBits, which lacks Primitive::output_shapes in MLX 0.32.1";
+pub const MLX_SCAN_SHAPE_REASON: &str =
+    "emits MLX Scan, which lacks Primitive::output_shapes in MLX 0.32.1";
+pub const MLX_SCATTER_SHAPE_REASON: &str =
+    "emits MLX Scatter, which lacks Primitive::output_shapes in MLX 0.32.1";
+pub const MLX_SLICE_SHAPE_REASON: &str =
+    "emits MLX Slice, which lacks Primitive::output_shapes in MLX 0.32.1";
+pub const MLX_SPLIT_SHAPE_REASON: &str =
+    "emits MLX Split, which lacks Primitive::output_shapes in MLX 0.32.1";
+pub const MLX_VIEW_SHAPE_REASON: &str =
+    "emits MLX View, which lacks Primitive::output_shapes in MLX 0.32.1";
+
+impl CompileShapeSafety {
+    pub const fn allows_shapeless(self) -> bool {
+        matches!(self, Self::Shapeless)
+    }
+
+    pub const fn allows_shape_keyed(self) -> bool {
+        !matches!(self, Self::EagerOnly { .. })
+    }
+
+    pub const fn partition_class(self) -> CompilePartitionClass {
+        match self {
+            Self::Shapeless => CompilePartitionClass::Shapeless,
+            Self::ShapeKeyedOnly { .. } => CompilePartitionClass::ShapeKeyed,
+            Self::EagerOnly { .. } => CompilePartitionClass::Eager,
+        }
+    }
+}
+
+/// Per-node classifier for lowerings whose primitive emission depends on attributes or static
+/// input geometry. This preserves shapeless decode for safe forms without letting an unsafe branch
+/// silently inherit a permissive default.
+pub type CompileShapeClassifier = fn(&NodeView) -> CompileShapeSafety;
+
 /// Decline the current claim predicate with a colocated reason (`format!`-style args, including
 /// inline captures like `deny!("rank {rank} unsupported")`). Use inside a `-> ClaimResult` function.
 /// The reason string is only built on the decline path, so its allocation never touches a claim
@@ -70,7 +130,17 @@ pub struct OpRegistration {
 
 /// The opset-aware (domain, op) -> entry table (process-wide singleton).
 pub struct OpRegistry {
-    table: Vec<OpRegistration>,
+    table: Vec<RegisteredOp>,
+}
+
+enum CompileShapeRule {
+    Always(CompileShapeSafety),
+    Classified(CompileShapeClassifier),
+}
+
+struct RegisteredOp {
+    entry: OpRegistration,
+    compile_shape_rule: CompileShapeRule,
 }
 
 impl OpRegistry {
@@ -78,8 +148,50 @@ impl OpRegistry {
         OpRegistry { table: Vec::new() }
     }
 
-    pub fn register(&mut self, entry: OpRegistration) {
-        self.table.push(entry);
+    /// Register a lowering that deliberately opts in to shapeless compilation.
+    pub fn register_shapeless(&mut self, entry: OpRegistration) {
+        self.table.push(RegisteredOp {
+            entry,
+            compile_shape_rule: CompileShapeRule::Always(CompileShapeSafety::Shapeless),
+        });
+    }
+
+    /// Register a lowering that always requires a shape-keyed trace.
+    pub fn register_shape_keyed(&mut self, entry: OpRegistration, reason: &'static str) {
+        assert!(
+            !reason.is_empty(),
+            "shape-keyed registration for {}::{} requires a reason",
+            entry.domain,
+            entry.op_type
+        );
+        self.table.push(RegisteredOp {
+            entry,
+            compile_shape_rule: CompileShapeRule::Always(CompileShapeSafety::ShapeKeyedOnly {
+                reason,
+            }),
+        });
+    }
+
+    /// Register a lowering whose concrete node form decides whether shapeless compilation is safe.
+    pub fn register_shape_classified(
+        &mut self,
+        entry: OpRegistration,
+        classifier: CompileShapeClassifier,
+    ) {
+        self.table.push(RegisteredOp {
+            entry,
+            compile_shape_rule: CompileShapeRule::Classified(classifier),
+        });
+    }
+
+    fn find_entry_index(&self, domain: &str, op_type: &str, since_version: i32) -> Option<usize> {
+        self.table.iter().position(|registered| {
+            let e = &registered.entry;
+            e.domain == domain
+                && e.op_type == op_type
+                && (e.min_opset == K_ANY_OPSET || since_version >= e.min_opset)
+                && (e.max_opset == K_ANY_OPSET || since_version <= e.max_opset)
+        })
     }
 
     /// The matching entry for (domain, op_type, since_version), or None.
@@ -89,12 +201,34 @@ impl OpRegistry {
         op_type: &str,
         since_version: i32,
     ) -> Option<&OpRegistration> {
-        self.table.iter().find(|e| {
-            e.domain == domain
-                && e.op_type == op_type
-                && (e.min_opset == K_ANY_OPSET || since_version >= e.min_opset)
-                && (e.max_opset == K_ANY_OPSET || since_version <= e.max_opset)
-        })
+        self.find_entry_index(domain, op_type, since_version)
+            .map(|index| &self.table[index].entry)
+    }
+
+    fn compile_shape_safety(&self, node: &NodeView) -> CompileShapeSafety {
+        let domain = node.domain();
+        let domain = if domain == "ai.onnx" { "" } else { &domain };
+        let op_type = node.op_type();
+        let Some(index) = self.find_entry_index(domain, &op_type, node.since_version()) else {
+            return CompileShapeSafety::ShapeKeyedOnly {
+                reason: "no matching registered lowering; shapeless compile denied conservatively",
+            };
+        };
+        let safety = match self.table[index].compile_shape_rule {
+            CompileShapeRule::Always(safety) => safety,
+            CompileShapeRule::Classified(classifier) => classifier(node),
+        };
+        if let CompileShapeSafety::ShapeKeyedOnly { reason }
+        | CompileShapeSafety::EagerOnly { reason } = safety
+        {
+            assert!(
+                !reason.is_empty(),
+                "shape classifier for {}::{} returned an empty reason",
+                domain,
+                op_type
+            );
+        }
+        safety
     }
 }
 
@@ -106,6 +240,11 @@ static REGISTRY: LazyLock<OpRegistry> = LazyLock::new(|| {
 
 fn registry() -> &'static OpRegistry {
     &REGISTRY
+}
+
+/// Compile-shape capability declared by the registered lowering for one concrete node.
+pub fn compile_shape_safety(node: &NodeView) -> CompileShapeSafety {
+    registry().compile_shape_safety(node)
 }
 
 /// Populate the table with every built-in op module (wave-1: elementwise + math).
@@ -1434,5 +1573,117 @@ mod tests {
         assert!(suffix_broadcast(&[2, 3], &[1, 3]));
         assert!(!suffix_broadcast(&[2, 3], &[]));
         assert!(scalar_or_suffix_broadcast(&[2, 3], &[]));
+    }
+
+    fn compile_shape_rule(
+        domain: &str,
+        op_type: &str,
+        since_version: i32,
+    ) -> &'static CompileShapeRule {
+        let index = registry()
+            .find_entry_index(domain, op_type, since_version)
+            .unwrap_or_else(|| panic!("missing registration for {domain}::{op_type}"));
+        &registry().table[index].compile_shape_rule
+    }
+
+    #[test]
+    fn every_shape_keyed_registration_carries_a_reason() {
+        for registered in &registry().table {
+            if let CompileShapeRule::Always(CompileShapeSafety::ShapeKeyedOnly { reason }) =
+                registered.compile_shape_rule
+            {
+                assert!(
+                    !reason.is_empty(),
+                    "{}::{} omitted its shape-specialization reason",
+                    registered.entry.domain,
+                    registered.entry.op_type
+                );
+                assert!(
+                    reason.contains("output_shapes") || reason.contains("conservatively"),
+                    "{}::{} has an unactionable shape-specialization reason: {reason}",
+                    registered.entry.domain,
+                    registered.entry.op_type
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn known_missing_output_shape_emitters_cannot_be_shapeless() {
+        let always_shape_keyed = [
+            ("com.microsoft", "PagedAttention", 1),
+            ("com.microsoft", "Attention", 1),
+            ("com.microsoft", "PackedMultiHeadAttention", 1),
+            ("", "RotaryEmbedding", 23),
+            ("com.microsoft", "RotaryEmbedding", 1),
+            ("com.microsoft", "MRotaryEmbedding", 1),
+            ("", "Scan", 24),
+            ("", "DeformConv", 22),
+            ("", "AveragePool", 24),
+            ("", "MaxPool", 24),
+            ("", "LpPool", 24),
+            ("", "BitCast", 26),
+            ("", "Scatter", 9),
+            ("", "LRN", 24),
+            ("ai.onnx.ml", "SVMClassifier", 1),
+            ("ai.onnx.ml", "FeatureVectorizer", 1),
+            ("com.microsoft", "QMoE", 1),
+            ("", "RandomNormal", 1),
+            ("", "RandomNormalLike", 1),
+            ("", "RandomUniform", 1),
+            ("", "RandomUniformLike", 1),
+            ("", "Bernoulli", 15),
+            ("", "Multinomial", 7),
+            ("", "RNN", 24),
+            ("", "GRU", 24),
+            ("", "LSTM", 24),
+            ("", "CumSum", 14),
+            ("", "ScatterElements", 24),
+            ("", "CenterCropPad", 24),
+            ("", "ScatterND", 24),
+            ("", "Slice", 24),
+            ("", "Split", 24),
+            ("", "Pad", 24),
+            ("", "DFT", 17),
+            ("", "STFT", 17),
+            ("com.microsoft", "CausalConvWithState", 1),
+            ("", "CausalConvWithState", 27),
+            ("com.microsoft", "LinearAttention", 1),
+            ("", "LinearAttention", 27),
+            ("", "GridSample", 24),
+            ("", "Col2Im", 24),
+            ("", "RoiAlign", 24),
+            ("", "MaxRoiPool", 24),
+            ("", "MaxUnpool", 24),
+        ];
+        for (domain, op_type, since_version) in always_shape_keyed {
+            assert!(
+                matches!(
+                    compile_shape_rule(domain, op_type, since_version),
+                    CompileShapeRule::Always(CompileShapeSafety::ShapeKeyedOnly { .. })
+                ),
+                "{domain}::{op_type} can emit an MLX primitive without output_shapes"
+            );
+        }
+
+        for op_type in [
+            "MatMulBlockQuantizedFp4Weight",
+            "MatMulBlockQuantizedFp8Weight",
+            "MatMulNBits",
+            "GatherBlockQuantized",
+        ] {
+            assert!(
+                matches!(
+                    compile_shape_rule("com.microsoft", op_type, 1),
+                    CompileShapeRule::Classified(_)
+                ),
+                "com.microsoft::{op_type} needs a per-node quant geometry classifier"
+            );
+        }
+
+        assert!(matches!(
+            compile_shape_rule("com.microsoft", "GroupQueryAttention", 1),
+            CompileShapeRule::Classified(_)
+        ));
     }
 }

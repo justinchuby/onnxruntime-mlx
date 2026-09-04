@@ -636,17 +636,12 @@ pub fn register(registry: &mut OpRegistry) {
             array_feature_extractor_claim as crate::registry::ClaimPredicate,
         ),
         ("Binarizer", binarizer_op, binarizer_claim),
-        (
-            "FeatureVectorizer",
-            feature_vectorizer_op,
-            feature_vectorizer_claim,
-        ),
         ("Imputer", imputer_op, imputer_claim),
         ("Normalizer", normalizer_op, normalizer_claim),
         ("OneHotEncoder", one_hot_encoder_op, one_hot_encoder_claim),
         ("Scaler", scaler_op, scaler_claim),
     ] {
-        registry.register(OpRegistration {
+        registry.register_shapeless(OpRegistration {
             domain: "ai.onnx.ml",
             op_type,
             min_opset: K_ANY_OPSET,
@@ -655,7 +650,18 @@ pub fn register(registry: &mut OpRegistry) {
             claim,
         });
     }
-    registry.register(OpRegistration {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "ai.onnx.ml",
+            op_type: "FeatureVectorizer",
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler: feature_vectorizer_op,
+            claim: feature_vectorizer_claim,
+        },
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
+    registry.register_shapeless(OpRegistration {
         domain: "ai.onnx.ml",
         op_type: "LabelEncoder",
         min_opset: 2,
