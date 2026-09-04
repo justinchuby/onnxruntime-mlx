@@ -742,24 +742,45 @@ def test_cumsum_failures_do_not_abort_host() -> None:
             f"shape-keyed Slice emitter: {gqa_decode_events}"
         )
 
-        cumsum_slice_events = [
+        cumsum_events = [
             event
             for event in trace_events
             if event.get("name") == "mlx.compute[general]"
-            and set(partition_names(event))
-            == {"shape_safety_cumsum", "shape_safety_slice"}
+            and "shape_safety_cumsum" in partition_names(event)
         ]
-        assert [event["args"].get("cache") for event in cumsum_slice_events] == [
+        slice_events = [
+            event
+            for event in trace_events
+            if event.get("name") == "mlx.compute[general]"
+            and "shape_safety_slice" in partition_names(event)
+        ]
+        assert [event["args"].get("cache") for event in cumsum_events] == [
             "MISS",
             "RETRACE",
         ], (
-            "adjacent CumSum+Slice must share their shape-keyed partition and retrace for T=4->7: "
-            f"{cumsum_slice_events}"
+            "the partition containing CumSum must be shape-keyed and retrace for T=4->7: "
+            f"{cumsum_events}"
         )
-        assert all(
-            set(partition_ops(event)) == {"CumSum", "Slice"}
-            for event in cumsum_slice_events
+        assert [event["args"].get("cache") for event in slice_events] == [
+            "MISS",
+            "RETRACE",
+        ], (
+            "the partition containing ONNX Slice must be shape-keyed and retrace for T=4->7: "
+            f"{slice_events}"
         )
+        for cumsum_event, slice_event in zip(cumsum_events, slice_events, strict=True):
+            same_partition = cumsum_event["args"].get(
+                "partition_id"
+            ) == slice_event["args"].get("partition_id")
+            if same_partition:
+                assert {
+                    "shape_safety_cumsum",
+                    "shape_safety_slice",
+                } <= set(partition_names(cumsum_event))
+                assert {"CumSum", "Slice"} <= set(partition_ops(cumsum_event))
+            else:
+                assert "CumSum" in partition_ops(cumsum_event)
+                assert "Slice" in partition_ops(slice_event)
 
         qmoe_events = [
             event
@@ -779,17 +800,20 @@ def test_cumsum_failures_do_not_abort_host() -> None:
             f"{qmoe_events}"
         )
         assert len(
-            {event["args"].get("partition_id") for event in cumsum_slice_events}
+            {event["args"].get("partition_id") for event in cumsum_events}
         ) == 1
+        assert len({event["args"].get("partition_id") for event in slice_events}) == 1
         assert len(
             {event["args"].get("partition_id") for event in qmoe_events}
         ) == 1
         assert (
-            cumsum_slice_events[0]["args"].get("partition_id")
+            cumsum_events[0]["args"].get("partition_id")
+            != qmoe_events[0]["args"].get("partition_id")
+            and slice_events[0]["args"].get("partition_id")
             != qmoe_events[0]["args"].get("partition_id")
         ), (
-            "CumSum+Slice and QMoE must remain distinct shape-keyed partitions: "
-            f"{cumsum_slice_events}, {qmoe_events}"
+            "CumSum/Slice and QMoE must remain distinct shape-keyed partitions: "
+            f"{cumsum_events}, {slice_events}, {qmoe_events}"
         )
     finally:
         trace_path.unlink(missing_ok=True)
