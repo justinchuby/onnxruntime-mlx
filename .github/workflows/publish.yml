@@ -23,7 +23,7 @@ on:
 jobs:
   build-wheels:
     name: Build distributions (macOS arm64)
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       ORT_VERSION: "1.29.0"
       MLX_VERSION: "0.32.2"
@@ -125,9 +125,9 @@ jobs:
   publish-crate:
     name: Publish to crates.io
     needs: build-wheels
-    runs-on: macos-14
+    runs-on: macos-15
     # The crate is a cdylib that only builds on Apple Silicon (mlx-c + Metal), so
-    # `cargo publish`'s verify build must run on macos-14. Auth is via crates.io
+    # `cargo publish`'s verify build must run on macos-15. Auth is via crates.io
     # Trusted Publishing (OIDC) — no long-lived token; the `crates` environment is
     # the configured trusted publisher (repo justinchuby/onnxruntime-mlx, this workflow).
     environment: crates
