@@ -198,19 +198,28 @@ fn selu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     bind_as_out(ctx, n, r)
 }
 
-/// Celu: `max(0,x) + min(0, alpha*(exp(x/alpha)-1))`.
+/// Celu has a max/min definition through opset 27 and an explicit Div/Elu/Mul
+/// function body in opset 28. They differ for non-positive alpha attributes.
 fn celu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
     let alpha = n.floats.get("alpha").copied().unwrap_or(1.0);
     let zero = scalar_like(ctx, x, 0.0)?;
     let alpha_s = scalar_like(ctx, x, alpha)?;
-    let inv_alpha = scalar_like(ctx, x, 1.0 / alpha)?;
-    let scaled = ctx.binary(mlx::mlx_multiply, x, inv_alpha)?;
-    let ex = ctx.unary(mlx::mlx_expm1, scaled)?;
-    let neg_inner = ctx.binary(mlx::mlx_multiply, alpha_s, ex)?;
-    let pos = ctx.binary(mlx::mlx_maximum, x, zero)?;
-    let neg = ctx.binary(mlx::mlx_minimum, zero, neg_inner)?;
-    let r = ctx.binary(mlx::mlx_add, pos, neg)?;
+    let r = if celu_uses_v28_function_body(n.since_version) {
+        let scaled = ctx.binary(mlx::mlx_divide, x, alpha_s)?;
+        let positive = ctx.binary(mlx::mlx_greater, scaled, zero)?;
+        let ex = ctx.unary(mlx::mlx_expm1, scaled)?;
+        let elu = ctx.where_(positive, scaled, ex)?;
+        ctx.binary(mlx::mlx_multiply, alpha_s, elu)?
+    } else {
+        let inv_alpha = scalar_like(ctx, x, 1.0 / alpha)?;
+        let scaled = ctx.binary(mlx::mlx_multiply, x, inv_alpha)?;
+        let ex = ctx.unary(mlx::mlx_expm1, scaled)?;
+        let neg_inner = ctx.binary(mlx::mlx_multiply, alpha_s, ex)?;
+        let pos = ctx.binary(mlx::mlx_maximum, x, zero)?;
+        let neg = ctx.binary(mlx::mlx_minimum, zero, neg_inner)?;
+        ctx.binary(mlx::mlx_add, pos, neg)?
+    };
     bind_as_out(ctx, n, r)
 }
 
@@ -310,6 +319,26 @@ fn swish_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
     let gate = ctx.unary(mlx::mlx_sigmoid, scaled)?;
     let r = ctx.binary(mlx::mlx_multiply, x, gate)?;
     bind_as_out(ctx, n, r)
+}
+
+/// SwiGLU v28: `A * sigmoid(alpha * A) * B`.
+///
+/// The ONNX schema requires A and B to have the same shape; unlike the
+/// equivalent expanded function, broadcasting is not permitted at this node.
+fn swiglu_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    let gate = ctx.resolve(&n.inputs[0])?;
+    let value = ctx.resolve(&n.inputs[1])?;
+    let alpha = n.floats.get("alpha").copied().unwrap_or(1.0);
+    let scaled = if alpha == 1.0 {
+        gate
+    } else {
+        let alpha_s = scalar_like(ctx, gate, alpha)?;
+        ctx.binary(mlx::mlx_multiply, gate, alpha_s)?
+    };
+    let sigmoid = ctx.unary(mlx::mlx_sigmoid, scaled)?;
+    let swish = ctx.binary(mlx::mlx_multiply, gate, sigmoid)?;
+    let out = ctx.binary(mlx::mlx_multiply, swish, value)?;
+    bind_as_out(ctx, n, out)
 }
 
 /// ThresholdedRelu: `x > alpha ? x : 0`.
@@ -484,6 +513,45 @@ fn float_unary_claim(node: &NodeView) -> ClaimResult {
 /// fp32/fp16/bf16 **and float64**, for ops whose MLX primitive was measured exact in fp64.
 fn fp64_unary_claim(node: &NodeView) -> ClaimResult {
     unary_same_type_claim(node, false, true)
+}
+
+fn same_shape_or_unknown(a: &[i64], b: &[i64]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(&left, &right)| left < 0 || right < 0 || left == right)
+}
+
+fn celu_uses_v28_function_body(since_version: i32) -> bool {
+    since_version >= 28
+}
+
+/// SwiGLU needs identical float tensors and uses sigmoid, whose float64 MLX
+/// implementation is only float32-accurate. Float8 is intentionally left on
+/// CPU because mlx-c does not expose a float8 elementwise execution path.
+fn swiglu_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 2 && node.num_outputs() == 1,
+        "expects 2 inputs and 1 output, got {}in/{}out",
+        node.num_inputs(),
+        node.num_outputs()
+    );
+    let (a, b, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
+        (Some(a), Some(b), Some(out)) => (a, b, out),
+        _ => deny!("missing tensor type/shape info on A, B, or Y"),
+    };
+    require!(
+        a.dtype == b.dtype && b.dtype == out.dtype && is_mlx_float(a.dtype),
+        "A, B, and Y must share an MLX fp32/fp16/bf16 dtype; float64 sigmoid is lossy and float8 has no mlx-c execution path"
+    );
+    require!(
+        same_shape_or_unknown(&a.shape, &b.shape) && same_shape_or_unknown(&a.shape, &out.shape),
+        "SwiGLU forbids broadcasting: A {:?}, B {:?}, and Y {:?} must have identical shapes",
+        a.shape,
+        b.shape,
+        out.shape
+    );
+    Ok(())
 }
 
 fn bias_gelu_claim(node: &NodeView) -> ClaimResult {
@@ -816,13 +884,14 @@ pub fn register(registry: &mut OpRegistry) {
     shapeless(registry, "LeakyRelu", leaky_relu_op, fp64_unary_claim);
     shapeless(registry, "Elu", elu_op, fp64_unary_claim);
     shapeless(registry, "Selu", selu_op, fp64_unary_claim);
-    shapeless(registry, "Celu", celu_op, fp64_unary_claim);
+    shapeless_since(registry, "Celu", 12, celu_op, fp64_unary_claim);
     shapeless(registry, "HardSigmoid", hard_sigmoid_op, fp64_unary_claim);
     shapeless_since(registry, "HardSwish", 14, hard_swish_op, fp64_unary_claim);
     shapeless_since(registry, "Mish", 18, mish_op, float_unary_claim);
     shapeless_since(registry, "PRelu", 1, prelu_op, prelu_claim);
     shapeless_since(registry, "Shrink", 9, shrink_op, shrink_claim);
-    shapeless(registry, "Swish", swish_op, float_unary_claim);
+    shapeless_since(registry, "Swish", 24, swish_op, float_unary_claim);
+    shapeless_since(registry, "SwiGLU", 28, swiglu_op, swiglu_claim);
     shapeless(
         registry,
         "ThresholdedRelu",
@@ -850,4 +919,16 @@ pub fn register(registry: &mut OpRegistry) {
 
     // Clip (min/max as optional inputs or opset<11 attrs).
     shapeless(registry, "Clip", clip_op, clip_claim);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::celu_uses_v28_function_body;
+
+    #[test]
+    fn celu_changes_lowering_only_at_opset_28() {
+        assert!(!celu_uses_v28_function_body(12));
+        assert!(!celu_uses_v28_function_body(27));
+        assert!(celu_uses_v28_function_body(28));
+    }
 }

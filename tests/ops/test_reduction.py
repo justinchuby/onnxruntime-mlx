@@ -810,16 +810,27 @@ def test_cumsum_failures_do_not_abort_host() -> None:
 
 
 @pytest.mark.parametrize("largest", [0, 1], ids=["smallest", "largest"])
-def test_topk(largest: int) -> None:
+@pytest.mark.parametrize("opset", [11, 24], ids=["opset11", "opset24"])
+@pytest.mark.parametrize(
+    "dtype,np_dtype",
+    [
+        (DT.FLOAT, np.float32),
+        (DT.DOUBLE, np.float64),
+        (DT.INT32, np.int32),
+        (DT.INT64, np.int64),
+    ],
+    ids=["fp32", "fp64", "i32", "i64"],
+)
+def test_topk(largest: int, opset: int, dtype: DT, np_dtype) -> None:
     model = m.make_model(
         "TopK",
-        [m.tensor("x", DT.FLOAT, [2, 5]), m.tensor("k", DT.INT64, [1])],
-        [m.tensor("values", DT.FLOAT, [2, 3]), m.tensor("indices", DT.INT64, [2, 3])],
+        [m.tensor("x", dtype, [2, 5]), m.tensor("k", DT.INT64, [1])],
+        [m.tensor("values", dtype, [2, 3]), m.tensor("indices", DT.INT64, [2, 3])],
         attributes={"axis": -1, "largest": largest, "sorted": 1},
-        opset=11,
+        opset=opset,
     )
     feeds = {
-        "x": np.array([[1, 5, 3, 2, 4], [-1, -5, -3, -2, -4]], dtype=np.float32),
+        "x": np.array([[1, 5, 3, 2, 4], [0, 6, 3, 2, 4]], dtype=np_dtype),
         "k": np.array([3], dtype=np.int64),
     }
     m.assert_matches_cpu(model, feeds, rtol=0, atol=0)

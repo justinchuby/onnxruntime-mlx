@@ -150,6 +150,40 @@ def test_activation(op: str, attrs: dict, dtype: DT, np_dtype, tol: float) -> No
     check(model, {"x": ACT_X.astype(np_dtype)}, rtol=tol, atol=max(tol, 1e-4))
 
 
+@pytest.mark.parametrize("alpha", [0.0, -0.7])
+def test_celu_nonpositive_alpha_matches_function_body(alpha: float) -> None:
+    """Pre-v28 Celu keeps its max/min formula for non-positive alpha."""
+    model = m.make_model(
+        "Celu",
+        [m.tensor("x", DT.FLOAT, [5])],
+        [m.tensor("out", DT.FLOAT, [5])],
+        attributes={"alpha": alpha},
+        opset=24,
+    )
+    feeds = {"x": np.array([-2.0, -0.5, 0.0, 0.5, 2.0], dtype=np.float32)}
+    check(model, feeds, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize("alpha", [1.0, 1.7])
+def test_swiglu_lower_opset_function_parity(alpha: float) -> None:
+    """ORT 1.29 cannot load v28; verify the SwiGLU v28 function body at v24."""
+    import onnx_ir as ir
+
+    a = m.tensor("a", DT.FLOAT, [2, 3])
+    b = m.tensor("b", DT.FLOAT, [2, 3])
+    gate = m.tensor("gate", DT.FLOAT, [2, 3])
+    out = m.tensor("out", DT.FLOAT, [2, 3])
+    swish = ir.node("Swish", [a], attributes={"alpha": alpha}, outputs=[gate])
+    mul = ir.node("Mul", [gate, b], outputs=[out])
+    graph = ir.Graph([a, b], [out], nodes=[swish, mul], name="mlx_swiglu_function", opset_imports={"": 24})
+    model = ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
+    feeds = {
+        "a": np.array([[-3.0, -0.5, 0.0], [0.5, 2.0, 4.0]], dtype=np.float32),
+        "b": np.array([[2.0, -1.0, 3.0], [0.5, -2.0, 1.5]], dtype=np.float32),
+    }
+    check(model, feeds, rtol=1e-5, atol=1e-6)
+
+
 def test_gelu_com_microsoft() -> None:
     model = m.make_model(
         "Gelu",
@@ -321,7 +355,11 @@ def test_logical_not() -> None:
 
 
 # --- Mod ----------------------------------------------------------------------------------------
-@pytest.mark.parametrize("dtype,np_dtype,tol", FLOAT_CASES, ids=["fp32", "fp16"])
+@pytest.mark.parametrize(
+    "dtype,np_dtype,tol",
+    [*FLOAT_CASES, (DT.DOUBLE, np.float64, 1e-14)],
+    ids=["fp32", "fp16", "fp64"],
+)
 def test_mod_fmod_float(dtype: DT, np_dtype, tol: float) -> None:
     # fmod=1 (C fmod, sign of dividend) — the only valid Mod for floats.
     model = m.make_model(
@@ -335,6 +373,20 @@ def test_mod_fmod_float(dtype: DT, np_dtype, tol: float) -> None:
         "b": np.array([2.0, 2.0, -2.0], dtype=np_dtype),
     }
     check(model, feeds, rtol=tol, atol=max(tol, 1e-3))
+
+
+def test_mod_fmod_infinite_divisor() -> None:
+    model = m.make_model(
+        "Mod",
+        [m.tensor("a", DT.FLOAT, [4]), m.tensor("b", DT.FLOAT, [4])],
+        [m.tensor("out", DT.FLOAT, [4])],
+        attributes={"fmod": 1},
+    )
+    feeds = {
+        "a": np.array([-5.3, -0.0, 5.3, np.inf], dtype=np.float32),
+        "b": np.array([np.inf, -np.inf, np.inf, np.inf], dtype=np.float32),
+    }
+    check(model, feeds, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("fmod", [0, 1])
@@ -359,7 +411,9 @@ def test_mod_int(fmod: int) -> None:
 # --- BitShift -----------------------------------------------------------------------------------
 @pytest.mark.parametrize("direction", ["LEFT", "RIGHT"])
 @pytest.mark.parametrize(
-    "dtype,np_dtype", [(DT.UINT32, np.uint32), (DT.UINT8, np.uint8)], ids=["u32", "u8"]
+    "dtype,np_dtype",
+    [(DT.UINT64, np.uint64), (DT.UINT32, np.uint32), (DT.UINT8, np.uint8)],
+    ids=["u64", "u32", "u8"],
 )
 def test_bitshift(direction: str, dtype: DT, np_dtype) -> None:
     # 'direction' is a required string attribute — build the node directly.

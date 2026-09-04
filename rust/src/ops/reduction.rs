@@ -10,7 +10,7 @@
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::registry::{
     ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_float64, is_mlx_cpu_float,
-    is_mlx_float, is_mlx_numeric,
+    is_mlx_float, is_mlx_numeric, is_signed_integer,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -38,6 +38,13 @@ enum PostOp {
     None,
     Log,
     Sqrt,
+}
+
+fn is_mlx_signed_integer_dtype(dtype: mlx::mlx_dtype) -> bool {
+    dtype == mlx::mlx_dtype__MLX_INT8
+        || dtype == mlx::mlx_dtype__MLX_INT16
+        || dtype == mlx::mlx_dtype__MLX_INT32
+        || dtype == mlx::mlx_dtype__MLX_INT64
 }
 
 fn has_axes_input(n: &NodeDesc) -> bool {
@@ -421,7 +428,11 @@ fn topk_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let k = k64 as i32;
     let largest = n.ints.get("largest").copied().unwrap_or(1) != 0;
 
-    let sort_input = if largest {
+    let sort_input = if largest && is_mlx_signed_integer_dtype(ctx.dtype_of(x)) {
+        // Integer negation makes MIN sort as the largest value. Bitwise inversion
+        // reverses the total signed and unsigned integer order without overflow.
+        ctx.unary(mlx::mlx_bitwise_invert, x)?
+    } else if largest {
         ctx.emit(|res, s| unsafe { mlx::mlx_negative(res, x, s) })?
     } else {
         x
@@ -683,7 +694,7 @@ fn cumprod_claim(node: &NodeView) -> ClaimResult {
         !x.shape.is_empty(),
         "input must have rank >= 1 (got a scalar)"
     );
-    let dtype_supported = is_mlx_float(x.dtype)
+    let dtype_supported = is_mlx_cpu_float(x.dtype)
         || x.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
         || x.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
         || x.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32
@@ -826,8 +837,8 @@ fn topk_claim(node: &NodeView) -> ClaimResult {
         "input must have rank >= 1 (got a scalar)"
     );
     require!(
-        is_mlx_float(x.dtype) && values.dtype == x.dtype,
-        "X/values must share one float dtype (fp32/fp16/bf16), got {} -> {}",
+        (is_mlx_cpu_float(x.dtype) || is_signed_integer(x.dtype)) && values.dtype == x.dtype,
+        "X/values must share fp32/fp16/bf16/fp64 or a signed integer dtype; unsigned, float8, and sub-byte TopK forms stay on CPU because ORT 1.29 has no kernel registration for their output path, got {} -> {}",
         crate::registry::ort_dtype_name(x.dtype),
         crate::registry::ort_dtype_name(values.dtype)
     );
@@ -842,8 +853,8 @@ fn topk_claim(node: &NodeView) -> ClaimResult {
         crate::registry::ort_dtype_name(indices.dtype)
     );
     require!(
-        k.shape.is_empty() || (k.shape.len() == 1 && k.shape[0] == 1),
-        "K must be a scalar or shape [1], read at translation time and constrained to 1..=axis dimension (got shape {:?})",
+        k.shape.len() == 1 && k.shape[0] == 1,
+        "K must be a shape [1] tensor as required by ONNX TopK, got shape {:?}",
         k.shape
     );
     require!(
@@ -869,6 +880,17 @@ fn topk_claim(node: &NodeView) -> ClaimResult {
     require!(
         sorted == 1,
         "only sorted=1 is supported (got {sorted}); K is read at translation time and must be within the selected axis"
+    );
+    let k_value = node
+        .read_const_int64(1)
+        .expect("is_const_int64 validated immediately above");
+    require!(
+        k_value.len() == 1
+            && x.shape[axis as usize] > 0
+            && (1..=x.shape[axis as usize]).contains(&k_value[0]),
+        "K initializer must contain one value in 1..={} for axis {raw_axis}, got {:?}",
+        x.shape[axis as usize],
+        k_value
     );
     Ok(())
 }
