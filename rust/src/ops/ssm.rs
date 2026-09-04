@@ -65,7 +65,47 @@ fn tensor_scatter_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), M
     let rank = ctx.ndim(past) as i32;
     let axis = norm_axis(n.ints.get("axis").copied().unwrap_or(-2), rank);
 
-    let present_arr = if present(n, 2) {
+    let mode = str_attr(n, "mode", "linear");
+    let present_arr = if mode == "circular" && present(n, 2) {
+        // Circular writes need a statically known split point. Dynamic indices are deliberately
+        // declined: MLX has no data-dependent split primitive that preserves the cache shape.
+        let start = ctx
+            .read_ints_eval(&n.inputs[2])?
+            .first()
+            .copied()
+            .ok_or_else(|| "TensorScatter: write_indices cannot be empty".to_string())?
+            as i32;
+        let cache_len = ctx.dim(past, axis);
+        let update_len = ctx.dim(update, axis);
+        let first_len = (cache_len - start).min(update_len);
+        let mut start0 = vec![0i32; rank as usize];
+        let mut stop0 = ctx.shape_of(past);
+        start0[axis as usize] = start;
+        stop0[axis as usize] = start + first_len;
+        let first_update = if first_len == update_len {
+            update
+        } else {
+            let update_shape = ctx.shape_of(update);
+            let update_start = vec![0i32; rank as usize];
+            let mut update_stop = update_shape;
+            update_stop[axis as usize] = first_len;
+            ctx.slice(update, &update_start, &update_stop)?
+        };
+        let first = ctx.slice_update(past, first_update, &start0, &stop0)?;
+        if first_len == update_len {
+            first
+        } else {
+            let update_shape = ctx.shape_of(update);
+            let mut update_start = vec![0i32; rank as usize];
+            let update_stop = update_shape;
+            update_start[axis as usize] = first_len;
+            let tail = ctx.slice(update, &update_start, &update_stop)?;
+            let start1 = vec![0i32; rank as usize];
+            let mut stop1 = ctx.shape_of(past);
+            stop1[axis as usize] = update_len - first_len;
+            ctx.slice_update(first, tail, &start1, &stop1)?
+        }
+    } else if present(n, 2) {
         // Decode form: dynamic offset from write_indices along `axis` (batch_size == 1 per claim).
         let wi = ctx.resolve(&n.inputs[2])?;
         let wi = ctx.astype(wi, I32)?;
@@ -111,7 +151,10 @@ fn tensor_scatter_claim(node: &NodeView) -> ClaimResult {
         node.num_outputs()
     );
     let mode = node.string_attr("mode", "linear");
-    require!(mode == "linear", "mode must be \"linear\", got {mode:?}");
+    require!(
+        mode == "linear" || mode == "circular",
+        "mode must be \"linear\" or \"circular\", got {mode:?}"
+    );
     let (past, update, out) = match (node.input_info(0), node.input_info(1), node.output_info(0)) {
         (Some(a), Some(b), Some(c)) => (a, b, c),
         _ => deny!("missing tensor type/shape info on an input or the output"),
@@ -123,21 +166,75 @@ fn tensor_scatter_claim(node: &NodeView) -> ClaimResult {
         crate::registry::ort_dtype_name(update.dtype),
         crate::registry::ort_dtype_name(out.dtype)
     );
+    require!(
+        past.shape.len() >= 2 && update.shape.len() == past.shape.len() && out.shape == past.shape,
+        "past_cache/output must have the same rank >=2 and shape; update must have the same rank"
+    );
+    let rank = past.shape.len() as i64;
+    let axis = node.int_attr("axis", -2);
+    require!(
+        axis >= -rank && axis < rank && axis != 0,
+        "axis must name a non-batch dimension in [-{rank}, {}], got {axis}",
+        rank - 1
+    );
+    let axis = norm_axis(axis, rank as i32) as usize;
+    for dim in 0..past.shape.len() {
+        if dim != axis && past.shape[dim] >= 0 && update.shape[dim] >= 0 {
+            require!(
+                past.shape[dim] == update.shape[dim],
+                "update dimension {dim} must equal past_cache ({} != {})",
+                update.shape[dim],
+                past.shape[dim]
+            );
+        }
+    }
+    if past.shape[axis] >= 0 && update.shape[axis] >= 0 {
+        require!(
+            update.shape[axis] <= past.shape[axis],
+            "update sequence length {} cannot exceed cache length {}",
+            update.shape[axis],
+            past.shape[axis]
+        );
+    }
     if ni == 3 && node.input_present(2) {
-        match node.input_info(2) {
-            Some(wi) if wi.dtype == T_INT64 => {}
+        let wi = match node.input_info(2) {
+            Some(wi) if wi.dtype == T_INT64 => wi,
             Some(wi) => deny!(
                 "write_indices must be int64, got {}",
                 crate::registry::ort_dtype_name(wi.dtype)
             ),
             None => deny!("missing tensor type/shape info on write_indices"),
-        }
+        };
+        require!(
+            wi.shape.len() == 1 && wi.shape[0] == past.shape[0],
+            "write_indices must be rank-1 with one entry per batch"
+        );
         // Only batch_size == 1 is expressible as one dynamic slice.
         require!(
             !past.shape.is_empty() && past.shape[0] == 1,
             "dynamic TensorScatter requires past_cache batch size 1, got shape {:?}",
             past.shape
         );
+        if mode == "circular" {
+            let indices = match node.read_const_int64(2) {
+                Some(indices) => indices,
+                None => deny!(
+                    "circular TensorScatter requires constant write_indices because MLX cannot split an update at a dynamic wrap point"
+                ),
+            };
+            require!(
+                indices.len() == 1 && indices[0] >= 0 && indices[0] < past.shape[axis],
+                "circular TensorScatter write index must be in [0, {})",
+                past.shape[axis]
+            );
+        } else if let Some(indices) = node.read_const_int64(2) {
+            require!(
+                indices.len() == 1
+                    && indices[0] >= 0
+                    && indices[0] + update.shape[axis] <= past.shape[axis],
+                "linear TensorScatter write index plus update length must fit in the cache"
+            );
+        }
     }
     Ok(())
 }
@@ -1268,7 +1365,7 @@ pub fn register(registry: &mut OpRegistry) {
     registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "TensorScatter",
-        min_opset: K_ANY_OPSET,
+        min_opset: 24,
         max_opset: K_ANY_OPSET,
         handler: tensor_scatter_op as OpHandler,
         claim: tensor_scatter_claim as ClaimPredicate,

@@ -486,6 +486,25 @@ def test_pad_constant_value():
     m.assert_matches_cpu(model, {"d": data}, **tol(np.float32))
 
 
+@pytest.mark.parametrize("mode", ["reflect", "edge", "wrap"])
+def test_pad_modes_with_axes(mode: str):
+    """Opset-25 Pad modes apply only to the selected, non-leading dimensions."""
+    data = sample(np.float32, [2, 3, 4])
+    pads = initz("p", np.array([1, 2, 1, 1], np.int64))
+    constant_value = initz("cv", np.array(0.0, np.float32))
+    axes = initz("a", np.array([1, 2], np.int64))
+    model = build(
+        "Pad",
+        [m.tensor("d", DT.FLOAT, [2, 3, 4]), pads, constant_value, axes],
+        [m.tensor("o", DT.FLOAT, [2, 5, 7])],
+        inits=(pads, constant_value, axes),
+        attrs=[ir.AttrString("mode", mode)],
+        opset=25,
+    )
+    m.assert_mlx_claims(model, {"d": data})
+    m.assert_matches_cpu(model, {"d": data}, **tol(np.float32))
+
+
 # --- Identity ---------------------------------------------------------------------------------
 @pytest.mark.parametrize("dt", MOVE_DTYPES)
 def test_identity(dt):
