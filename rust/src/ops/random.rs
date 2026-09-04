@@ -8,7 +8,7 @@ use crate::engine::{MlxError, NodeDesc, TranslationContext, mlx_dtype_from_onnx}
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
     ClaimPredicate, ClaimResult, K_ANY_OPSET, NodeView, OpHandler, OpRegistration, OpRegistry,
-    is_mlx_float, is_mlx_supported,
+    is_mlx_cpu_float, is_mlx_float, is_mlx_supported,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -419,32 +419,109 @@ fn multinomial_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-fn parse_einsum(raw: &str) -> Option<(Vec<String>, String)> {
-    let eq: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
-    let arrow = eq.find("->")?;
-    if eq[arrow + 2..].contains("->") {
-        return None;
-    }
-    let lhs = &eq[..arrow];
-    let output = eq[arrow + 2..].to_string();
-    if lhs.is_empty() || output.is_empty() {
-        return None;
-    }
-    let mut terms = Vec::new();
-    for term in lhs.split(',') {
-        if term.is_empty() {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EinsumToken {
+    Label(char),
+    Ellipsis,
+}
+
+fn parse_einsum_term(raw: &str, output: bool) -> Option<Vec<EinsumToken>> {
+    let bytes = raw.as_bytes();
+    let mut tokens = Vec::new();
+    let mut labels = HashSet::new();
+    let mut has_ellipsis = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c.is_ascii_alphabetic() {
+            if output && !labels.insert(c) {
+                return None;
+            }
+            tokens.push(EinsumToken::Label(c));
+            i += 1;
+        } else if bytes[i..].starts_with(b"...") && !has_ellipsis {
+            tokens.push(EinsumToken::Ellipsis);
+            has_ellipsis = true;
+            i += 3;
+        } else {
             return None;
         }
-        terms.push(term.to_string());
     }
-    let simple = |t: &str| -> bool {
-        let mut seen = HashSet::new();
-        t.chars().all(|c| c.is_ascii_lowercase() && seen.insert(c))
-    };
-    if !simple(&output) || !terms.iter().all(|t| simple(t)) {
+    Some(tokens)
+}
+
+fn parse_einsum(raw: &str) -> Option<(Vec<Vec<EinsumToken>>, Vec<EinsumToken>)> {
+    let eq: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    // MLX 0.32.1 includes equation punctuation in its internal used-character set before reserving
+    // virtual labels. More than 52 distinct raw characters underflows that reservation.
+    if eq.chars().collect::<HashSet<_>>().len() > 52 {
         return None;
     }
+    let (lhs, explicit_output) = match eq.split_once("->") {
+        Some((lhs, output)) if !output.contains("->") => (lhs, Some(output)),
+        Some(_) => return None,
+        None => (eq.as_str(), None),
+    };
+    if lhs.is_empty() {
+        return None;
+    }
+    let terms = lhs
+        .split(',')
+        .map(|term| parse_einsum_term(term, false))
+        .collect::<Option<Vec<_>>>()?;
+    // MLX 0.32.1 parses comma-separated terms with std::getline, which drops a trailing empty
+    // scalar term. Leading/interior scalar terms are preserved and remain supported.
+    if lhs.ends_with(',') {
+        return None;
+    }
+    let output = if let Some(output) = explicit_output {
+        parse_einsum_term(output, true)?
+    } else {
+        let mut counts = HashMap::new();
+        let mut has_ellipsis = false;
+        for token in terms.iter().flatten() {
+            match token {
+                EinsumToken::Label(label) => *counts.entry(*label).or_insert(0usize) += 1,
+                EinsumToken::Ellipsis => has_ellipsis = true,
+            }
+        }
+        let mut labels = counts
+            .into_iter()
+            .filter_map(|(label, count)| (count == 1).then_some(label))
+            .collect::<Vec<_>>();
+        labels.sort_unstable();
+        let mut output = Vec::with_capacity(labels.len() + usize::from(has_ellipsis));
+        if has_ellipsis {
+            output.push(EinsumToken::Ellipsis);
+        }
+        output.extend(labels.into_iter().map(EinsumToken::Label));
+        output
+    };
     Some((terms, output))
+}
+
+fn merge_broadcast_dim(existing: i64, next: i64) -> Option<i64> {
+    if existing < 0 && next < 0 {
+        None
+    } else if existing == next || next == 1 {
+        if (existing == 0 || existing < 0) && next == 1 {
+            return None;
+        }
+        Some(existing)
+    } else if existing == 1 {
+        if next == 0 || next < 0 {
+            return None;
+        }
+        Some(next)
+    } else if existing == 0 || next == 0 {
+        None
+    } else if existing < 0 {
+        Some(next)
+    } else if next < 0 {
+        Some(existing)
+    } else {
+        None
+    }
 }
 
 fn einsum_claim(node: &NodeView) -> ClaimResult {
@@ -463,7 +540,7 @@ fn einsum_claim(node: &NodeView) -> ClaimResult {
     let (input_terms, output_term) = match parse_einsum(&equation) {
         Some(v) => v,
         None => deny!(
-            "equation must use explicit -> output, lowercase labels only, and no repeated label within a term (got {equation:?})"
+            "equation contains invalid labels, ellipsis, arrow, or repeated output labels (got {equation:?})"
         ),
     };
     require!(
@@ -477,18 +554,15 @@ fn einsum_claim(node: &NodeView) -> ClaimResult {
     };
     let dtype = in0.dtype;
     require!(
-        is_random_float(dtype) && out.dtype == dtype,
-        "all tensors must share float32 or float16 dtype, got first input {} and output {}",
+        is_mlx_cpu_float(dtype) && out.dtype == dtype,
+        "all tensors must share an MLX float dtype, got first input {} and output {}",
         crate::registry::ort_dtype_name(dtype),
         crate::registry::ort_dtype_name(out.dtype)
     );
-    require!(
-        out.shape.len() == output_term.len(),
-        "output rank {} must match equation output term length {}",
-        out.shape.len(),
-        output_term.len()
-    );
     let mut dims: HashMap<char, i64> = HashMap::new();
+    let mut ellipsis_dims: Vec<i64> = Vec::new();
+    let mut input_has_ellipsis = false;
+    let mut input_ellipsis_rank: Option<usize> = None;
     for (i, term) in input_terms.iter().enumerate() {
         let info = match node.input_info(i) {
             Some(x) => x,
@@ -500,39 +574,108 @@ fn einsum_claim(node: &NodeView) -> ClaimResult {
             crate::registry::ort_dtype_name(dtype),
             crate::registry::ort_dtype_name(info.dtype)
         );
+        let label_count = term
+            .iter()
+            .filter(|token| matches!(token, EinsumToken::Label(_)))
+            .count();
+        let has_ellipsis = term.contains(&EinsumToken::Ellipsis);
+        input_has_ellipsis |= has_ellipsis;
         require!(
-            info.shape.len() == term.len(),
-            "input {i} rank {} must match equation term length {}",
+            (has_ellipsis && info.shape.len() >= label_count)
+                || (!has_ellipsis && info.shape.len() == label_count),
+            "input {i} rank {} is incompatible with {} labels{}",
             info.shape.len(),
-            term.len()
+            label_count,
+            if has_ellipsis { " plus ellipsis" } else { "" }
         );
-        for (axis, label) in term.chars().enumerate() {
-            let d = info.shape[axis];
-            match dims.get(&label).copied() {
+        let ellipsis_rank = info.shape.len() - label_count;
+        if has_ellipsis {
+            match input_ellipsis_rank {
+                Some(expected) => require!(
+                    expected == ellipsis_rank,
+                    "input {i} ellipsis rank {ellipsis_rank} must match prior ellipsis rank {expected}"
+                ),
                 None => {
-                    dims.insert(label, d);
-                }
-                Some(existing) => {
-                    require!(
-                        existing < 0 || d < 0 || existing == d,
-                        "label {label:?} has incompatible dimensions {existing} and {d}"
-                    );
-                    if existing < 0 && d >= 0 {
-                        dims.insert(label, d);
-                    }
+                    input_ellipsis_rank = Some(ellipsis_rank);
+                    ellipsis_dims = vec![1; ellipsis_rank];
                 }
             }
         }
-    }
-    for (axis, label) in output_term.chars().enumerate() {
-        match dims.get(&label).copied() {
-            Some(d) => require!(
-                d < 0 || out.shape[axis] < 0 || d == out.shape[axis],
-                "output label {label:?} dimension {} does not match inferred dimension {d}",
-                out.shape[axis]
-            ),
-            None => deny!("output label {label:?} does not appear in any input term"),
+        let mut axis = 0;
+        let mut local_dims = HashMap::new();
+        for token in term {
+            let EinsumToken::Label(label) = token else {
+                let start = ellipsis_dims.len() - ellipsis_rank;
+                for (offset, &d) in info.shape[axis..axis + ellipsis_rank].iter().enumerate() {
+                    let existing = ellipsis_dims[start + offset];
+                    let Some(merged) = merge_broadcast_dim(existing, d) else {
+                        deny!("input {i} ellipsis has incompatible dimensions {existing} and {d}")
+                    };
+                    ellipsis_dims[start + offset] = merged;
+                }
+                axis += ellipsis_rank;
+                continue;
+            };
+            let d = info.shape[axis];
+            if let Some(existing) = local_dims.insert(*label, d) {
+                require!(
+                    existing < 0 || d < 0 || existing == d,
+                    "input {i} repeated label {label:?} has incompatible dimensions {existing} and {d}"
+                );
+            }
+            match dims.get(label).copied() {
+                None => {
+                    dims.insert(*label, d);
+                }
+                Some(existing) => {
+                    let Some(merged) = merge_broadcast_dim(existing, d) else {
+                        deny!("label {label:?} has incompatible dimensions {existing} and {d}")
+                    };
+                    dims.insert(*label, merged);
+                }
+            }
+            axis += 1;
         }
+    }
+    let unique_labels = dims.len();
+    let ellipsis_rank = input_ellipsis_rank.unwrap_or(0);
+    require!(
+        unique_labels + ellipsis_rank <= 52,
+        "equation needs {} labels after ellipsis expansion, but MLX supports at most 52",
+        unique_labels + ellipsis_rank
+    );
+    let output_has_ellipsis = output_term.contains(&EinsumToken::Ellipsis);
+    require!(
+        ellipsis_rank == 0 || output_has_ellipsis,
+        "a non-empty input ellipsis must appear in the output"
+    );
+    let mut expected_output = Vec::new();
+    for token in output_term {
+        match token {
+            EinsumToken::Ellipsis => {
+                require!(
+                    input_has_ellipsis,
+                    "output ellipsis requires an ellipsis in at least one input term"
+                );
+                expected_output.extend_from_slice(&ellipsis_dims);
+            }
+            EinsumToken::Label(label) => match dims.get(&label).copied() {
+                Some(d) => expected_output.push(d),
+                None => deny!("output label {label:?} does not appear in any input term"),
+            },
+        }
+    }
+    require!(
+        out.shape.len() == expected_output.len(),
+        "output rank {} must match inferred equation rank {}",
+        out.shape.len(),
+        expected_output.len()
+    );
+    for (axis, (&expected, &actual)) in expected_output.iter().zip(&out.shape).enumerate() {
+        require!(
+            expected < 0 || actual < 0 || expected == actual,
+            "output axis {axis} dimension {actual} does not match inferred dimension {expected}"
+        );
     }
     Ok(())
 }
@@ -614,4 +757,36 @@ pub fn register(registry: &mut OpRegistry) {
         multinomial_claim,
     );
     shapeless(registry, "Einsum", 12, einsum_op, einsum_claim);
+}
+
+#[cfg(test)]
+mod einsum_parser_tests {
+    use super::{merge_broadcast_dim, parse_einsum};
+
+    #[test]
+    fn scalar_terms_and_outputs_are_valid_except_trailing_scalar_input() {
+        assert!(parse_einsum(",ij->ij").is_some());
+        assert!(parse_einsum("ij,,jk->ik").is_some());
+        assert!(parse_einsum("i,i->").is_some());
+        assert!(parse_einsum("ij,->ij").is_none());
+    }
+
+    #[test]
+    fn mlx_raw_character_limit_is_enforced() {
+        let labels = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        assert!(parse_einsum(&format!("{labels}->{labels}")).is_none());
+        let safe = &labels[..50];
+        assert!(parse_einsum(&format!("{safe}->{safe}")).is_some());
+    }
+
+    #[test]
+    fn mlx_unsafe_zero_size_broadcast_possibilities_are_declined() {
+        assert_eq!(merge_broadcast_dim(0, 1), None);
+        assert_eq!(merge_broadcast_dim(1, 0), None);
+        assert_eq!(merge_broadcast_dim(-1, -1), None);
+        assert_eq!(merge_broadcast_dim(-1, 1), None);
+        assert_eq!(merge_broadcast_dim(1, -1), None);
+        assert_eq!(merge_broadcast_dim(-1, 4), Some(4));
+        assert_eq!(merge_broadcast_dim(4, -1), Some(4));
+    }
 }
