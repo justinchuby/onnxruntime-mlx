@@ -94,6 +94,9 @@ def _cumsum_model(
 
 def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
     """The CumSum/Shape/Slice mask prefix used by Mobius decoder exports."""
+    shape_name_prefix = (
+        "decoder_shape_safety" if decoder_cluster else "shape_safety"
+    )
     input_ids = ir.Value(
         name="input_ids",
         type=ir.TensorType(DT.INT64),
@@ -172,7 +175,7 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
             "CumSum",
             [attention_mask, axis],
             outputs=[all_indices],
-            name="shape_safety_cumsum",
+            name=f"{shape_name_prefix}_cumsum",
         ),
         ir.node("Unsqueeze", [all_indices, axis_1], outputs=[kv_indices]),
         ir.node(
@@ -192,7 +195,7 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
             "Slice",
             [all_indices, start, total_length, axis_1],
             outputs=[query_indices_2d],
-            name="shape_safety_slice",
+            name=f"{shape_name_prefix}_slice",
         ),
         ir.node("Unsqueeze", [query_indices_2d, axis_2], outputs=[query_indices]),
         ir.node("GreaterOrEqual", [query_indices, kv_indices], outputs=[mask_3d]),
@@ -270,7 +273,7 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
                 },
                 domain="com.microsoft",
                 outputs=[attention_output, present_key, present_value],
-                name="shape_safety_gqa",
+                name="decoder_shape_safety_gqa",
             )
         )
         tokens = m.tensor("tokens", DT.FLOAT, [1, hidden])
@@ -300,13 +303,13 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
                     "Reshape",
                     [attention_output, token_shape],
                     outputs=[tokens],
-                    name="shape_safety_tokens",
+                    name="decoder_shape_safety_tokens",
                 ),
                 ir.node(
                     "MatMul",
                     [tokens, router_weight],
                     outputs=[router],
-                    name="shape_safety_router",
+                    name="decoder_shape_safety_router",
                 ),
             ]
         )
@@ -350,7 +353,7 @@ def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
                     },
                     domain="com.microsoft",
                     outputs=[qmoe_output],
-                    name="shape_safety_qmoe",
+                    name="decoder_shape_safety_qmoe",
                 ),
                 ir.node("Add", [qmoe_output, tokens], outputs=[decoder_output]),
             ]
@@ -715,7 +718,7 @@ def test_cumsum_failures_do_not_abort_host() -> None:
             for event in trace_events
             if event.get("name") == "mlx.compute[decode]"
             and event.get("args", {}).get("path") == "decode"
-            and "shape_safety_gqa" in partition_names(event)
+            and "decoder_shape_safety_gqa" in partition_names(event)
         ]
         assert [event["args"].get("cache") for event in gqa_decode_events] == [
             "MISS",
@@ -730,9 +733,9 @@ def test_cumsum_failures_do_not_abort_host() -> None:
         assert all(
             set(partition_names(event))
             == {
-                "shape_safety_gqa",
-                "shape_safety_tokens",
-                "shape_safety_router",
+                "decoder_shape_safety_gqa",
+                "decoder_shape_safety_tokens",
+                "decoder_shape_safety_router",
             }
             and set(partition_ops(event))
             == {"GroupQueryAttention", "Reshape", "MatMul"}
@@ -742,31 +745,41 @@ def test_cumsum_failures_do_not_abort_host() -> None:
             f"shape-keyed Slice emitter: {gqa_decode_events}"
         )
 
-        cumsum_events = [
+        cumsum_compute_events = [
             event
             for event in trace_events
+            if event.get("name", "").startswith("mlx.compute[")
+            and "decoder_shape_safety_cumsum" in partition_names(event)
+        ]
+        slice_compute_events = [
+            event
+            for event in trace_events
+            if event.get("name", "").startswith("mlx.compute[")
+            and "decoder_shape_safety_slice" in partition_names(event)
+        ]
+        cumsum_events = [
+            event
+            for event in cumsum_compute_events
             if event.get("name") == "mlx.compute[general]"
-            and "shape_safety_cumsum" in partition_names(event)
         ]
         slice_events = [
             event
-            for event in trace_events
+            for event in slice_compute_events
             if event.get("name") == "mlx.compute[general]"
-            and "shape_safety_slice" in partition_names(event)
         ]
         assert [event["args"].get("cache") for event in cumsum_events] == [
             "MISS",
             "RETRACE",
         ], (
             "the partition containing CumSum must be shape-keyed and retrace for T=4->7: "
-            f"{cumsum_events}"
+            f"{cumsum_compute_events}"
         )
         assert [event["args"].get("cache") for event in slice_events] == [
             "MISS",
             "RETRACE",
         ], (
             "the partition containing ONNX Slice must be shape-keyed and retrace for T=4->7: "
-            f"{slice_events}"
+            f"{slice_compute_events}"
         )
         for cumsum_event, slice_event in zip(cumsum_events, slice_events, strict=True):
             same_partition = cumsum_event["args"].get(
@@ -774,8 +787,8 @@ def test_cumsum_failures_do_not_abort_host() -> None:
             ) == slice_event["args"].get("partition_id")
             if same_partition:
                 assert {
-                    "shape_safety_cumsum",
-                    "shape_safety_slice",
+                    "decoder_shape_safety_cumsum",
+                    "decoder_shape_safety_slice",
                 } <= set(partition_names(cumsum_event))
                 assert {"CumSum", "Slice"} <= set(partition_ops(cumsum_event))
             else:
@@ -786,7 +799,7 @@ def test_cumsum_failures_do_not_abort_host() -> None:
             event
             for event in trace_events
             if event.get("name") == "mlx.compute[general]"
-            and partition_names(event) == ("shape_safety_qmoe",)
+            and partition_names(event) == ("decoder_shape_safety_qmoe",)
         ]
         assert [event["args"].get("cache") for event in qmoe_events] == [
             "MISS",
