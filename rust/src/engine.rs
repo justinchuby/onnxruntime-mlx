@@ -1223,7 +1223,7 @@ impl<'a> TranslationContext<'a> {
         Ok(self.keep(res))
     }
 
-    /// Shape-preserving cumulative sum.
+    /// Shape-preserving cumulative reduction.
     ///
     /// MLX 0.32's backing `Scan` primitive lacks `Primitive::output_shapes`, so every registered
     /// handler that can reach this helper must declare `CompileShapeSafety::ShapeKeyedOnly`.
@@ -1236,6 +1236,19 @@ impl<'a> TranslationContext<'a> {
     ) -> Result<mlxsys::mlx_array, MlxError> {
         self.emit(|res, stream| unsafe {
             mlxsys::mlx_cumsum(res, a, axis, reverse, inclusive, stream)
+        })
+    }
+
+    /// Shape-preserving cumulative product with the same MLX Scan shape-inference constraint.
+    pub fn cumprod(
+        &mut self,
+        a: mlxsys::mlx_array,
+        axis: i32,
+        reverse: bool,
+        inclusive: bool,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, stream| unsafe {
+            mlxsys::mlx_cumprod(res, a, axis, reverse, inclusive, stream)
         })
     }
 

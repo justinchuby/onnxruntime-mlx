@@ -88,7 +88,6 @@ fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
             "GroupQueryAttention"
                 | "PagedAttention"
                 | "SparseAttention"
-                | "CumProd"
                 | "Det"
                 | "ImageDecoder"
                 | "NonMaxSuppression"
@@ -109,7 +108,7 @@ fn is_general_compile_unsafe(n: &NodeDesc) -> bool {
 /// A node that would read a DATA-DEPENDENT runtime shape/scalar while translating the graph.
 ///
 /// Shape-keyed MLX caches observe tensor shapes/dtypes, not tensor values. A direct runtime
-/// Reshape/Expand/Slice/Range parameter or CumSum axis would otherwise be read from the live
+/// Reshape/Expand/Slice/Range parameter or cumulative axis would otherwise be read from the live
 /// `OrtKernelContext` during the first trace and silently baked into every later call with the same
 /// input shapes. Initializers and shape-const intermediates (derived from `Shape`/`Size`) are safe:
 /// their value is fixed, or changes exactly when the shape key changes.
@@ -124,7 +123,7 @@ fn reads_data_dependent_parameter(n: &NodeDesc) -> bool {
         "Reshape" | "Expand" => &[1],
         "Slice" => &[1, 2, 3, 4],
         "Range" => &[0, 1, 2],
-        "CumSum" => &[1],
+        "CumSum" | "CumProd" => &[1],
         _ => return false,
     };
     idx.iter().any(|&i| {
@@ -1246,14 +1245,12 @@ mod shape_inference_tests {
         }
     }
 
-    fn cumsum(axis_source: Src) -> NodeDesc {
+    fn cumulative(op_type: &str, axis_source: Src, reason: &'static str) -> NodeDesc {
         let mut node = NodeDesc::new(
-            "CumSum".to_string(),
+            op_type.to_string(),
             String::new(),
             14,
-            CompileShapeSafety::ShapeKeyedOnly {
-                reason: crate::registry::MLX_SCAN_SHAPE_REASON,
-            },
+            CompileShapeSafety::ShapeKeyedOnly { reason },
         );
         node.inputs = vec![input("data", Src::CtxInput), input("axis", axis_source)];
         node
@@ -1266,6 +1263,14 @@ mod shape_inference_tests {
                 "CumSum".to_string(),
                 String::new(),
                 14,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SCAN_SHAPE_REASON,
+                },
+            ),
+            NodeDesc::new(
+                "CumProd".to_string(),
+                String::new(),
+                26,
                 CompileShapeSafety::ShapeKeyedOnly {
                     reason: crate::registry::MLX_SCAN_SHAPE_REASON,
                 },
@@ -1346,11 +1351,39 @@ mod shape_inference_tests {
     #[test]
     fn runtime_cumsum_axis_is_not_a_shape_key() {
         assert!(
-            reads_data_dependent_parameter(&cumsum(Src::CtxInput)),
+            reads_data_dependent_parameter(&cumulative(
+                "CumSum",
+                Src::CtxInput,
+                crate::registry::MLX_SCAN_SHAPE_REASON,
+            )),
             "a runtime axis value must not be baked into a shape-keyed closure"
         );
         assert!(
-            !reads_data_dependent_parameter(&cumsum(Src::Initializer)),
+            !reads_data_dependent_parameter(&cumulative(
+                "CumSum",
+                Src::Initializer,
+                crate::registry::MLX_SCAN_SHAPE_REASON,
+            )),
+            "an initializer axis is compile-time data"
+        );
+    }
+
+    #[test]
+    fn runtime_cumprod_axis_is_not_a_shape_key() {
+        assert!(
+            reads_data_dependent_parameter(&cumulative(
+                "CumProd",
+                Src::CtxInput,
+                crate::registry::MLX_SCAN_SHAPE_REASON,
+            )),
+            "a runtime axis value must not be baked into a shape-keyed closure"
+        );
+        assert!(
+            !reads_data_dependent_parameter(&cumulative(
+                "CumProd",
+                Src::Initializer,
+                crate::registry::MLX_SCAN_SHAPE_REASON,
+            )),
             "an initializer axis is compile-time data"
         );
     }

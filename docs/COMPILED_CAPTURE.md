@@ -71,7 +71,7 @@ The MLX 0.32.1 audit found these missing-`output_shapes` primitives in current l
 | MLX primitive | Registered lowerings that can emit it |
 |---|---|
 | `Slice` | ONNX `Slice`; QMoE; CausalConvWithState; LinearAttention; Scan; DeformConv; LRN; RNN/GRU/LSTM; DFT; `ai.onnx.ml` SVMClassifier/FeatureVectorizer; `com.microsoft` Attention/PackedMultiHeadAttention/RotaryEmbedding/MRotaryEmbedding/PagedAttention; sliding-window and attention-bias GroupQueryAttention; GridSample/RoiAlign/MaxRoiPool; conditional block-quantized matmul, MatMulNBits zero-point trim, and GatherBlockQuantized zero-point trim forms |
-| `Scan` | CumSum; internal LinearAttention cumulative gating |
+| `Scan` | CumSum; CumProd; internal LinearAttention cumulative gating |
 | `AsStrided` | AveragePool/MaxPool/LpPool; STFT |
 | `Pad` | AveragePool/MaxPool/LpPool; LRN; CenterCropPad; ONNX Pad; LinearAttention; conditional unaligned MatMulNBits |
 | `RandomBits` | RandomNormal/RandomNormalLike/RandomUniform/RandomUniformLike/Bernoulli/Multinomial |
@@ -121,7 +121,7 @@ violates one falls back to eager (or, for attention, to the growing-concat route
    (`compile_enabled`, `compiled.rs:46-51`).
 
 2. **No data-dependent translation parameters.** `Reshape` / `Expand` target (input 1), `Slice`
-   starts/ends/axes/steps (1–4), `Range` bounds (0–2), and the `CumSum` axis (1) must be **constant or
+   starts/ends/axes/steps (1–4), `Range` bounds (0–2), and the `CumSum`/`CumProd` axis (1) must be **constant or
    shape-const** (derived from `Shape`/`Size`), never plain runtime data
    (`reads_data_dependent_parameter`). Shape-const is OK because it changes with the shape-keyed cache
    key; an ordinary runtime tensor value does not participate in that key and would otherwise be
