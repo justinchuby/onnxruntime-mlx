@@ -2,8 +2,8 @@
 
 Covers the ops added in this work:
   * ``GatherBlockQuantized`` asymmetric 4-input form (explicit packed int4 ``zero_points``).
-  * ``TensorScatter`` (ai.onnx opset 24) — static-KV-cache scatter, prefill (offset 0) and decode
-    (per-batch write index, batch_size 1) forms.
+  * ``TensorScatter`` (ai.onnx opset 24) — static-KV-cache scatter, prefill (offset 0), decode
+    (per-batch write index, batch_size 1), and circular-wrap forms.
   * ``CausalConvWithState`` (com.microsoft) — stateful causal depthwise conv1d, with/without carry
     state and bias, plus fused SiLU/Swish.
   * ``LinearAttention`` (com.microsoft) — a delta-rule linear-attention recurrence unrolled over the
@@ -331,6 +331,33 @@ def test_tensor_scatter_decode_write_index():
     model, feeds = _tensor_scatter_model(batch=1, with_write_indices=True)
     if not _cpu_supports(model, feeds):
         pytest.skip("ORT CPU lacks TensorScatter (opset 24) in this build")
+    m.assert_matches_cpu(model, feeds, rtol=1e-6, atol=0.0)
+
+
+def test_tensor_scatter_circular_constant_write_index():
+    """Circular mode splits an update that crosses the fixed cache boundary."""
+    B, H, S, D, seq = 1, 2, 8, 4, 3
+    wi = initz("wi", np.array([7], dtype=np.int64))
+    model = build(
+        "TensorScatter",
+        [
+            m.tensor("past", DT.FLOAT, [B, H, S, D]),
+            m.tensor("upd", DT.FLOAT, [B, H, seq, D]),
+            wi,
+        ],
+        [m.tensor("present", DT.FLOAT, [B, H, S, D])],
+        attrs=[ir.AttrString("mode", "circular"), ir.AttrInt64("axis", -2)],
+        inits=(wi,),
+        opset=24,
+    )
+    rng = np.random.default_rng(1295)
+    feeds = {
+        "past": rng.standard_normal((B, H, S, D)).astype(np.float32),
+        "upd": rng.standard_normal((B, H, seq, D)).astype(np.float32),
+    }
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU lacks TensorScatter (opset 24) in this build")
+    m.assert_mlx_claims(model, feeds)
     m.assert_matches_cpu(model, feeds, rtol=1e-6, atol=0.0)
 
 

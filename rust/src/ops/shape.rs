@@ -484,7 +484,16 @@ fn space_to_depth_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), M
     let h = shape[2] / block;
     let w = shape[3] / block;
     let reshaped = ctx.reshape(data, &[shape[0], shape[1], h, block, w, block])?;
-    let transposed = ctx.transpose(reshaped, &[0, 3, 5, 1, 2, 4])?;
+    let perm = match n.strings.get("mode").map(String::as_str).unwrap_or("DCR") {
+        "DCR" => [0, 3, 5, 1, 2, 4],
+        "CRD" => [0, 1, 3, 5, 2, 4],
+        mode => {
+            return Err(format!(
+                "SpaceToDepth: mode must be DCR or CRD, got {mode:?}"
+            ));
+        }
+    };
+    let transposed = ctx.transpose(reshaped, &perm)?;
     let out = ctx.reshape(transposed, &[shape[0], shape[1] * block * block, h, w])?;
     let out = ctx.contiguous(out)?;
     ctx.bind(&n.outputs[0], out);
@@ -826,22 +835,41 @@ fn pad_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         let z = ctx.scalar_i64(0);
         ctx.astype(z, dt)?
     };
-    let mode = b"constant\0";
-    let r = ctx.emit(|res, s| unsafe {
-        mlx::mlx_pad(
-            res,
-            data,
-            ax.as_ptr(),
-            ax.len(),
-            low.as_ptr(),
-            low.len(),
-            high.as_ptr(),
-            high.len(),
-            pad_value,
-            mode.as_ptr() as *const std::os::raw::c_char,
-            s,
-        )
-    })?;
+    let mode = n
+        .strings
+        .get("mode")
+        .map(String::as_str)
+        .unwrap_or("constant");
+    let r = match mode {
+        // MLX implements these two modes directly.
+        "constant" | "reflect" => {
+            let mode = if mode == "constant" {
+                c"constant"
+            } else {
+                c"reflect"
+            };
+            ctx.emit(|res, s| unsafe {
+                mlx::mlx_pad(
+                    res,
+                    data,
+                    ax.as_ptr(),
+                    ax.len(),
+                    low.as_ptr(),
+                    low.len(),
+                    high.as_ptr(),
+                    high.len(),
+                    pad_value,
+                    mode.as_ptr(),
+                    s,
+                )
+            })?
+        }
+        // MLX's built-in edge path aborts for multi-axis input and it has no wrap mode. Express
+        // both through stable slice/broadcast/take primitives instead.
+        "edge" => edge_pad(ctx, data, &ax, &low, &high)?,
+        "wrap" => wrap_pad(ctx, data, &ax, &low, &high)?,
+        mode => return Err(format!("Pad: unsupported mode {mode:?}")),
+    };
     // A zero-sized pad result has no backing buffer; re-materialise as clean zeros for CopyOut.
     if ctx.size_of(r) == 0 {
         let shp = ctx.shape_of(r);
@@ -852,6 +880,67 @@ fn pad_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     }
     ctx.bind(&n.outputs[0], r);
     Ok(())
+}
+
+fn edge_pad(
+    ctx: &mut TranslationContext,
+    data: mlx::mlx_array,
+    axes: &[i32],
+    low: &[i32],
+    high: &[i32],
+) -> Result<mlx::mlx_array, MlxError> {
+    let mut result = data;
+    for ((&axis, &before), &after) in axes.iter().zip(low).zip(high) {
+        if before > 0 {
+            let shape = ctx.shape_of(result);
+            let start = vec![0; shape.len()];
+            let mut stop = shape.clone();
+            stop[axis as usize] = 1;
+            let first = ctx.slice(result, &start, &stop)?;
+            let mut target = shape;
+            target[axis as usize] = before;
+            let first = ctx.emit(|res, s| unsafe {
+                mlx::mlx_broadcast_to(res, first, target.as_ptr(), target.len(), s)
+            })?;
+            result = ctx.concat2(first, result, axis)?;
+        }
+        if after > 0 {
+            let shape = ctx.shape_of(result);
+            let mut start = vec![0; shape.len()];
+            start[axis as usize] = shape[axis as usize] - 1;
+            let last = ctx.slice(result, &start, &shape)?;
+            let mut target = shape;
+            target[axis as usize] = after;
+            let last = ctx.emit(|res, s| unsafe {
+                mlx::mlx_broadcast_to(res, last, target.as_ptr(), target.len(), s)
+            })?;
+            result = ctx.concat2(result, last, axis)?;
+        }
+    }
+    Ok(result)
+}
+
+fn wrap_pad(
+    ctx: &mut TranslationContext,
+    data: mlx::mlx_array,
+    axes: &[i32],
+    low: &[i32],
+    high: &[i32],
+) -> Result<mlx::mlx_array, MlxError> {
+    let mut result = data;
+    for ((&axis, &before), &after) in axes.iter().zip(low).zip(high) {
+        let extent = ctx.dim(result, axis);
+        let indices = ctx.arange(
+            -(before as f64),
+            (extent + after) as f64,
+            1.0,
+            mlx::mlx_dtype__MLX_INT32,
+        )?;
+        let extent = ctx.scalar_i32(extent);
+        let indices = ctx.binary(mlx::mlx_remainder, indices, extent)?;
+        result = ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, result, indices, axis, s) })?;
+    }
+    Ok(result)
 }
 
 fn identity_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
@@ -1631,6 +1720,11 @@ fn space_to_depth_claim(node: &NodeView) -> ClaimResult {
         data.shape[2] % block == 0 && data.shape[3] % block == 0,
         "SpaceToDepth: spatial extents must be divisible by blocksize"
     );
+    let mode = node.string_attr("mode", "DCR");
+    require!(
+        mode == "DCR" || mode == "CRD",
+        "SpaceToDepth: mode must be DCR or CRD"
+    );
     let expected = vec![
         data.shape[0],
         data.shape[1] * block * block,
@@ -2025,37 +2119,55 @@ fn pad_claim(node: &NodeView) -> ClaimResult {
         crate::registry::ort_dtype_name(out),
         crate::registry::ort_dtype_name(data)
     );
+    let mode = node.string_attr("mode", "constant");
     require!(
-        node.string_attr("mode", "constant") == "constant",
-        "Pad: only constant, non-negative `pads` with mode=constant are claimed (runtime pads, negative/cropping pads, or reflect/edge modes stay on CPU)"
+        matches!(mode.as_str(), "constant" | "reflect" | "edge" | "wrap"),
+        "Pad: mode must be constant, reflect, edge, or wrap"
     );
-    match node.read_const_int64(1) {
-        Some(pads) => {
-            require!(
-                pads.iter().all(|&p| p >= 0),
-                "Pad: only constant, non-negative `pads` with mode=constant are claimed (runtime pads, negative/cropping pads, or reflect/edge modes stay on CPU)"
-            );
+    let pads = match node.read_const_int64(1) {
+        Some(pads) => pads,
+        None => deny!("Pad: `pads` must be a constant int64 initializer"),
+    };
+    require!(
+        pads.iter().all(|&pad| (0..=i32::MAX as i64).contains(&pad)),
+        "Pad: pads must be non-negative values that fit MLX int32 extents"
+    );
+    let rank = node.input_info(0).map_or(0, |data| data.shape.len()) as i64;
+    let axes = if nin >= 4 && node.input_present(3) {
+        match node.read_const_int64(3) {
+            Some(axes) => axes,
+            None => deny!("Pad: `axes` must be a constant int64 initializer"),
         }
-        None => deny!(
-            "Pad: only constant, non-negative `pads` with mode=constant are claimed (runtime pads, negative/cropping pads, or reflect/edge modes stay on CPU)"
-        ),
+    } else {
+        (0..rank).collect()
+    };
+    require!(
+        pads.len() == axes.len() * 2,
+        "Pad: `pads` length {} must be twice `axes` length {}",
+        pads.len(),
+        axes.len()
+    );
+    let mut seen = vec![false; rank as usize];
+    for axis in axes {
+        require!(
+            axis >= -rank && axis < rank,
+            "Pad: axis {axis} is out of range for rank {rank}"
+        );
+        let axis = norm_axis(axis, rank as i32) as usize;
+        require!(!seen[axis], "Pad: axes must be unique");
+        seen[axis] = true;
     }
     if nin >= 3 && node.input_present(2) {
         match node.input_info(2) {
-            Some(cv) if cv.dtype == data => {}
+            Some(cv) if cv.dtype == data && cv.shape.is_empty() => {}
             Some(cv) => deny!(
-                "Pad: constant_value dtype {} must match data dtype {}",
+                "Pad: constant_value must be a scalar with dtype {} (got {} shape {:?})",
+                crate::registry::ort_dtype_name(data),
                 crate::registry::ort_dtype_name(cv.dtype),
-                crate::registry::ort_dtype_name(data)
+                cv.shape
             ),
             None => deny!("Pad: constant_value input has no tensor type/shape info"),
         }
-    }
-    if nin >= 4 && node.input_present(3) {
-        require!(
-            node.is_const_int64(3),
-            "Pad: `axes` must be a constant int64 initializer; this node's is a runtime value — stays on CPU"
-        );
     }
     Ok(())
 }
