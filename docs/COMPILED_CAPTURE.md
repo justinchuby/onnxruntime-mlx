@@ -60,6 +60,11 @@ shape-keyed or eager partition instead of aborting the surrounding shapeless dec
 ShapeKeyed pays one recompile per distinct `(shape, dtype)` tuple — cheap when the shape set is small
 and repeating (prefill prompt lengths, CNN batch sizes), pathological if unbounded.
 
+This is declared as a property of each registered lowering (`CompileShapeSafety`), not inferred from
+model or node names. The same property marks `LinearAttention`, whose long-prefill implementation
+uses an internal `mlx_cumsum`; it remains eligible for shape-keyed prefill while being barred from a
+future shapeless route.
+
 ### Two distinct senses of "dynamic"
 
 - **Symbolic-dynamic at claim time** (a `-1`/symbolic dim in the graph): always fine **as long as the

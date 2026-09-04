@@ -829,4 +829,8 @@ def test_linear_attention_qwen35_real_prefill(
     )
     if not _cpu_supports(model, feeds):
         pytest.skip("ORT CPU lacks com.microsoft.LinearAttention (per-head-scalar decay) in this build")
+    if rule == "gated_delta" and T == 128 and not with_past and not dyn_time:
+        # This exact case takes `linear_attention_chunked`, whose internal cumulative decay uses
+        # TranslationContext::cumsum. Prove the shape-safety registration did not unclaim the op.
+        m.assert_mlx_claims(model, feeds)
     m.assert_matches_cpu(model, feeds, rtol=2e-3, atol=2e-3)

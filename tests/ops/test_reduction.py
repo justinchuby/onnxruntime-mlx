@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import numpy as np
 import onnx_ir as ir
 import pytest
 from onnx_ir import DataType as DT
 
 import _models as m
+
+_ABORT_CHILD_ENV = "ONNXRUNTIME_EP_MLX_CUMSUM_ABORT_CHILD"
 
 
 def _initializer(name: str, value: np.ndarray) -> ir.Value:
@@ -46,20 +53,24 @@ def _model_with_axes_attribute(
 def _cumsum_model(
     *,
     axis_initializer: int | None,
+    data_dtype: DT = DT.FLOAT,
+    axis_dtype: DT = DT.INT64,
     axis_shape: list[int] | None = None,
     exclusive: int = 0,
     reverse: int = 0,
     input_name: str = "x",
+    opset: int = 14,
 ) -> bytes:
     shape: list[int | str] = ["batch", "sequence"]
-    x = ir.Value(name=input_name, type=ir.TensorType(DT.FLOAT), shape=ir.Shape(shape))
-    out = ir.Value(name="out", type=ir.TensorType(DT.FLOAT), shape=ir.Shape(shape))
+    x = ir.Value(name=input_name, type=ir.TensorType(data_dtype), shape=ir.Shape(shape))
+    out = ir.Value(name="out", type=ir.TensorType(data_dtype), shape=ir.Shape(shape))
+    axis_np_dtype = np.int32 if axis_dtype == DT.INT32 else np.int64
     if axis_initializer is None:
-        axis = m.tensor("axis", DT.INT64, axis_shape or [])
+        axis = m.tensor("axis", axis_dtype, axis_shape or [])
         graph_inputs = [x, axis]
         initializers = []
     else:
-        axis = _initializer("axis", np.array(axis_initializer, dtype=np.int64))
+        axis = _initializer("axis", np.array(axis_initializer, dtype=axis_np_dtype))
         graph_inputs = [x]
         initializers = [axis]
     node = ir.node(
@@ -74,7 +85,7 @@ def _cumsum_model(
         nodes=[node],
         initializers=initializers,
         name="mlx_cumsum_shape_preserving",
-        opset_imports={"": 14},
+        opset_imports={"": opset},
     )
     return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
 
@@ -94,6 +105,8 @@ def _vibevoice_attention_bias_model() -> bytes:
     axis = _initializer("cumsum_axis", np.array(1, dtype=np.int64))
     axis_1 = _initializer("axis_1", np.array([1], dtype=np.int64))
     axis_2 = _initializer("axis_2", np.array([2], dtype=np.int64))
+    zero = _initializer("zero_bias", np.array(0.0, dtype=np.float32))
+    masked = _initializer("masked_bias", np.array(-10_000.0, dtype=np.float32))
 
     all_indices = ir.Value(
         name="all_indices",
@@ -127,9 +140,29 @@ def _vibevoice_attention_bias_model() -> bytes:
         type=ir.TensorType(DT.BOOL),
         shape=ir.Shape(["batch", "query", "total"]),
     )
+    padding_3d = ir.Value(
+        name="padding_3d",
+        type=ir.TensorType(DT.INT64),
+        shape=ir.Shape(["batch", 1, "total"]),
+    )
+    padding_bool = ir.Value(
+        name="padding_bool",
+        type=ir.TensorType(DT.BOOL),
+        shape=ir.Shape(["batch", 1, "total"]),
+    )
+    valid_mask = ir.Value(
+        name="valid_mask",
+        type=ir.TensorType(DT.BOOL),
+        shape=ir.Shape(["batch", "query", "total"]),
+    )
+    bias_3d = ir.Value(
+        name="bias_3d",
+        type=ir.TensorType(DT.FLOAT),
+        shape=ir.Shape(["batch", "query", "total"]),
+    )
     bias = ir.Value(
         name="attention_bias",
-        type=ir.TensorType(DT.BOOL),
+        type=ir.TensorType(DT.FLOAT),
         shape=ir.Shape(["batch", 1, "query", "total"]),
     )
     nodes = [
@@ -155,13 +188,17 @@ def _vibevoice_attention_bias_model() -> bytes:
         ),
         ir.node("Unsqueeze", [query_indices_2d, axis_2], outputs=[query_indices]),
         ir.node("GreaterOrEqual", [query_indices, kv_indices], outputs=[mask_3d]),
-        ir.node("Unsqueeze", [mask_3d, axis_1], outputs=[bias]),
+        ir.node("Unsqueeze", [attention_mask, axis_1], outputs=[padding_3d]),
+        ir.node("Cast", [padding_3d], attributes={"to": int(DT.BOOL)}, outputs=[padding_bool]),
+        ir.node("And", [mask_3d, padding_bool], outputs=[valid_mask]),
+        ir.node("Where", [valid_mask, zero, masked], outputs=[bias_3d]),
+        ir.node("Unsqueeze", [bias_3d, axis_1], outputs=[bias]),
     ]
     graph = ir.Graph(
         [input_ids, attention_mask],
         [bias],
         nodes=nodes,
-        initializers=[axis, axis_1, axis_2],
+        initializers=[axis, axis_1, axis_2, zero, masked],
         name="vibevoice_decoder_attention_bias",
         opset_imports={"": 23},
     )
@@ -230,58 +267,100 @@ def test_reduce_noop_with_empty_axes(op: str) -> None:
     m.assert_matches_cpu(model, {"x": x, "axes": np.empty((0,), dtype=np.int64)})
 
 
+_CUMSUM_DTYPES = [
+    pytest.param(DT.FLOAT, np.float32, 1e-6, id="fp32"),
+    pytest.param(DT.FLOAT16, np.float16, 2e-3, id="fp16"),
+    pytest.param(DT.INT64, np.int64, 0.0, id="int64"),
+]
+
+
+@pytest.mark.parametrize("data_dtype,np_dtype,tolerance", _CUMSUM_DTYPES)
 @pytest.mark.parametrize("axis", [0, -1], ids=["positive-axis", "negative-axis"])
 @pytest.mark.parametrize(
     "exclusive,reverse",
     [(0, 0), (1, 0), (0, 1), (1, 1)],
     ids=["inclusive", "exclusive", "reverse", "exclusive-reverse"],
 )
-def test_cumsum_scalar_axis_initializer(
-    axis: int, exclusive: int, reverse: int
+def test_cumsum_shape_and_values_for_every_mode(
+    data_dtype: DT,
+    np_dtype,
+    tolerance: float,
+    axis: int,
+    exclusive: int,
+    reverse: int,
 ) -> None:
     model = _cumsum_model(
         axis_initializer=axis,
+        data_dtype=data_dtype,
         exclusive=exclusive,
         reverse=reverse,
-        input_name="input_ids",
     )
     mlx_session = m._session(model, m.EP_PROVIDERS)
     cpu_session = m._session(model, ["CPUExecutionProvider"])
     for x in [
-        np.array([[1], [4]], dtype=np.float32),
-        np.array([[1, 2, 3, 4], [4, 3, 2, 1]], dtype=np.float32),
+        np.array([[1], [4]], dtype=np_dtype),
+        np.array([[1, 2, 3, 4], [4, 3, 2, 1]], dtype=np_dtype),
     ]:
-        expected = cpu_session.run(None, {"input_ids": x})
-        actual = mlx_session.run(None, {"input_ids": x})
-        np.testing.assert_array_equal(actual[0], expected[0])
+        expected = cpu_session.run(None, {"x": x})
+        actual = mlx_session.run(None, {"x": x})
+        assert actual[0].shape == x.shape
+        assert actual[0].dtype == x.dtype
+        np.testing.assert_allclose(
+            actual[0], expected[0], rtol=tolerance, atol=tolerance
+        )
 
 
-@pytest.mark.parametrize("axis_shape", [[], [1]], ids=["scalar", "one-element-vector"])
 @pytest.mark.parametrize(
-    "exclusive,reverse",
-    [(0, 0), (1, 0), (0, 1), (1, 1)],
-    ids=["inclusive", "exclusive", "reverse", "exclusive-reverse"],
+    "opset,axis_dtype",
+    [
+        pytest.param(11, DT.INT32, id="opset11-int32"),
+        pytest.param(14, DT.INT64, id="opset14-int64"),
+        pytest.param(24, DT.INT64, id="opset24-int64"),
+    ],
 )
-def test_cumsum_runtime_axis_changes_between_runs(
-    axis_shape: list[int], exclusive: int, reverse: int
+def test_cumsum_scalar_initializer_opset_and_axis_dtype(
+    opset: int, axis_dtype: DT
 ) -> None:
     model = _cumsum_model(
-        axis_initializer=None,
-        axis_shape=axis_shape,
-        exclusive=exclusive,
-        reverse=reverse,
+        axis_initializer=-1,
+        axis_dtype=axis_dtype,
+        opset=opset,
     )
+    feeds = {"x": np.arange(1, 13, dtype=np.float32).reshape(3, 4)}
+    mlx_session = m._session(model, m.EP_PROVIDERS)
+    cpu_session = m._session(model, ["CPUExecutionProvider"])
+    np.testing.assert_array_equal(
+        mlx_session.run(None, feeds)[0], cpu_session.run(None, feeds)[0]
+    )
+
+
+@pytest.mark.parametrize(
+    "axis_dtype,axis_np_dtype",
+    [(DT.INT32, np.int32), (DT.INT64, np.int64)],
+    ids=["int32", "int64"],
+)
+def test_cumsum_runtime_scalar_axis_changes_between_runs(
+    axis_dtype: DT, axis_np_dtype
+) -> None:
+    model = _cumsum_model(axis_initializer=None, axis_dtype=axis_dtype)
     mlx_session = m._session(model, m.EP_PROVIDERS)
     cpu_session = m._session(model, ["CPUExecutionProvider"])
     x = np.arange(1, 7, dtype=np.float32).reshape(2, 3)
     for axis in [0, -1, 1]:
-        axis_value = np.array(axis, dtype=np.int64)
-        if axis_shape:
-            axis_value = axis_value.reshape(axis_shape)
-        feeds = {"x": x, "axis": axis_value}
+        feeds = {"x": x, "axis": np.array(axis, dtype=axis_np_dtype)}
         expected = cpu_session.run(None, feeds)
         actual = mlx_session.run(None, feeds)
         np.testing.assert_array_equal(actual[0], expected[0])
+
+
+def test_cumsum_one_element_axis_vector_ort_compatibility() -> None:
+    """ORT accepts [1] even though the strict ONNX contract calls the axis scalar."""
+    model = _cumsum_model(axis_initializer=None, axis_shape=[1])
+    feeds = {
+        "x": np.arange(1, 7, dtype=np.float32).reshape(2, 3),
+        "axis": np.array([-1], dtype=np.int64),
+    }
+    m.assert_matches_cpu(model, feeds, rtol=0, atol=0)
 
 
 def test_cumsum_runtime_axis_is_claimed() -> None:
@@ -296,7 +375,11 @@ def test_cumsum_runtime_axis_is_claimed() -> None:
     )
 
 
-def test_cumsum_vibevoice_attention_bias_session_and_execution() -> None:
+@pytest.mark.skipif(
+    os.environ.get(_ABORT_CHILD_ENV) != "1",
+    reason="abort-isolation child; invoked by test_cumsum_failures_do_not_abort_host",
+)
+def test_cumsum_abort_isolation_child() -> None:
     model = _vibevoice_attention_bias_model()
     mlx_session = m._session(model, m.EP_PROVIDERS)
     cpu_session = m._session(model, ["CPUExecutionProvider"])
@@ -308,7 +391,11 @@ def test_cumsum_vibevoice_attention_bias_session_and_execution() -> None:
         {
             "input_ids": np.array([[7, 8], [9, 10]], dtype=np.int64),
             "attention_mask": np.array(
-                [[1, 1, 1, 1, 1], [0, 1, 1, 1, 1]], dtype=np.int64
+                [
+                    [1, 1, 1, 1, 1, 1, 1],
+                    [0, 0, 1, 1, 1, 1, 1],
+                ],
+                dtype=np.int64,
             ),
         },
     ]
@@ -316,8 +403,49 @@ def test_cumsum_vibevoice_attention_bias_session_and_execution() -> None:
         expected = cpu_session.run(None, run_feeds)
         actual = mlx_session.run(None, run_feeds)
         np.testing.assert_array_equal(actual[0], expected[0])
-
     m.assert_op_claimed(model, feeds[0], "CumSum", rtol=0, atol=0)
+
+    invalid_axis = _cumsum_model(axis_initializer=None)
+    with pytest.raises(Exception, match="axis"):
+        m._session(invalid_axis, m.EP_PROVIDERS).run(
+            None,
+            {
+                "x": np.arange(6, dtype=np.float32).reshape(2, 3),
+                "axis": np.array(2, dtype=np.int64),
+            },
+        )
+    for attrs in [{"exclusive": 2}, {"reverse": -1}]:
+        invalid_attr = _cumsum_model(axis_initializer=1, **attrs)
+        with pytest.raises(Exception, match=next(iter(attrs))):
+            m._session(invalid_attr, m.EP_PROVIDERS)
+
+
+@pytest.mark.skipif(
+    os.environ.get(_ABORT_CHILD_ENV) == "1",
+    reason="child executes the regression and must not recursively spawn",
+)
+def test_cumsum_failures_do_not_abort_host() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            f"{Path(__file__).name}::test_cumsum_abort_isolation_child",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ],
+        cwd=Path(__file__).parent,
+        env={**os.environ, _ABORT_CHILD_ENV: "1"},
+        text=True,
+        capture_output=True,
+        timeout=300,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"CumSum regression child exited {result.returncode}; a native abort is typically 255.\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
 
 
 @pytest.mark.parametrize("largest", [0, 1], ids=["smallest", "largest"])

@@ -258,10 +258,11 @@ unsafe fn get_capability_impl(
             .map(|&node| {
                 let view = NodeView::new(ep.ort_api, node);
                 decoder_graph
-                    && crate::compiled::requires_shape_specialized_compile(
+                    && crate::registry::compile_shape_safety(
                         &view.domain(),
                         &view.op_type(),
-                    )
+                        view.since_version(),
+                    ) == crate::registry::CompileShapeSafety::ShapeKeyedOnly
             })
             .collect();
 

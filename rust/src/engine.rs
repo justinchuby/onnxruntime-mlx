@@ -1216,6 +1216,22 @@ impl<'a> TranslationContext<'a> {
         Ok(self.keep(res))
     }
 
+    /// Shape-preserving cumulative sum.
+    ///
+    /// MLX 0.32's backing `Scan` primitive lacks `Primitive::output_shapes`, so every registered
+    /// handler that can reach this helper must declare `CompileShapeSafety::ShapeKeyedOnly`.
+    pub fn cumsum(
+        &mut self,
+        a: mlxsys::mlx_array,
+        axis: i32,
+        reverse: bool,
+        inclusive: bool,
+    ) -> Result<mlxsys::mlx_array, MlxError> {
+        self.emit(|res, stream| unsafe {
+            mlxsys::mlx_cumsum(res, a, axis, reverse, inclusive, stream)
+        })
+    }
+
     // ---- array introspection (borrowed raw handles; ownership stays with the arena/cache) ---------
 
     pub fn shape_of(&self, a: mlxsys::mlx_array) -> Vec<i32> {

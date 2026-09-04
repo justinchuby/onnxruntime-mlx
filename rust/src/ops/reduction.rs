@@ -10,8 +10,8 @@
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::mlx::VectorArray;
 use crate::registry::{
-    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_float64, is_mlx_cpu_float,
-    is_mlx_float, is_mlx_numeric,
+    ClaimResult, CompileShapeSafety, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_float64,
+    is_mlx_cpu_float, is_mlx_float, is_mlx_numeric,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -316,7 +316,7 @@ fn cumsum_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
     let reverse = n.ints.get("reverse").copied().unwrap_or(0) != 0;
     let inclusive = n.ints.get("exclusive").copied().unwrap_or(0) == 0;
     let axis = axis as i32;
-    let out = ctx.emit(|res, s| unsafe { mlx::mlx_cumsum(res, x, axis, reverse, inclusive, s) })?;
+    let out = ctx.cumsum(x, axis, reverse, inclusive)?;
     ctx.bind(&n.outputs[0], out);
     Ok(())
 }
@@ -685,6 +685,8 @@ fn cumsum_claim(node: &NodeView) -> ClaimResult {
         "axis input must be int32 or int64, got {}",
         crate::registry::ort_dtype_name(axis.dtype)
     );
+    // ONNX specifies a scalar. ORT also accepts a one-element vector, so retain that compatibility
+    // form while keeping it distinct in the regression suite.
     require!(
         axis.shape.is_empty() || (axis.shape.len() == 1 && axis.shape[0] == 1),
         "axis input must be scalar or shape [1], got {:?}",
@@ -939,6 +941,26 @@ fn reg(
     });
 }
 
+fn reg_shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    min_opset: i32,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+) {
+    registry.register_with_compile_shape_safety(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        CompileShapeSafety::ShapeKeyedOnly,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
     reg(
         registry,
@@ -1012,7 +1034,7 @@ pub fn register(registry: &mut OpRegistry) {
     );
     reg(registry, "ArgMax", K_ANY_OPSET, argmax_op, argminmax_claim);
     reg(registry, "ArgMin", K_ANY_OPSET, argmin_op, argminmax_claim);
-    reg(registry, "CumSum", 11, cumsum_op, cumsum_claim);
+    reg_shape_keyed(registry, "CumSum", 11, cumsum_op, cumsum_claim);
     reg(registry, "CumProd", 26, cumprod_op, cumprod_claim);
     reg(registry, "Hardmax", K_ANY_OPSET, hardmax_op, hardmax_claim);
     reg(registry, "TopK", 10, topk_op, topk_claim);

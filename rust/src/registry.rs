@@ -27,6 +27,17 @@ pub type ClaimResult = Result<(), Cow<'static, str>>;
 /// opset) key is matched first.
 pub type ClaimPredicate = fn(&NodeView) -> ClaimResult;
 
+/// The strongest compiled shape mode an op lowering may enter.
+///
+/// `Shapeless` means every MLX primitive the handler can emit implements
+/// `Primitive::output_shapes`. `ShapeKeyedOnly` means at least one emitted primitive relies on the
+/// concrete trace-time shape and must never enter `mlx_compile(..., shapeless=true)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompileShapeSafety {
+    Shapeless,
+    ShapeKeyedOnly,
+}
+
 /// Decline the current claim predicate with a colocated reason (`format!`-style args, including
 /// inline captures like `deny!("rank {rank} unsupported")`). Use inside a `-> ClaimResult` function.
 /// The reason string is only built on the decline path, so its allocation never touches a claim
@@ -71,15 +82,41 @@ pub struct OpRegistration {
 /// The opset-aware (domain, op) -> entry table (process-wide singleton).
 pub struct OpRegistry {
     table: Vec<OpRegistration>,
+    compile_shape_safety: Vec<CompileShapeSafety>,
 }
 
 impl OpRegistry {
     fn new() -> Self {
-        OpRegistry { table: Vec::new() }
+        OpRegistry {
+            table: Vec::new(),
+            compile_shape_safety: Vec::new(),
+        }
     }
 
     pub fn register(&mut self, entry: OpRegistration) {
+        self.register_with_compile_shape_safety(entry, CompileShapeSafety::Shapeless);
+    }
+
+    /// Register an op whose lowering has an explicit compiled-shape constraint.
+    ///
+    /// Keep this declaration beside the handler registration: compile admission must describe the
+    /// MLX primitives the handler may emit, not rediscover that fact from an op-name allow/deny list.
+    pub fn register_with_compile_shape_safety(
+        &mut self,
+        entry: OpRegistration,
+        safety: CompileShapeSafety,
+    ) {
         self.table.push(entry);
+        self.compile_shape_safety.push(safety);
+    }
+
+    fn find_entry_index(&self, domain: &str, op_type: &str, since_version: i32) -> Option<usize> {
+        self.table.iter().position(|e| {
+            e.domain == domain
+                && e.op_type == op_type
+                && (e.min_opset == K_ANY_OPSET || since_version >= e.min_opset)
+                && (e.max_opset == K_ANY_OPSET || since_version <= e.max_opset)
+        })
     }
 
     /// The matching entry for (domain, op_type, since_version), or None.
@@ -89,12 +126,19 @@ impl OpRegistry {
         op_type: &str,
         since_version: i32,
     ) -> Option<&OpRegistration> {
-        self.table.iter().find(|e| {
-            e.domain == domain
-                && e.op_type == op_type
-                && (e.min_opset == K_ANY_OPSET || since_version >= e.min_opset)
-                && (e.max_opset == K_ANY_OPSET || since_version <= e.max_opset)
-        })
+        self.find_entry_index(domain, op_type, since_version)
+            .map(|index| &self.table[index])
+    }
+
+    fn compile_shape_safety(
+        &self,
+        domain: &str,
+        op_type: &str,
+        since_version: i32,
+    ) -> CompileShapeSafety {
+        self.find_entry_index(domain, op_type, since_version)
+            .map(|index| self.compile_shape_safety[index])
+            .unwrap_or(CompileShapeSafety::Shapeless)
     }
 }
 
@@ -106,6 +150,12 @@ static REGISTRY: LazyLock<OpRegistry> = LazyLock::new(|| {
 
 fn registry() -> &'static OpRegistry {
     &REGISTRY
+}
+
+/// Compile-shape capability declared by the registered lowering for an op.
+pub fn compile_shape_safety(domain: &str, op_type: &str, since_version: i32) -> CompileShapeSafety {
+    let domain = if domain == "ai.onnx" { "" } else { domain };
+    registry().compile_shape_safety(domain, op_type, since_version)
 }
 
 /// Populate the table with every built-in op module (wave-1: elementwise + math).

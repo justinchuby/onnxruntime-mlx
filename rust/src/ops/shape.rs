@@ -14,8 +14,8 @@ use half::{bf16, f16};
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext, dim_i32, mlx_dtype_from_onnx};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
-    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_int_index, is_mlx_float,
-    is_mlx_numeric, is_movable, is_range_type,
+    ClaimResult, CompileShapeSafety, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry,
+    is_int_index, is_mlx_float, is_mlx_numeric, is_movable, is_range_type,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -2485,6 +2485,25 @@ fn reg(
     });
 }
 
+fn reg_shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+) {
+    registry.register_with_compile_shape_safety(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        CompileShapeSafety::ShapeKeyedOnly,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Gather", gather_op, gather_like_claim);
     reg(registry, "GatherND", gathernd_op, gathernd_claim);
@@ -2534,7 +2553,7 @@ pub fn register(registry: &mut OpRegistry) {
     reg(registry, "Squeeze", squeeze_op, squeeze_claim);
     reg(registry, "Flatten", flatten_op, flatten_claim);
     reg(registry, "Expand", expand_op, expand_claim);
-    reg(registry, "Slice", slice_op, slice_claim);
+    reg_shape_keyed(registry, "Slice", slice_op, slice_claim);
     reg(registry, "Split", split_op, split_claim);
     reg(registry, "Tile", tile_op, tile_claim);
     reg(registry, "Pad", pad_op, pad_claim);

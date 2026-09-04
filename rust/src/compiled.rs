@@ -37,6 +37,7 @@ use crate::engine::{
     dim_i32, is_separate_qkv_attention, mlx_dtype_from_onnx, read_ctx_input_raw, rope_row_key,
 };
 use crate::mlx::{self, Array, Closure, VectorArray};
+use crate::registry::CompileShapeSafety;
 use crate::sys::mlx as mlxsys;
 use crate::sys::ort;
 
@@ -50,35 +51,24 @@ pub fn compile_enabled(has_control_flow: bool) -> bool {
     !has_control_flow && !killed
 }
 
-/// Whether this ONNX op must stay out of MLX's SHAPELESS compiled closure.
-///
-/// MLX 0.32's `Scan` (the primitive behind CumSum) and `Slice` primitives do not implement
-/// `Primitive::output_shapes`. Shapeless replay asks every primitive to recompute its output shape
-/// from the current input metadata, so either primitive aborts the host process before mlx-c can
-/// return an error. Shape-keyed compilation and eager execution are safe because both retain the
-/// concrete shape established while the graph is built.
-///
-/// This is a primitive-capability boundary, not a model workaround: any default-domain CumSum or
-/// Slice must be partitioned away from a shapeless decoder closure until the linked MLX implements
-/// those shape functions.
-pub fn requires_shape_specialized_compile(domain: &str, op_type: &str) -> bool {
-    (domain.is_empty() || domain == "ai.onnx") && matches!(op_type, "CumSum" | "Slice")
+fn node_compile_shape_safety(node: &NodeDesc) -> CompileShapeSafety {
+    crate::registry::compile_shape_safety(&node.domain, &node.op_type, node.since_version)
 }
 
-fn has_shape_specialized_compile_node(nodes: &[NodeDesc]) -> bool {
-    nodes.iter().any(|node| {
-        requires_shape_specialized_compile(&node.domain, &node.op_type)
-            || node
+fn compile_shape_mode_supported(nodes: &[NodeDesc], shapeless: bool) -> bool {
+    nodes.iter().all(|node| {
+        (!shapeless || node_compile_shape_safety(node) == CompileShapeSafety::Shapeless)
+            && node
                 .subgraphs
                 .iter()
-                .any(|subgraph| has_shape_specialized_compile_node(&subgraph.nodes))
+                .all(|subgraph| compile_shape_mode_supported(&subgraph.nodes, shapeless))
     })
 }
 
 /// Decode uses `mlx_compile(..., shapeless=true)`, so plans containing a primitive without MLX
 /// output-shape inference must use their shape-keyed/eager route instead.
 pub fn decode_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
-    compile_enabled(has_control_flow) && !has_shape_specialized_compile_node(nodes)
+    compile_enabled(has_control_flow) && compile_shape_mode_supported(nodes, true)
 }
 
 /// Op types whose subgraphs keep their existing (eager / compiled-decode) routes because they are
@@ -154,6 +144,7 @@ pub fn general_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     !nodes
         .iter()
         .any(|n| is_general_compile_unsafe(n) || reads_data_dependent_parameter(n))
+        && compile_shape_mode_supported(nodes, false)
 }
 
 fn host_scalar_i64(
@@ -297,7 +288,8 @@ pub fn prefill_enabled(has_control_flow: bool, nodes: &[NodeDesc]) -> bool {
     {
         return false;
     }
-    !nodes.iter().any(reads_data_dependent_parameter)
+    compile_shape_mode_supported(nodes, false)
+        && !nodes.iter().any(reads_data_dependent_parameter)
         && nodes.iter().any(|n| {
             n.op_type == "GroupQueryAttention"
                 && n.ints.get("sliding_window_cache").copied().unwrap_or(0) == 0
@@ -1262,10 +1254,37 @@ mod shape_inference_tests {
 
     #[test]
     fn scan_and_slice_require_shape_specialized_compile() {
-        assert!(requires_shape_specialized_compile("", "CumSum"));
-        assert!(requires_shape_specialized_compile("ai.onnx", "Slice"));
-        assert!(!requires_shape_specialized_compile("", "Add"));
-        assert!(!requires_shape_specialized_compile("com.example", "CumSum"));
+        for mut node in [
+            NodeDesc::new("CumSum".to_string(), String::new(), 14),
+            NodeDesc::new("Slice".to_string(), String::new(), 14),
+            NodeDesc::new(
+                "LinearAttention".to_string(),
+                "com.microsoft".to_string(),
+                1,
+            ),
+        ] {
+            assert_eq!(
+                node_compile_shape_safety(&node),
+                CompileShapeSafety::ShapeKeyedOnly
+            );
+            node.domain = "com.example".to_string();
+            assert_eq!(
+                node_compile_shape_safety(&node),
+                CompileShapeSafety::Shapeless
+            );
+        }
+        assert_eq!(
+            node_compile_shape_safety(&NodeDesc::new("Add".to_string(), String::new(), 14)),
+            CompileShapeSafety::Shapeless
+        );
+        assert!(compile_shape_mode_supported(
+            &[NodeDesc::new("CumSum".to_string(), String::new(), 14)],
+            false
+        ));
+        assert!(!compile_shape_mode_supported(
+            &[NodeDesc::new("CumSum".to_string(), String::new(), 14)],
+            true
+        ));
     }
 
     #[test]
