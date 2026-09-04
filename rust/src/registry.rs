@@ -1683,7 +1683,7 @@ mod tests {
 
         assert!(matches!(
             compile_shape_rule("com.microsoft", "GroupQueryAttention", 1),
-            CompileShapeRule::Always(CompileShapeSafety::Shapeless)
+            CompileShapeRule::Classified(_)
         ));
     }
 }
