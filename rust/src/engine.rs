@@ -1059,6 +1059,35 @@ impl<'a> TranslationContext<'a> {
         }
     }
 
+    /// Whether an optional tensor reaches this fused node's input boundary.
+    ///
+    /// ORT 1.29 may return a non-null placeholder for an empty optional, so pointer-nullness alone
+    /// is insufficient. Only a present optional(tensor) can yield tensor shape information.
+    pub fn ctx_input_is_present(&self, index: usize) -> Result<bool, MlxError> {
+        unsafe {
+            let api = &*self.ort_api;
+            let mut value: *const ort::OrtValue = std::ptr::null();
+            let st = (api.KernelContext_GetInput.unwrap())(self.kctx, index, &mut value);
+            if !st.is_null() {
+                (api.ReleaseStatus.unwrap())(st);
+                return Err(format!("MLX: KernelContext_GetInput({index}) failed"));
+            }
+            if value.is_null() {
+                return Ok(false);
+            }
+            let mut info: *mut ort::OrtTensorTypeAndShapeInfo = std::ptr::null_mut();
+            let st = (api.GetTensorTypeAndShape.unwrap())(value, &mut info);
+            if !st.is_null() || info.is_null() {
+                if !st.is_null() {
+                    (api.ReleaseStatus.unwrap())(st);
+                }
+                return Ok(false);
+            }
+            (api.ReleaseTensorTypeAndShapeInfo.unwrap())(info);
+            Ok(true)
+        }
+    }
+
     /// Read a constant int64 parameter input (shape/axes/starts/ends/steps/pads/repeats/split) as a
     /// host `Vec<i64>` at translate time. The claim predicate verified it is a tensor(int64) input.
     pub fn read_ints(&self, r: &TensorRef) -> Result<Vec<i64>, MlxError> {

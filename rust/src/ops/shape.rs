@@ -14,8 +14,8 @@ use half::{bf16, f16};
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext, dim_i32, mlx_dtype_from_onnx};
 use crate::mlx::{Array, VectorArray};
 use crate::registry::{
-    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_int_index, is_mlx_float,
-    is_mlx_numeric, is_movable, is_range_type,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, ValueKind, is_int_index,
+    is_mlx_float, is_mlx_numeric, is_movable, is_range_type,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -774,6 +774,15 @@ fn split_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> 
         ctx.bind(&n.outputs[i], part);
     }
     Ok(())
+}
+
+/// See `misc::container_output_op`: the plugin-EP Compute ABI cannot assign a sequence to a fused
+/// output slot, even though OrtApi can build a standalone sequence value.
+fn split_to_sequence_op(_ctx: &mut TranslationContext, _n: &NodeDesc) -> Result<(), MlxError> {
+    Err(
+        "MLX SplitToSequence: sequence output cannot cross the ORT 1.29 plugin EP boundary"
+            .to_string(),
+    )
 }
 
 fn tile_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
@@ -1934,6 +1943,36 @@ fn split_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
+fn split_to_sequence_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        (1..=2).contains(&node.num_inputs()) && node.num_outputs() == 1,
+        "SplitToSequence-24 expects 1-2 inputs and 1 output"
+    );
+    match node.input_kind(0) {
+        Some(ValueKind::Tensor(info)) if is_movable(info.dtype) && !info.shape.is_empty() => {}
+        Some(ValueKind::Tensor(info)) => deny!(
+            "SplitToSequence-24: input must be a non-scalar movable tensor, got {} shape {:?}",
+            crate::registry::ort_dtype_name(info.dtype),
+            info.shape
+        ),
+        Some(kind) => deny!(
+            "SplitToSequence-24: input must be a tensor, got {}",
+            kind.description()
+        ),
+        None => deny!("SplitToSequence-24: input is absent"),
+    }
+    match node.output_kind(0) {
+        Some(ValueKind::Sequence(inner)) if inner.tensor().is_some() => deny!(
+            "SplitToSequence-24: sequence(tensor) output cannot cross the ORT 1.29 plugin EP boundary; KernelContext_GetOutput only allocates tensors"
+        ),
+        Some(kind) => deny!(
+            "SplitToSequence-24: {} output is unsupported; only sequence(tensor) is valid and container outputs stay on CPU",
+            kind.description()
+        ),
+        None => deny!("SplitToSequence-24: output type information is unavailable"),
+    }
+}
+
 fn tile_claim(node: &NodeView) -> ClaimResult {
     require!(
         node.num_inputs() == 2 && node.num_outputs() == 1,
@@ -2022,6 +2061,19 @@ fn pad_claim(node: &NodeView) -> ClaimResult {
 }
 
 fn identity_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "Identity expects 1 input and 1 output"
+    );
+    match (node.input_kind(0), node.output_kind(0)) {
+        (Some(ValueKind::Tensor(_)), Some(ValueKind::Tensor(_))) => {}
+        (Some(input), Some(output)) => deny!(
+            "Identity: {} -> {} crosses the ORT 1.29 plugin EP boundary; sequence/optional outputs cannot be bound by KernelContext_GetOutput",
+            input.description(),
+            output.description()
+        ),
+        _ => deny!("Identity: missing input or output type information"),
+    }
     transpose_claim(node)
 }
 
@@ -2576,6 +2628,14 @@ pub fn register(registry: &mut OpRegistry) {
         split_claim,
         crate::registry::MLX_SPLIT_SHAPE_REASON,
     );
+    registry.register_shapeless(OpRegistration {
+        domain: "",
+        op_type: "SplitToSequence",
+        min_opset: 24,
+        max_opset: K_ANY_OPSET,
+        handler: split_to_sequence_op,
+        claim: split_to_sequence_claim,
+    });
     shapeless(registry, "Tile", tile_op, tile_claim);
     shape_keyed(
         registry,

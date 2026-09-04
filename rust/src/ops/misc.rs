@@ -14,7 +14,7 @@ use std::os::raw::c_void;
 use crate::engine::{MlxError, NodeDesc, Src, TensorRef, TranslationContext};
 use crate::registry::{
     ClaimPredicate, ClaimResult, K_ANY_OPSET, NodeView, OpHandler, OpRegistration, OpRegistry,
-    SlotInfo, is_mlx_float, is_mlx_supported, is_signed_integer,
+    SlotInfo, ValueKind, is_mlx_float, is_mlx_supported, is_signed_integer,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -1018,10 +1018,17 @@ fn unique_claim(node: &NodeView) -> ClaimResult {
 }
 
 // =============================================================================================
-// Optional family (tensor-present forms only).
+// Optional family.
 // =============================================================================================
 fn optional_has_element_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
-    let t = ctx.scalar_bool(true);
+    let present = match n.inputs[0].source {
+        Src::CtxInput => ctx.ctx_input_is_present(n.inputs[0].ctx_index)?,
+        Src::Absent => false,
+        // Container-producing nodes are never claimed at an EP boundary, so an intermediate here
+        // can only be a tensor value, which is necessarily present.
+        Src::Initializer | Src::Intermediate => true,
+    };
+    let t = ctx.scalar_bool(present);
     ctx.bind(&n.outputs[0], t);
     Ok(())
 }
@@ -1033,14 +1040,33 @@ fn optional_has_element_claim(node: &NodeView) -> ClaimResult {
         node.num_inputs(),
         node.num_outputs()
     );
-    require!(
-        node.input_info(0).is_some(),
-        "only tensor-present Optional forms are supported"
-    );
+    match node.input_kind(0) {
+        Some(ValueKind::Tensor(_)) => {}
+        Some(kind @ ValueKind::Optional(_)) if kind.optional_tensor().is_some() => {}
+        Some(kind) => deny!(
+            "OptionalHasElement: {} input is unsupported; only tensor and optional(tensor) values can cross the MLX EP boundary",
+            kind.description()
+        ),
+        None => deny!("OptionalHasElement: input is absent"),
+    }
+    match node.output_info(0) {
+        Some(info)
+            if info.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL
+                && info.shape.is_empty() => {}
+        Some(info) => deny!(
+            "OptionalHasElement: output must be a scalar bool tensor, got {} shape {:?}",
+            crate::registry::ort_dtype_name(info.dtype),
+            info.shape
+        ),
+        None => deny!("OptionalHasElement: output must be a tensor"),
+    }
     Ok(())
 }
 
 fn optional_get_element_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
+    if n.inputs[0].source == Src::CtxInput && !ctx.ctx_input_is_present(n.inputs[0].ctx_index)? {
+        return Err("MLX OptionalGetElement: input optional is empty".to_string());
+    }
     let a = ctx.resolve(&n.inputs[0])?;
     ctx.bind(&n.outputs[0], a);
     Ok(())
@@ -1051,15 +1077,57 @@ fn optional_get_element_claim(node: &NodeView) -> ClaimResult {
         node.num_inputs() == 1 && node.num_outputs() == 1 && node.input_present(0),
         "requires one present input and one output"
     );
-    match (node.input_info(0), node.output_info(0)) {
-        (Some(a), Some(b)) => {
+    let input = match node.input_kind(0) {
+        Some(ValueKind::Tensor(info)) => info,
+        // ORT's plugin-EP boundary provides no presence bit or safe unwrap operation for an empty
+        // optional. Treating the non-null empty placeholder as a tensor crashes in ORT before this
+        // EP can return the standard OptionalGetElement error, so the real optional form stays on
+        // CPU. A bare tensor is retained for legacy graphs that ORT permits for this operator.
+        Some(ValueKind::Optional(_)) => deny!(
+            "OptionalGetElement: optional(tensor) may be empty and ORT 1.29's plugin EP boundary cannot safely unwrap it; stays on CPU"
+        ),
+        Some(kind) => deny!(
+            "OptionalGetElement: {} input is unsupported; only optional(tensor) is supported",
+            kind.description()
+        ),
+        None => deny!("OptionalGetElement: input is absent"),
+    };
+    match node.output_info(0) {
+        Some(b) => {
             require!(
-                is_mlx_supported(a.dtype) && b.dtype == a.dtype,
+                is_mlx_supported(input.dtype) && b.dtype == input.dtype,
                 "input/output must share an MLX-supported dtype"
             );
             Ok(())
         }
-        _ => deny!("missing tensor type/shape info on input or output"),
+        None => deny!("OptionalGetElement: output must be a tensor"),
+    }
+}
+
+/// `KernelContext_GetOutput` accepts dimensions and allocates only a tensor. Although the OrtApi
+/// can construct standalone sequences, the plugin-EP Compute ABI has no operation to assign one to
+/// a fused-node output, so claiming a producer would make the model invalid at session creation.
+fn container_output_op(_ctx: &mut TranslationContext, _n: &NodeDesc) -> Result<(), MlxError> {
+    Err(
+        "MLX: container-producing nodes cannot execute at the ORT 1.29 plugin EP boundary"
+            .to_string(),
+    )
+}
+
+fn optional_claim(node: &NodeView) -> ClaimResult {
+    require!(
+        node.num_inputs() == 1 && node.num_outputs() == 1,
+        "Optional expects 1 optional input and 1 output"
+    );
+    match node.output_kind(0) {
+        Some(ValueKind::Optional(inner)) if inner.tensor().is_some() => deny!(
+            "Optional: optional(tensor) output cannot cross the ORT 1.29 plugin EP boundary; KernelContext_GetOutput only allocates tensors"
+        ),
+        Some(kind) => deny!(
+            "Optional: {} output is unsupported; only optional(tensor) is representable by this operator and container outputs stay on CPU",
+            kind.description()
+        ),
+        None => deny!("Optional: output type information is unavailable"),
     }
 }
 
@@ -1234,6 +1302,28 @@ fn shape_keyed(
     );
 }
 
+fn eager(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    min_opset: i32,
+    max_opset: i32,
+    handler: OpHandler,
+    claim: ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_eager(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset,
+            max_opset,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
     shapeless(
         registry,
@@ -1288,11 +1378,20 @@ pub fn register(registry: &mut OpRegistry) {
     );
     shapeless(
         registry,
+        "Optional",
+        15,
+        K_ANY_OPSET,
+        container_output_op,
+        optional_claim,
+    );
+    eager(
+        registry,
         "OptionalHasElement",
         K_ANY_OPSET,
         K_ANY_OPSET,
         optional_has_element_op,
         optional_has_element_claim,
+        "reads optional presence from the ORT kernel context at execution time",
     );
     shapeless(
         registry,
