@@ -1194,7 +1194,7 @@ fn sce_loss_claim(node: &NodeView) -> ClaimResult {
 
 // ---- registration -------------------------------------------------------------------------------
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     min_opset: i32,
@@ -1202,7 +1202,7 @@ fn reg(
     handler: OpHandler,
     claim: ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset,
@@ -1212,8 +1212,30 @@ fn reg(
     });
 }
 
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    min_opset: i32,
+    max_opset: i32,
+    handler: OpHandler,
+    claim: ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset,
+            max_opset,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
-    reg(
+    shapeless(
         registry,
         "Constant",
         K_ANY_OPSET,
@@ -1221,7 +1243,7 @@ pub fn register(registry: &mut OpRegistry) {
         constant_op,
         constant_claim,
     );
-    reg(
+    shapeless(
         registry,
         "TfIdfVectorizer",
         9,
@@ -1229,7 +1251,7 @@ pub fn register(registry: &mut OpRegistry) {
         tfidf_op,
         tfidf_claim,
     );
-    reg(
+    shapeless(
         registry,
         "OneHot",
         9,
@@ -1237,10 +1259,18 @@ pub fn register(registry: &mut OpRegistry) {
         one_hot_op,
         one_hot_claim,
     );
-    reg(registry, "Trilu", 14, K_ANY_OPSET, trilu_op, trilu_claim);
-    reg(registry, "Scatter", 9, 10, scatter_op, scatter_claim);
-    reg(registry, "Det", K_ANY_OPSET, K_ANY_OPSET, det_op, det_claim);
-    reg(
+    shapeless(registry, "Trilu", 14, K_ANY_OPSET, trilu_op, trilu_claim);
+    shape_keyed(
+        registry,
+        "Scatter",
+        9,
+        10,
+        scatter_op,
+        scatter_claim,
+        crate::registry::MLX_SCATTER_SHAPE_REASON,
+    );
+    shapeless(registry, "Det", K_ANY_OPSET, K_ANY_OPSET, det_op, det_claim);
+    shapeless(
         registry,
         "NonZero",
         K_ANY_OPSET,
@@ -1248,7 +1278,7 @@ pub fn register(registry: &mut OpRegistry) {
         nonzero_op,
         nonzero_claim,
     );
-    reg(
+    shapeless(
         registry,
         "Unique",
         K_ANY_OPSET,
@@ -1256,7 +1286,7 @@ pub fn register(registry: &mut OpRegistry) {
         unique_op,
         unique_claim,
     );
-    reg(
+    shapeless(
         registry,
         "OptionalHasElement",
         K_ANY_OPSET,
@@ -1264,7 +1294,7 @@ pub fn register(registry: &mut OpRegistry) {
         optional_has_element_op,
         optional_has_element_claim,
     );
-    reg(
+    shapeless(
         registry,
         "OptionalGetElement",
         K_ANY_OPSET,
@@ -1272,7 +1302,7 @@ pub fn register(registry: &mut OpRegistry) {
         optional_get_element_op,
         optional_get_element_claim,
     );
-    reg(
+    shapeless(
         registry,
         "NegativeLogLikelihoodLoss",
         K_ANY_OPSET,
@@ -1280,7 +1310,7 @@ pub fn register(registry: &mut OpRegistry) {
         nll_loss_op,
         nll_loss_claim,
     );
-    reg(
+    shapeless(
         registry,
         "SoftmaxCrossEntropyLoss",
         K_ANY_OPSET,

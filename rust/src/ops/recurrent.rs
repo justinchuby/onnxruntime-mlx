@@ -640,24 +640,27 @@ fn lstm_claim(node: &NodeView) -> ClaimResult {
     recurrent_claim(node, "LSTM")
 }
 
-fn reg(
+fn shape_keyed(
     registry: &mut OpRegistry,
     op_type: &'static str,
     handler: OpHandler,
     claim: ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
-        domain: "",
-        op_type,
-        min_opset: K_ANY_OPSET,
-        max_opset: K_ANY_OPSET,
-        handler,
-        claim,
-    });
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
 }
 
 pub fn register(registry: &mut OpRegistry) {
-    reg(registry, "RNN", recurrent_op, rnn_claim);
-    reg(registry, "GRU", recurrent_op, gru_claim);
-    reg(registry, "LSTM", recurrent_op, lstm_claim);
+    shape_keyed(registry, "RNN", recurrent_op, rnn_claim);
+    shape_keyed(registry, "GRU", recurrent_op, gru_claim);
+    shape_keyed(registry, "LSTM", recurrent_op, lstm_claim);
 }

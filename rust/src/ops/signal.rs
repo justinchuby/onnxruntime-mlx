@@ -579,13 +579,13 @@ fn mel_weight_matrix_claim(node: &NodeView) -> ClaimResult {
 
 // ---- registration -------------------------------------------------------------------------------
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     handler: OpHandler,
     claim: ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset: 17,
@@ -595,13 +595,45 @@ fn reg(
     });
 }
 
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    handler: OpHandler,
+    claim: ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset: 17,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
-    reg(registry, "DFT", dft_op, dft_claim);
-    reg(registry, "STFT", stft_op, stft_claim);
-    reg(registry, "HannWindow", hann_op, window_claim);
-    reg(registry, "HammingWindow", hamming_op, window_claim);
-    reg(registry, "BlackmanWindow", blackman_op, window_claim);
-    reg(
+    shape_keyed(
+        registry,
+        "DFT",
+        dft_op,
+        dft_claim,
+        "emits MLX FFT and may emit Slice; neither implements Primitive::output_shapes in MLX 0.32.1",
+    );
+    shape_keyed(
+        registry,
+        "STFT",
+        stft_op,
+        stft_claim,
+        "emits MLX AsStrided and FFT, which lack Primitive::output_shapes in MLX 0.32.1",
+    );
+    shapeless(registry, "HannWindow", hann_op, window_claim);
+    shapeless(registry, "HammingWindow", hamming_op, window_claim);
+    shapeless(registry, "BlackmanWindow", blackman_op, window_claim);
+    shapeless(
         registry,
         "MelWeightMatrix",
         mel_weight_matrix_op,

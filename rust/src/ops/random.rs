@@ -539,14 +539,14 @@ fn einsum_claim(node: &NodeView) -> ClaimResult {
 
 // ---- registration -------------------------------------------------------------------------------
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     min_opset: i32,
     handler: OpHandler,
     claim: ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset,
@@ -556,42 +556,62 @@ fn reg(
     });
 }
 
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    min_opset: i32,
+    handler: OpHandler,
+    claim: ClaimPredicate,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        crate::registry::MLX_RANDOM_BITS_SHAPE_REASON,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
-    reg(
+    shape_keyed(
         registry,
         "RandomNormal",
         1,
         random_normal_op,
         random_normal_claim,
     );
-    reg(
+    shape_keyed(
         registry,
         "RandomNormalLike",
         1,
         random_normal_like_op,
         random_normal_like_claim,
     );
-    reg(
+    shape_keyed(
         registry,
         "RandomUniform",
         1,
         random_uniform_op,
         random_uniform_claim,
     );
-    reg(
+    shape_keyed(
         registry,
         "RandomUniformLike",
         1,
         random_uniform_like_op,
         random_uniform_like_claim,
     );
-    reg(registry, "Bernoulli", 15, bernoulli_op, bernoulli_claim);
-    reg(
+    shape_keyed(registry, "Bernoulli", 15, bernoulli_op, bernoulli_claim);
+    shape_keyed(
         registry,
         "Multinomial",
         7,
         multinomial_op,
         multinomial_claim,
     );
-    reg(registry, "Einsum", 12, einsum_op, einsum_claim);
+    shapeless(registry, "Einsum", 12, einsum_op, einsum_claim);
 }

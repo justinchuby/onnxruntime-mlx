@@ -589,13 +589,13 @@ fn loop_claim(node: &NodeView) -> ClaimResult {
 
 // ---- registration -------------------------------------------------------------------------------
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     handler: OpHandler,
     claim: ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset: K_ANY_OPSET,
@@ -605,8 +605,34 @@ fn reg(
     });
 }
 
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    handler: OpHandler,
+    claim: ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
-    reg(registry, "If", if_op, if_claim);
-    reg(registry, "Scan", scan_op, scan_claim);
-    reg(registry, "Loop", loop_op, loop_claim);
+    shapeless(registry, "If", if_op, if_claim);
+    shape_keyed(
+        registry,
+        "Scan",
+        scan_op,
+        scan_claim,
+        "emits MLX Slice and, for fused selective scans, CustomKernel; neither implements Primitive::output_shapes in MLX 0.32.1",
+    );
+    shapeless(registry, "Loop", loop_op, loop_claim);
 }

@@ -10,8 +10,8 @@
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
 use crate::mlx::VectorArray;
 use crate::registry::{
-    ClaimResult, CompileShapeSafety, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_float64,
-    is_mlx_cpu_float, is_mlx_float, is_mlx_numeric,
+    ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_float64, is_mlx_cpu_float,
+    is_mlx_float, is_mlx_numeric,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -924,14 +924,14 @@ fn topk_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     min_opset: i32,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset,
@@ -941,14 +941,14 @@ fn reg(
     });
 }
 
-fn reg_shape_keyed(
+fn shape_keyed(
     registry: &mut OpRegistry,
     op_type: &'static str,
     min_opset: i32,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register_with_compile_shape_safety(
+    registry.register_shape_keyed(
         OpRegistration {
             domain: "",
             op_type,
@@ -957,87 +957,87 @@ fn reg_shape_keyed(
             handler,
             claim,
         },
-        CompileShapeSafety::ShapeKeyedOnly,
+        crate::registry::MLX_SCAN_SHAPE_REASON,
     );
 }
 
 pub fn register(registry: &mut OpRegistry) {
-    reg(
+    shapeless(
         registry,
         "ReduceSum",
         K_ANY_OPSET,
         reduce_sum_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceMax",
         K_ANY_OPSET,
         reduce_max_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceMean",
         K_ANY_OPSET,
         reduce_mean_op,
         reduce_float_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceMin",
         K_ANY_OPSET,
         reduce_min_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceProd",
         K_ANY_OPSET,
         reduce_prod_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceSumSquare",
         K_ANY_OPSET,
         reduce_sumsquare_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceL1",
         K_ANY_OPSET,
         reduce_l1_op,
         reduce_numeric_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceL2",
         K_ANY_OPSET,
         reduce_l2_op,
         reduce_float_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceLogSum",
         K_ANY_OPSET,
         reduce_logsum_op,
         reduce_float_claim,
     );
-    reg(
+    shapeless(
         registry,
         "ReduceLogSumExp",
         K_ANY_OPSET,
         reduce_logsumexp_op,
         reduce_float_claim,
     );
-    reg(registry, "ArgMax", K_ANY_OPSET, argmax_op, argminmax_claim);
-    reg(registry, "ArgMin", K_ANY_OPSET, argmin_op, argminmax_claim);
-    reg_shape_keyed(registry, "CumSum", 11, cumsum_op, cumsum_claim);
-    reg(registry, "CumProd", 26, cumprod_op, cumprod_claim);
-    reg(registry, "Hardmax", K_ANY_OPSET, hardmax_op, hardmax_claim);
-    reg(registry, "TopK", 10, topk_op, topk_claim);
+    shapeless(registry, "ArgMax", K_ANY_OPSET, argmax_op, argminmax_claim);
+    shapeless(registry, "ArgMin", K_ANY_OPSET, argmin_op, argminmax_claim);
+    shape_keyed(registry, "CumSum", 11, cumsum_op, cumsum_claim);
+    shapeless(registry, "CumProd", 26, cumprod_op, cumprod_claim);
+    shapeless(registry, "Hardmax", K_ANY_OPSET, hardmax_op, hardmax_claim);
+    shapeless(registry, "TopK", 10, topk_op, topk_claim);
 }
 
 #[cfg(test)]

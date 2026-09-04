@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -9,6 +10,7 @@ import sys
 
 import numpy as np
 import onnx_ir as ir
+import onnxruntime as ort
 import pytest
 from onnx_ir import DataType as DT
 
@@ -90,7 +92,7 @@ def _cumsum_model(
     return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
 
 
-def _vibevoice_attention_bias_model() -> bytes:
+def _vibevoice_attention_bias_model(*, decoder_cluster: bool = False) -> bytes:
     """The CumSum/Shape/Slice mask prefix used by Mobius decoder exports."""
     input_ids = ir.Value(
         name="input_ids",
@@ -194,13 +196,187 @@ def _vibevoice_attention_bias_model() -> bytes:
         ir.node("Where", [valid_mask, zero, masked], outputs=[bias_3d]),
         ir.node("Unsqueeze", [bias_3d, axis_1], outputs=[bias]),
     ]
+    graph_inputs = [input_ids, attention_mask]
+    graph_outputs = [bias]
+    initializers = [axis, axis_1, axis_2, zero, masked]
+    opset_imports = {"": 23}
+
+    if decoder_cluster:
+        hidden = 8
+        experts = 2
+        intermediate = 8
+        cache_capacity = 8
+        query = ir.Value(
+            name="query",
+            type=ir.TensorType(DT.FLOAT),
+            shape=ir.Shape([1, 1, hidden]),
+        )
+        key = ir.Value(
+            name="key",
+            type=ir.TensorType(DT.FLOAT),
+            shape=ir.Shape([1, 1, hidden]),
+        )
+        value = ir.Value(
+            name="value",
+            type=ir.TensorType(DT.FLOAT),
+            shape=ir.Shape([1, 1, hidden]),
+        )
+        past_key = ir.Value(
+            name="past_key",
+            type=ir.TensorType(DT.FLOAT),
+            shape=ir.Shape([1, 1, cache_capacity, hidden]),
+        )
+        past_value = ir.Value(
+            name="past_value",
+            type=ir.TensorType(DT.FLOAT),
+            shape=ir.Shape([1, 1, cache_capacity, hidden]),
+        )
+        seqlens_k = m.tensor("seqlens_k", DT.INT32, [1])
+        total_sequence_length = m.tensor("total_sequence_length", DT.INT32, [1])
+        absent = ir.Value(name="")
+        attention_output = m.tensor("attention_output", DT.FLOAT, [1, 1, hidden])
+        present_key = ir.Value(
+            name="present_key",
+            type=ir.TensorType(DT.FLOAT),
+            shape=ir.Shape([1, 1, cache_capacity, hidden]),
+        )
+        present_value = ir.Value(
+            name="present_value",
+            type=ir.TensorType(DT.FLOAT),
+            shape=ir.Shape([1, 1, cache_capacity, hidden]),
+        )
+        nodes.append(
+            ir.node(
+                "GroupQueryAttention",
+                [
+                    query,
+                    key,
+                    value,
+                    past_key,
+                    past_value,
+                    seqlens_k,
+                    total_sequence_length,
+                    absent,
+                    absent,
+                    absent,
+                    bias,
+                ],
+                attributes={
+                    "num_heads": 1,
+                    "kv_num_heads": 1,
+                    "do_rotary": 0,
+                    "scale": float(1.0 / np.sqrt(hidden)),
+                },
+                domain="com.microsoft",
+                outputs=[attention_output, present_key, present_value],
+            )
+        )
+        tokens = m.tensor("tokens", DT.FLOAT, [1, hidden])
+        router = m.tensor("router", DT.FLOAT, [1, experts])
+        token_shape = _initializer(
+            "token_shape", np.array([1, hidden], dtype=np.int64)
+        )
+        router_weight = _initializer(
+            "router_weight",
+            np.array(
+                [
+                    [0.25, -0.25],
+                    [0.5, 0.125],
+                    [-0.125, 0.375],
+                    [0.75, -0.5],
+                    [0.375, 0.25],
+                    [-0.5, 0.625],
+                    [0.125, -0.375],
+                    [0.625, 0.5],
+                ],
+                dtype=np.float32,
+            ),
+        )
+        nodes.extend(
+            [
+                ir.node(
+                    "Reshape",
+                    [attention_output, token_shape],
+                    outputs=[tokens],
+                ),
+                ir.node("MatMul", [tokens, router_weight], outputs=[router]),
+            ]
+        )
+
+        packed_fc1 = (
+            np.arange(experts * intermediate * (hidden // 2), dtype=np.uint8)
+            .reshape(experts, intermediate, hidden // 2)
+            * np.uint8(13)
+            + np.uint8(0x67)
+        )
+        packed_fc2 = (
+            np.arange(experts * hidden * (intermediate // 2), dtype=np.uint8)
+            .reshape(experts, hidden, intermediate // 2)
+            * np.uint8(11)
+            + np.uint8(0x79)
+        )
+        fc1_w = _initializer("fc1_w", packed_fc1)
+        fc1_s = _initializer(
+            "fc1_s",
+            np.linspace(0.02, 0.06, experts * intermediate, dtype=np.float32)
+            .reshape(experts, intermediate),
+        )
+        fc2_w = _initializer("fc2_w", packed_fc2)
+        fc2_s = _initializer(
+            "fc2_s",
+            np.linspace(0.025, 0.055, experts * hidden, dtype=np.float32)
+            .reshape(experts, hidden),
+        )
+        qmoe_output = m.tensor("qmoe_output", DT.FLOAT, [1, hidden])
+        decoder_output = m.tensor("decoder_output", DT.FLOAT, [1, hidden])
+        nodes.extend(
+            [
+                ir.node(
+                    "QMoE",
+                    [tokens, router, fc1_w, fc1_s, ir.Value(name=""), fc2_w, fc2_s],
+                    attributes={
+                        "k": 1,
+                        "activation_type": "silu",
+                        "expert_weight_bits": 4,
+                        "normalize_routing_weights": 0,
+                    },
+                    domain="com.microsoft",
+                    outputs=[qmoe_output],
+                ),
+                ir.node("Add", [qmoe_output, tokens], outputs=[decoder_output]),
+            ]
+        )
+        graph_inputs.extend(
+            [
+                query,
+                key,
+                value,
+                past_key,
+                past_value,
+                seqlens_k,
+                total_sequence_length,
+            ]
+        )
+        graph_outputs.extend([decoder_output, present_key, present_value])
+        initializers.extend(
+            [
+                router_weight,
+                fc1_w,
+                fc1_s,
+                fc2_w,
+                fc2_s,
+                token_shape,
+            ]
+        )
+        opset_imports["com.microsoft"] = 1
+
     graph = ir.Graph(
-        [input_ids, attention_mask],
-        [bias],
+        graph_inputs,
+        graph_outputs,
         nodes=nodes,
-        initializers=[axis, axis_1, axis_2, zero, masked],
+        initializers=initializers,
         name="vibevoice_decoder_attention_bias",
-        opset_imports={"": 23},
+        opset_imports=opset_imports,
     )
     return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
 
@@ -405,6 +581,69 @@ def test_cumsum_abort_isolation_child() -> None:
         np.testing.assert_array_equal(actual[0], expected[0])
     m.assert_op_claimed(model, feeds[0], "CumSum", rtol=0, atol=0)
 
+    decoder_model = _vibevoice_attention_bias_model(decoder_cluster=True)
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    options.enable_profiling = True
+    options.profile_file_prefix = f".decoder_shape_safety_{os.getpid()}"
+    decoder_session = ort.InferenceSession(
+        decoder_model, options, providers=m.EP_PROVIDERS
+    )
+    rng = np.random.default_rng(53)
+    query = rng.standard_normal((1, 1, 8)).astype(np.float32)
+    key = rng.standard_normal((1, 1, 8)).astype(np.float32)
+    value = rng.standard_normal((1, 1, 8)).astype(np.float32)
+    for total in [4, 7]:
+        past = total - 1
+        past_key = np.zeros((1, 1, 8, 8), dtype=np.float32)
+        past_value = np.zeros((1, 1, 8, 8), dtype=np.float32)
+        past_key[:, :, :past, :] = rng.standard_normal((1, 1, past, 8))
+        past_value[:, :, :past, :] = rng.standard_normal((1, 1, past, 8))
+        decoder_feeds = {
+            "input_ids": np.array([[7]], dtype=np.int64),
+            "attention_mask": np.array(
+                [[1] * (total - 1) + [0]], dtype=np.int64
+            ),
+            "query": query,
+            "key": key,
+            "value": value,
+            "past_key": past_key,
+            "past_value": past_value,
+            "seqlens_k": np.array([total - 1], dtype=np.int32),
+            "total_sequence_length": np.array([total], dtype=np.int32),
+        }
+        decoder_outputs = decoder_session.run(None, decoder_feeds)
+        assert decoder_outputs[0].shape == (1, 1, 1, total)
+        assert decoder_outputs[1].shape == (1, 8)
+        assert decoder_outputs[2].shape == (1, 1, 8, 8)
+        assert decoder_outputs[3].shape == (1, 1, 8, 8)
+        assert all(np.isfinite(output).all() for output in decoder_outputs)
+
+    profile_path = Path(decoder_session.end_profiling())
+    try:
+        profile_events = json.loads(profile_path.read_text())
+    finally:
+        profile_path.unlink(missing_ok=True)
+    cpu_ops = {
+        event.get("args", {}).get("op_name")
+        for event in profile_events
+        if event.get("cat") == "Node"
+        and event.get("args", {}).get("provider") == "CPUExecutionProvider"
+    }
+    assert {"CumSum", "Slice", "QMoE", "GroupQueryAttention"}.isdisjoint(cpu_ops), (
+        f"decoder shape-safety nodes fell back to CPU: {sorted(op for op in cpu_ops if op)}"
+    )
+    mlx_partitions = {
+        event.get("name")
+        for event in profile_events
+        if event.get("cat") == "Node"
+        and event.get("args", {}).get("provider") == "MLXExecutionProvider"
+    }
+    assert len(mlx_partitions) >= 5, (
+        "CumSum, ONNX Slice, QMoE's internal Slice emitter, and their eligible neighbours "
+        f"were not isolated into distinct MLX partitions: {sorted(mlx_partitions)}"
+    )
+
     invalid_axis = _cumsum_model(axis_initializer=None)
     with pytest.raises(Exception, match="axis"):
         m._session(invalid_axis, m.EP_PROVIDERS).run(
@@ -425,27 +664,74 @@ def test_cumsum_abort_isolation_child() -> None:
     reason="child executes the regression and must not recursively spawn",
 )
 def test_cumsum_failures_do_not_abort_host() -> None:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            f"{Path(__file__).name}::test_cumsum_abort_isolation_child",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-        ],
-        cwd=Path(__file__).parent,
-        env={**os.environ, _ABORT_CHILD_ENV: "1"},
-        text=True,
-        capture_output=True,
-        timeout=300,
-        check=False,
+    trace_path = (
+        Path(__file__).parent / f".decoder_shape_safety_trace_{os.getpid()}.json"
     )
-    assert result.returncode == 0, (
-        f"CumSum regression child exited {result.returncode}; a native abort is typically 255.\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    trace_path.unlink(missing_ok=True)
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                f"{Path(__file__).name}::test_cumsum_abort_isolation_child",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+            ],
+            cwd=Path(__file__).parent,
+            env={
+                **os.environ,
+                _ABORT_CHILD_ENV: "1",
+                "ONNXRUNTIME_EP_MLX_TRACE": str(trace_path),
+            },
+            text=True,
+            capture_output=True,
+            timeout=300,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"CumSum regression child exited {result.returncode}; a native abort is typically 255.\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert trace_path.exists(), (
+            "the decoder child produced no MLX trace; the compiled-route assertions cannot be "
+            f"evaluated.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        trace_events = json.loads(trace_path.read_text())
+        decode_events = [
+            event
+            for event in trace_events
+            if event.get("name") == "mlx.compute[decode]"
+            and event.get("args", {}).get("path") == "decode"
+        ]
+        decode_cache = {event["args"].get("cache") for event in decode_events}
+        assert {"MISS", "HIT"} <= decode_cache, (
+            "the eligible GQA decoder partition did not compile shapeless once and replay at "
+            f"T=7: {decode_events}"
+        )
+        assert any(event["args"].get("nodes", 0) > 1 for event in decode_events), (
+            "the shapeless decode partition contains no surrounding eligible decoder nodes: "
+            f"{decode_events}"
+        )
+        isolated_general = [
+            event
+            for event in trace_events
+            if event.get("name") == "mlx.compute[general]"
+            and event.get("args", {}).get("nodes") == 1
+        ]
+        assert len(isolated_general) >= 6, (
+            "CumSum, ONNX Slice, and QMoE must each execute in a singleton shape-keyed MLX "
+            f"partition on both T=4 and T=7 runs: {isolated_general}"
+        )
+        assert any(
+            event["args"].get("cache") == "RETRACE" for event in isolated_general
+        ), (
+            "the T=4 -> T=7 shape change did not retrace the isolated shape-keyed partitions: "
+            f"{isolated_general}"
+        )
+    finally:
+        trace_path.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("largest", [0, 1], ids=["smallest", "largest"])

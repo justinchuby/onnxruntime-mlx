@@ -903,13 +903,13 @@ fn bitshift_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset: K_ANY_OPSET,
@@ -919,14 +919,14 @@ fn reg(
     });
 }
 
-fn reg_since(
+fn shapeless_since(
     registry: &mut OpRegistry,
     op_type: &'static str,
     min_opset: i32,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset,
@@ -936,8 +936,29 @@ fn reg_since(
     });
 }
 
+fn shape_keyed_since(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    min_opset: i32,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
 pub fn register(registry: &mut OpRegistry) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "Add",
         min_opset: K_ANY_OPSET,
@@ -945,7 +966,7 @@ pub fn register(registry: &mut OpRegistry) {
         handler: add_op,
         claim: add_claim,
     });
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "Mul",
         min_opset: K_ANY_OPSET,
@@ -953,7 +974,7 @@ pub fn register(registry: &mut OpRegistry) {
         handler: mul_op,
         claim: mul_claim,
     });
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "Sub",
         min_opset: K_ANY_OPSET,
@@ -961,7 +982,7 @@ pub fn register(registry: &mut OpRegistry) {
         handler: sub_op,
         claim: sub_claim,
     });
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "Sigmoid",
         min_opset: K_ANY_OPSET,
@@ -969,7 +990,7 @@ pub fn register(registry: &mut OpRegistry) {
         handler: sigmoid_op,
         claim: sigmoid_claim,
     });
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "Softmax",
         min_opset: K_ANY_OPSET,
@@ -977,7 +998,7 @@ pub fn register(registry: &mut OpRegistry) {
         handler: softmax_op,
         claim: softmax_claim,
     });
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "Cast",
         min_opset: K_ANY_OPSET,
@@ -985,11 +1006,18 @@ pub fn register(registry: &mut OpRegistry) {
         handler: cast_op,
         claim: cast_claim,
     });
-    reg_since(registry, "CastLike", 15, cast_like_op, cast_like_claim);
-    reg_since(registry, "BitCast", 26, bit_cast_op, bit_cast_claim);
-    reg_since(registry, "LogSoftmax", 1, log_softmax_op, log_softmax_claim);
+    shapeless_since(registry, "CastLike", 15, cast_like_op, cast_like_claim);
+    shape_keyed_since(
+        registry,
+        "BitCast",
+        26,
+        bit_cast_op,
+        bit_cast_claim,
+        crate::registry::MLX_VIEW_SHAPE_REASON,
+    );
+    shapeless_since(registry, "LogSoftmax", 1, log_softmax_op, log_softmax_claim);
     // Sigmoid is also claimed in the com.microsoft domain (fused activation).
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "com.microsoft",
         op_type: "Sigmoid",
         min_opset: K_ANY_OPSET,
@@ -999,22 +1027,22 @@ pub fn register(registry: &mut OpRegistry) {
     });
 
     // Variadic elementwise.
-    reg(registry, "Max", max_op, numeric_variadic_claim);
-    reg(registry, "Min", min_op, numeric_variadic_claim);
-    reg(registry, "Sum", sum_op, float_variadic_claim);
-    reg(registry, "Mean", mean_op, float_variadic_claim);
+    shapeless(registry, "Max", max_op, numeric_variadic_claim);
+    shapeless(registry, "Min", min_op, numeric_variadic_claim);
+    shapeless(registry, "Sum", sum_op, float_variadic_claim);
+    shapeless(registry, "Mean", mean_op, float_variadic_claim);
 
     // Comparisons (bool output).
-    reg(registry, "Equal", equal_op, equal_claim);
-    reg(registry, "Greater", greater_op, ordered_comparison_claim);
-    reg(registry, "Less", less_op, ordered_comparison_claim);
-    reg(
+    shapeless(registry, "Equal", equal_op, equal_claim);
+    shapeless(registry, "Greater", greater_op, ordered_comparison_claim);
+    shapeless(registry, "Less", less_op, ordered_comparison_claim);
+    shapeless(
         registry,
         "GreaterOrEqual",
         greater_equal_op,
         ordered_comparison_claim,
     );
-    reg(
+    shapeless(
         registry,
         "LessOrEqual",
         less_equal_op,
@@ -1022,42 +1050,42 @@ pub fn register(registry: &mut OpRegistry) {
     );
 
     // Logical (bool).
-    reg(registry, "And", and_op, logical_binary_claim);
-    reg(registry, "Or", or_op, logical_binary_claim);
-    reg(registry, "Xor", xor_op, logical_binary_claim);
-    reg(registry, "Not", not_op, not_claim);
-    reg_since(
+    shapeless(registry, "And", and_op, logical_binary_claim);
+    shapeless(registry, "Or", or_op, logical_binary_claim);
+    shapeless(registry, "Xor", xor_op, logical_binary_claim);
+    shapeless(registry, "Not", not_op, not_claim);
+    shapeless_since(
         registry,
         "BitwiseAnd",
         18,
         bitwise_and_op,
         bitwise_binary_claim,
     );
-    reg_since(
+    shapeless_since(
         registry,
         "BitwiseOr",
         18,
         bitwise_or_op,
         bitwise_binary_claim,
     );
-    reg_since(
+    shapeless_since(
         registry,
         "BitwiseXor",
         18,
         bitwise_xor_op,
         bitwise_binary_claim,
     );
-    reg_since(
+    shapeless_since(
         registry,
         "BitwiseNot",
         18,
         bitwise_not_op,
         bitwise_not_claim,
     );
-    reg_since(registry, "IsInf", 10, is_inf_op, is_inf_claim);
-    reg_since(registry, "IsNaN", 9, is_nan_op, float_predicate_claim);
+    shapeless_since(registry, "IsInf", 10, is_inf_op, is_inf_claim);
+    shapeless_since(registry, "IsNaN", 9, is_nan_op, float_predicate_claim);
 
     // Misc elementwise.
-    reg(registry, "Mod", mod_op, mod_claim);
-    reg(registry, "BitShift", bitshift_op, bitshift_claim);
+    shapeless(registry, "Mod", mod_op, mod_claim);
+    shapeless(registry, "BitShift", bitshift_op, bitshift_claim);
 }

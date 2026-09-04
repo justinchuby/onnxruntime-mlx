@@ -257,12 +257,7 @@ unsafe fn get_capability_impl(
             .iter()
             .map(|&node| {
                 let view = NodeView::new(ep.ort_api, node);
-                decoder_graph
-                    && crate::registry::compile_shape_safety(
-                        &view.domain(),
-                        &view.op_type(),
-                        view.since_version(),
-                    ) == crate::registry::CompileShapeSafety::ShapeKeyedOnly
+                decoder_graph && !crate::registry::compile_shape_safety(&view).allows_shapeless()
             })
             .collect();
 
@@ -1116,7 +1111,13 @@ unsafe fn build_plan(
             let op_type = node_op_type(api, node);
             let domain = node_domain(api, node);
             let since_version = node_since_version(api, node);
-            let mut nd = NodeDesc::new(op_type, domain, since_version);
+            let view = NodeView::new(api, node);
+            let mut nd = NodeDesc::new(
+                op_type,
+                domain,
+                since_version,
+                crate::registry::compile_shape_safety(&view),
+            );
             let tr = crate::trace::tracer();
             if tr.is_enabled() {
                 nd.node_id = node_id(api, node);
@@ -1604,10 +1605,12 @@ unsafe fn build_subgraphs(
             let trace_on = crate::trace::tracer().is_enabled();
             for &idx in &order {
                 let node = bnodes[idx];
+                let view = NodeView::new(api, node);
                 let mut mnd = NodeDesc::new(
                     node_op_type(api, node),
                     node_domain(api, node),
                     node_since_version(api, node),
+                    crate::registry::compile_shape_safety(&view),
                 );
                 if trace_on {
                     mnd.node_id = node_id(api, node);
@@ -2513,7 +2516,12 @@ mod float64_plan_tests {
     use crate::sys::ort;
 
     fn node_with_output(otype: ort::ONNXTensorElementDataType) -> NodeDesc {
-        let mut node = NodeDesc::new("Elu".to_string(), String::new(), 6);
+        let mut node = NodeDesc::new(
+            "Elu".to_string(),
+            String::new(),
+            6,
+            crate::registry::CompileShapeSafety::Shapeless,
+        );
         node.outputs.push(OutRef {
             name: "y".to_string(),
             external: true,

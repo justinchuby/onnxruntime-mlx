@@ -1476,13 +1476,13 @@ fn non_max_suppression_claim(node: &NodeView) -> ClaimResult {
 
 // ---- registration -------------------------------------------------------------------------------
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     op_type: &'static str,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type,
         min_opset: K_ANY_OPSET,
@@ -1492,14 +1492,64 @@ fn reg(
     });
 }
 
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    op_type: &'static str,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type,
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler,
+            claim,
+        },
+        reason,
+    );
+}
+
 pub fn register_vision(registry: &mut OpRegistry) {
-    reg(registry, "GridSample", grid_sample_op, grid_sample_claim);
-    reg(registry, "AffineGrid", affine_grid_op, affine_grid_claim);
-    reg(registry, "Col2Im", col2im_op, col2im_claim);
-    reg(registry, "RoiAlign", roi_align_op, roi_align_claim);
-    reg(registry, "MaxRoiPool", max_roi_pool_op, max_roi_pool_claim);
-    reg(registry, "MaxUnpool", max_unpool_op, max_unpool_claim);
-    reg(
+    shape_keyed(
+        registry,
+        "GridSample",
+        grid_sample_op,
+        grid_sample_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
+    shapeless(registry, "AffineGrid", affine_grid_op, affine_grid_claim);
+    shape_keyed(
+        registry,
+        "Col2Im",
+        col2im_op,
+        col2im_claim,
+        crate::registry::MLX_SCATTER_SHAPE_REASON,
+    );
+    shape_keyed(
+        registry,
+        "RoiAlign",
+        roi_align_op,
+        roi_align_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
+    shape_keyed(
+        registry,
+        "MaxRoiPool",
+        max_roi_pool_op,
+        max_roi_pool_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
+    shape_keyed(
+        registry,
+        "MaxUnpool",
+        max_unpool_op,
+        max_unpool_claim,
+        crate::registry::MLX_SCATTER_SHAPE_REASON,
+    );
+    shapeless(
         registry,
         "NonMaxSuppression",
         non_max_suppression_op,

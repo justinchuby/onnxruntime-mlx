@@ -8,8 +8,8 @@
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext, mlx_dtype_from_onnx};
 use crate::registry::{
-    ClaimPredicate, ClaimResult, CompileShapeSafety, K_ANY_OPSET, NodeView, OpHandler,
-    OpRegistration, OpRegistry, is_mlx_float,
+    ClaimPredicate, ClaimResult, K_ANY_OPSET, NodeView, OpHandler, OpRegistration, OpRegistry,
+    is_mlx_float,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -1265,7 +1265,7 @@ fn gated_rms_norm_claim(node: &NodeView) -> ClaimResult {
 // ---- registration -------------------------------------------------------------------------------
 
 pub fn register(registry: &mut OpRegistry) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain: "",
         op_type: "TensorScatter",
         min_opset: K_ANY_OPSET,
@@ -1273,23 +1273,29 @@ pub fn register(registry: &mut OpRegistry) {
         handler: tensor_scatter_op as OpHandler,
         claim: tensor_scatter_claim as ClaimPredicate,
     });
-    registry.register(OpRegistration {
-        domain: "com.microsoft",
-        op_type: "CausalConvWithState",
-        min_opset: K_ANY_OPSET,
-        max_opset: K_ANY_OPSET,
-        handler: causal_conv_op as OpHandler,
-        claim: causal_conv_claim as ClaimPredicate,
-    });
-    registry.register(OpRegistration {
-        domain: "",
-        op_type: "CausalConvWithState",
-        min_opset: 27,
-        max_opset: K_ANY_OPSET,
-        handler: causal_conv_op as OpHandler,
-        claim: causal_conv_claim as ClaimPredicate,
-    });
-    registry.register_with_compile_shape_safety(
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "com.microsoft",
+            op_type: "CausalConvWithState",
+            min_opset: K_ANY_OPSET,
+            max_opset: K_ANY_OPSET,
+            handler: causal_conv_op as OpHandler,
+            claim: causal_conv_claim as ClaimPredicate,
+        },
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain: "",
+            op_type: "CausalConvWithState",
+            min_opset: 27,
+            max_opset: K_ANY_OPSET,
+            handler: causal_conv_op as OpHandler,
+            claim: causal_conv_claim as ClaimPredicate,
+        },
+        crate::registry::MLX_SLICE_SHAPE_REASON,
+    );
+    registry.register_shape_keyed(
         OpRegistration {
             domain: "com.microsoft",
             op_type: "LinearAttention",
@@ -1298,9 +1304,9 @@ pub fn register(registry: &mut OpRegistry) {
             handler: linear_attention_op as OpHandler,
             claim: linear_attention_claim as ClaimPredicate,
         },
-        CompileShapeSafety::ShapeKeyedOnly,
+        "emits MLX Slice, Pad, and Scan, which lack Primitive::output_shapes in MLX 0.32.1",
     );
-    registry.register_with_compile_shape_safety(
+    registry.register_shape_keyed(
         OpRegistration {
             domain: "",
             op_type: "LinearAttention",
@@ -1309,7 +1315,7 @@ pub fn register(registry: &mut OpRegistry) {
             handler: linear_attention_op as OpHandler,
             claim: linear_attention_standard_claim as ClaimPredicate,
         },
-        CompileShapeSafety::ShapeKeyedOnly,
+        "emits MLX Slice, Pad, and Scan, which lack Primitive::output_shapes in MLX 0.32.1",
     );
     for (op_type, handler, claim) in [
         (
@@ -1328,7 +1334,7 @@ pub fn register(registry: &mut OpRegistry) {
             gated_rms_norm_claim as ClaimPredicate,
         ),
     ] {
-        registry.register(OpRegistration {
+        registry.register_shapeless(OpRegistration {
             domain: "com.microsoft",
             op_type,
             min_opset: K_ANY_OPSET,

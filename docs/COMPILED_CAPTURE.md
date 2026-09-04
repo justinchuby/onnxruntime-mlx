@@ -53,17 +53,42 @@ trace/apply/eval error). The compiled path never crashes and never diverges (`co
 | **`Shapeless`** | The compiled closure is shape-*agnostic*: a dimension may **grow/change every call with zero retrace**. One closure serves every step. | **decode** (growing KV length costs one compile ever, not one per token) |
 | **`ShapeKeyed`** | `mlx_compile` keys on input shapes/dtypes and **transparently retraces** (re-invokes the thunk) when they change, so a new shape recompiles rather than miscomputes. | **general** static-shape subgraphs; **prefill** (varying query length `S`) |
 
-MLX 0.32's shapeless `mlx_compile` cannot shape-infer its `Slice` or `Scan` primitives (`CumSum`
-lowers to `Scan`) and cannot eval mid-trace. In decoder graphs, the EP therefore gives ONNX
-`Slice`/`CumSum` nodes a separate partition colour: they remain claimed by MLX, but execute through a
-shape-keyed or eager partition instead of aborting the surrounding shapeless decoder closure.
-ShapeKeyed pays one recompile per distinct `(shape, dtype)` tuple — cheap when the shape set is small
-and repeating (prefill prompt lengths, CNN batch sizes), pathological if unbounded.
+MLX 0.32's shapeless `mlx_compile` cannot shape-infer several primitives and cannot eval mid-trace.
+Every registered lowering therefore makes an explicit choice at its registration boundary:
 
-This is declared as a property of each registered lowering (`CompileShapeSafety`), not inferred from
-model or node names. The same property marks `LinearAttention`, whose long-prefill implementation
-uses an internal `mlx_cumsum`; it remains eligible for shape-keyed prefill while being barred from a
-future shapeless route.
+- `register_shapeless` is an affirmative promise that its **shapeless-specific** trace emits only
+  primitives implementing `Primitive::output_shapes`;
+- `register_shape_keyed` carries the exact missing-primitive reason;
+- `register_shape_classified` derives the decision from concrete static node geometry (used by quant
+  handlers so ordinary aligned `MatMulNBits` decode remains shapeless).
+
+There is no unclassified registration API. `NodeDesc` stores the resulting decision during Compile,
+so decoder partition colouring and every compiled execution route consume the same proof. Eager MLX
+execution is unaffected.
+
+The MLX 0.32.1 audit found these missing-`output_shapes` primitives in current lowerings:
+
+| MLX primitive | Registered lowerings that can emit it |
+|---|---|
+| `Slice` | ONNX `Slice`; QMoE; CausalConvWithState; LinearAttention; Scan; DeformConv; LRN; RNN/GRU/LSTM; DFT; `ai.onnx.ml` SVMClassifier/FeatureVectorizer; `com.microsoft` Attention/PackedMultiHeadAttention/RotaryEmbedding/MRotaryEmbedding/PagedAttention; GridSample/RoiAlign/MaxRoiPool; conditional block-quantized matmul, MatMulNBits zero-point trim, and GatherBlockQuantized zero-point trim forms |
+| `Scan` | CumSum; internal LinearAttention cumulative gating |
+| `AsStrided` | AveragePool/MaxPool/LpPool; STFT |
+| `Pad` | AveragePool/MaxPool/LpPool; LRN; CenterCropPad; ONNX Pad; LinearAttention; conditional unaligned MatMulNBits |
+| `RandomBits` | RandomNormal/RandomNormalLike/RandomUniform/RandomUniformLike/Bernoulli/Multinomial |
+| `Scatter` | Scatter/ScatterElements/ScatterND; PagedAttention; Col2Im; MaxUnpool |
+| `Split` | ONNX Split |
+| `View` | BitCast |
+| `FFT` | DFT/STFT |
+| `CustomKernel` | the fused selective-scan branch inside ONNX Scan |
+
+`GroupQueryAttention` is the deliberate exception: its eager and shape-keyed paths use `Slice`, but
+the shapeless decode configuration replaces those operations with data-fed RoPE rows and
+shape-preserving alternatives. That specialized trace remains explicitly registered as shapeless.
+
+In decoder graphs, shape-keyed nodes receive a separate partition colour. They remain claimed by MLX
+but execute through a shape-keyed or eager partition instead of aborting the surrounding shapeless
+decoder closure. ShapeKeyed pays one recompile per distinct `(shape, dtype)` tuple — cheap when the
+shape set is small and repeating (prefill prompt lengths, CNN batch sizes), pathological if unbounded.
 
 ### Two distinct senses of "dynamic"
 

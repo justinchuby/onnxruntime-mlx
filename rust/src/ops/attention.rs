@@ -2338,7 +2338,7 @@ fn mrotary_embedding_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-fn reg(
+fn shapeless(
     registry: &mut OpRegistry,
     domain: &'static str,
     op_type: &'static str,
@@ -2347,7 +2347,7 @@ fn reg(
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
 ) {
-    registry.register(OpRegistration {
+    registry.register_shapeless(OpRegistration {
         domain,
         op_type,
         min_opset,
@@ -2355,6 +2355,30 @@ fn reg(
         handler,
         claim,
     });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn shape_keyed(
+    registry: &mut OpRegistry,
+    domain: &'static str,
+    op_type: &'static str,
+    min_opset: i32,
+    max_opset: i32,
+    handler: crate::registry::OpHandler,
+    claim: crate::registry::ClaimPredicate,
+    reason: &'static str,
+) {
+    registry.register_shape_keyed(
+        OpRegistration {
+            domain,
+            op_type,
+            min_opset,
+            max_opset,
+            handler,
+            claim,
+        },
+        reason,
+    );
 }
 
 // ---- PagedAttention (com.microsoft) ------------------------------------------------------------
@@ -2977,7 +3001,7 @@ fn paged_attention_claim(node: &NodeView) -> ClaimResult {
 }
 
 pub fn register_attention(registry: &mut OpRegistry) {
-    reg(
+    shape_keyed(
         registry,
         "com.microsoft",
         "PagedAttention",
@@ -2985,8 +3009,11 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         paged_attention_op,
         paged_attention_claim,
+        "emits MLX Slice and Scatter, which lack Primitive::output_shapes in MLX 0.32.1",
     );
-    reg(
+    // GQA's eager and shape-keyed paths use Slice, but the shapeless decode route replaces every
+    // such operation with data-fed RoPE rows and shape-preserving alternatives.
+    shapeless(
         registry,
         "com.microsoft",
         "GroupQueryAttention",
@@ -2996,7 +3023,7 @@ pub fn register_attention(registry: &mut OpRegistry) {
         group_query_attention_claim,
     );
     // Attention entered ai.onnx at opset 23; opset 24 adds the trailing nonpad_kv_seqlen input.
-    reg(
+    shapeless(
         registry,
         "",
         "Attention",
@@ -3005,7 +3032,7 @@ pub fn register_attention(registry: &mut OpRegistry) {
         attention_op,
         attention_claim,
     );
-    reg(
+    shapeless(
         registry,
         "",
         "Attention",
@@ -3014,7 +3041,7 @@ pub fn register_attention(registry: &mut OpRegistry) {
         attention_op,
         attention_claim,
     );
-    reg(
+    shape_keyed(
         registry,
         "com.microsoft",
         "Attention",
@@ -3022,8 +3049,9 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         ms_attention_op,
         ms_attention_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
     );
-    reg(
+    shapeless(
         registry,
         "com.microsoft",
         "MultiHeadAttention",
@@ -3032,7 +3060,7 @@ pub fn register_attention(registry: &mut OpRegistry) {
         multihead_attention_op,
         multihead_attention_claim,
     );
-    reg(
+    shape_keyed(
         registry,
         "com.microsoft",
         "PackedMultiHeadAttention",
@@ -3040,9 +3068,10 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         packed_multihead_attention_op,
         packed_multihead_attention_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
     );
     // RotaryEmbedding: ai.onnx entered at opset 23; com.microsoft is version-insensitive.
-    reg(
+    shape_keyed(
         registry,
         "",
         "RotaryEmbedding",
@@ -3050,8 +3079,9 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         rotary_embedding_op,
         rotary_embedding_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
     );
-    reg(
+    shape_keyed(
         registry,
         "com.microsoft",
         "RotaryEmbedding",
@@ -3059,8 +3089,9 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         rotary_embedding_op,
         rotary_embedding_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
     );
-    reg(
+    shape_keyed(
         registry,
         "com.microsoft",
         "MRotaryEmbedding",
@@ -3068,5 +3099,6 @@ pub fn register_attention(registry: &mut OpRegistry) {
         K_ANY_OPSET,
         mrotary_embedding_op,
         mrotary_embedding_claim,
+        crate::registry::MLX_SLICE_SHAPE_REASON,
     );
 }

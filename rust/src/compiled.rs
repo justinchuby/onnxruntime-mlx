@@ -52,12 +52,12 @@ pub fn compile_enabled(has_control_flow: bool) -> bool {
 }
 
 fn node_compile_shape_safety(node: &NodeDesc) -> CompileShapeSafety {
-    crate::registry::compile_shape_safety(&node.domain, &node.op_type, node.since_version)
+    node.compile_shape_safety
 }
 
 fn compile_shape_mode_supported(nodes: &[NodeDesc], shapeless: bool) -> bool {
     nodes.iter().all(|node| {
-        (!shapeless || node_compile_shape_safety(node) == CompileShapeSafety::Shapeless)
+        (!shapeless || node_compile_shape_safety(node).allows_shapeless())
             && node
                 .subgraphs
                 .iter()
@@ -1247,42 +1247,85 @@ mod shape_inference_tests {
     }
 
     fn cumsum(axis_source: Src) -> NodeDesc {
-        let mut node = NodeDesc::new("CumSum".to_string(), String::new(), 14);
+        let mut node = NodeDesc::new(
+            "CumSum".to_string(),
+            String::new(),
+            14,
+            CompileShapeSafety::ShapeKeyedOnly {
+                reason: crate::registry::MLX_SCAN_SHAPE_REASON,
+            },
+        );
         node.inputs = vec![input("data", Src::CtxInput), input("axis", axis_source)];
         node
     }
 
     #[test]
-    fn scan_and_slice_require_shape_specialized_compile() {
-        for mut node in [
-            NodeDesc::new("CumSum".to_string(), String::new(), 14),
-            NodeDesc::new("Slice".to_string(), String::new(), 14),
+    fn missing_output_shape_emitters_require_shape_specialized_compile() {
+        for node in [
+            NodeDesc::new(
+                "CumSum".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SCAN_SHAPE_REASON,
+                },
+            ),
+            NodeDesc::new(
+                "Slice".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SLICE_SHAPE_REASON,
+                },
+            ),
             NodeDesc::new(
                 "LinearAttention".to_string(),
                 "com.microsoft".to_string(),
                 1,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: "emits MLX Slice, Pad, and Scan",
+                },
+            ),
+            NodeDesc::new(
+                "QMoE".to_string(),
+                "com.microsoft".to_string(),
+                1,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SLICE_SHAPE_REASON,
+                },
             ),
         ] {
-            assert_eq!(
-                node_compile_shape_safety(&node),
-                CompileShapeSafety::ShapeKeyedOnly
-            );
-            node.domain = "com.example".to_string();
-            assert_eq!(
-                node_compile_shape_safety(&node),
-                CompileShapeSafety::Shapeless
-            );
+            assert!(!node_compile_shape_safety(&node).allows_shapeless());
         }
-        assert_eq!(
-            node_compile_shape_safety(&NodeDesc::new("Add".to_string(), String::new(), 14)),
-            CompileShapeSafety::Shapeless
+        assert!(
+            node_compile_shape_safety(&NodeDesc::new(
+                "Add".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::Shapeless,
+            ))
+            .allows_shapeless()
         );
         assert!(compile_shape_mode_supported(
-            &[NodeDesc::new("CumSum".to_string(), String::new(), 14)],
+            &[NodeDesc::new(
+                "CumSum".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SCAN_SHAPE_REASON,
+                },
+            )],
             false
         ));
         assert!(!compile_shape_mode_supported(
-            &[NodeDesc::new("CumSum".to_string(), String::new(), 14)],
+            &[NodeDesc::new(
+                "CumSum".to_string(),
+                String::new(),
+                14,
+                CompileShapeSafety::ShapeKeyedOnly {
+                    reason: crate::registry::MLX_SCAN_SHAPE_REASON,
+                },
+            )],
             true
         ));
     }
@@ -1301,7 +1344,12 @@ mod shape_inference_tests {
 
     #[test]
     fn direct_runtime_shape_parameter_is_data_dependent() {
-        let mut reshape = NodeDesc::new("Reshape".to_string(), String::new(), 14);
+        let mut reshape = NodeDesc::new(
+            "Reshape".to_string(),
+            String::new(),
+            14,
+            CompileShapeSafety::Shapeless,
+        );
         reshape.inputs = vec![input("data", Src::CtxInput), input("shape", Src::CtxInput)];
         assert!(reads_data_dependent_parameter(&reshape));
 

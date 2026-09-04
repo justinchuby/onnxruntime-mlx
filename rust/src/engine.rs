@@ -136,6 +136,7 @@ pub struct NodeDesc {
     pub op_type: String,
     pub domain: String,
     pub since_version: i32,
+    pub compile_shape_safety: crate::registry::CompileShapeSafety,
     pub ints: HashMap<String, i64>,
     pub floats: HashMap<String, f32>,
     pub int_arrays: HashMap<String, Vec<i64>>,
@@ -151,13 +152,19 @@ pub struct NodeDesc {
 }
 
 impl NodeDesc {
-    pub fn new(op_type: String, domain: String, since_version: i32) -> Self {
+    pub fn new(
+        op_type: String,
+        domain: String,
+        since_version: i32,
+        compile_shape_safety: crate::registry::CompileShapeSafety,
+    ) -> Self {
         NodeDesc {
             node_id: 0,
             name: String::new(),
             op_type,
             domain,
             since_version,
+            compile_shape_safety,
             ints: HashMap::new(),
             floats: HashMap::new(),
             int_arrays: HashMap::new(),
@@ -2206,7 +2213,12 @@ mod tests {
     }
 
     fn node(op_type: &str, inputs: &[&str], output_name: &str) -> NodeDesc {
-        let mut node = NodeDesc::new(op_type.to_string(), String::new(), 17);
+        let mut node = NodeDesc::new(
+            op_type.to_string(),
+            String::new(),
+            17,
+            crate::registry::CompileShapeSafety::Shapeless,
+        );
         node.inputs = inputs.iter().map(|name| input(name)).collect();
         node.outputs = vec![output(output_name)];
         node
