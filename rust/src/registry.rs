@@ -1638,6 +1638,7 @@ mod tests {
             ("", "GRU", 24),
             ("", "LSTM", 24),
             ("", "CumSum", 14),
+            ("", "CumProd", 26),
             ("", "ScatterElements", 24),
             ("", "CenterCropPad", 24),
             ("", "ScatterND", 24),

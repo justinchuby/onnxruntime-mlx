@@ -8,7 +8,6 @@
 //! correctly-shaped identity array instead of calling the aborting kernel).
 
 use crate::engine::{MlxError, NodeDesc, Src, TranslationContext};
-use crate::mlx::VectorArray;
 use crate::registry::{
     ClaimResult, K_ANY_OPSET, NodeView, OpRegistration, OpRegistry, is_float64, is_mlx_cpu_float,
     is_mlx_float, is_mlx_numeric,
@@ -321,9 +320,9 @@ fn cumsum_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError>
     Ok(())
 }
 
-/// ONNX CumSum changes values, never extents: axis/exclusive/reverse do not participate in shape
-/// inference, and symbolic dimensions pass through unchanged.
-fn infer_cumsum_output_shape(data_shape: &[i64]) -> Vec<i64> {
+/// ONNX cumulative reductions change values, never extents: axis/exclusive/reverse do not
+/// participate in shape inference, and symbolic dimensions pass through unchanged.
+fn infer_cumulative_output_shape(data_shape: &[i64]) -> Vec<i64> {
     data_shape.to_vec()
 }
 
@@ -337,28 +336,6 @@ fn shape_metadata_compatible(expected: &[i64], actual: &[i64]) -> bool {
 
 // ---- CumProd -----------------------------------------------------------------------------------
 
-fn take_axis_index(
-    ctx: &mut TranslationContext,
-    x: mlx::mlx_array,
-    axis: i32,
-    index: i32,
-) -> Result<mlx::mlx_array, MlxError> {
-    let selector = ctx.arange(
-        index as f64,
-        (index + 1) as f64,
-        1.0,
-        mlx::mlx_dtype__MLX_INT32,
-    )?;
-    ctx.emit(|res, s| unsafe { mlx::mlx_take_axis(res, x, selector, axis, s) })
-}
-
-fn ones_like(ctx: &mut TranslationContext, x: mlx::mlx_array) -> Result<mlx::mlx_array, MlxError> {
-    let zero = ctx.zeros_like(x)?;
-    let one = ctx.scalar_i32(1);
-    let one = ctx.astype(one, ctx.dtype_of(x))?;
-    ctx.binary(mlx::mlx_add, zero, one)
-}
-
 fn cumprod_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
     let x = ctx.resolve(&n.inputs[0])?;
     let rank = ctx.ndim(x) as i64;
@@ -369,45 +346,10 @@ fn cumprod_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError
     if axis < 0 || axis >= rank {
         return Err("MLX CumProd axis is out of range".to_string());
     }
-    let axis = axis as i32;
-    let dim = ctx.dim(x, axis);
-    if dim <= 0 {
-        return Err("MLX CumProd requires a non-empty cumulative axis".to_string());
-    }
-
-    let exclusive = n.ints.get("exclusive").copied().unwrap_or(0) != 0;
     let reverse = n.ints.get("reverse").copied().unwrap_or(0) != 0;
-    let mut accumulated: Option<mlx::mlx_array> = None;
-    let mut outputs = vec![None; dim as usize];
-
-    for step in 0..dim {
-        let index = if reverse { dim - 1 - step } else { step };
-        let current = take_axis_index(ctx, x, axis, index)?;
-        let output = if exclusive {
-            match accumulated {
-                Some(value) => value,
-                None => ones_like(ctx, current)?,
-            }
-        } else {
-            match accumulated {
-                Some(value) => ctx.binary(mlx::mlx_multiply, value, current)?,
-                None => current,
-            }
-        };
-        outputs[index as usize] = Some(output);
-        accumulated = Some(if exclusive {
-            ctx.binary(mlx::mlx_multiply, output, current)?
-        } else {
-            output
-        });
-    }
-
-    let mut values = VectorArray::new();
-    for output in outputs {
-        values.append(output.ok_or_else(|| "MLX CumProd internal output gap".to_string())?);
-    }
-    let out =
-        ctx.emit(|res, s| unsafe { mlx::mlx_concatenate_axis(res, values.as_raw(), axis, s) })?;
+    let inclusive = n.ints.get("exclusive").copied().unwrap_or(0) == 0;
+    let axis = axis as i32;
+    let out = ctx.cumprod(x, axis, reverse, inclusive)?;
     ctx.bind(&n.outputs[0], out);
     Ok(())
 }
@@ -672,7 +614,7 @@ fn cumsum_claim(node: &NodeView) -> ClaimResult {
         crate::registry::ort_dtype_name(x.dtype),
         crate::registry::ort_dtype_name(out.dtype)
     );
-    let expected_shape = infer_cumsum_output_shape(&x.shape);
+    let expected_shape = infer_cumulative_output_shape(&x.shape);
     require!(
         shape_metadata_compatible(&expected_shape, &out.shape),
         "output shape must equal the data input shape, got {:?} -> {:?}",
@@ -751,6 +693,13 @@ fn cumprod_claim(node: &NodeView) -> ClaimResult {
         "input/output must share a CumProd dtype supported by MLX, got {} -> {}",
         crate::registry::ort_dtype_name(x.dtype),
         crate::registry::ort_dtype_name(out.dtype)
+    );
+    let expected_shape = infer_cumulative_output_shape(&x.shape);
+    require!(
+        shape_metadata_compatible(&expected_shape, &out.shape),
+        "output shape must equal the data input shape, got {:?} -> {:?}",
+        x.shape,
+        out.shape
     );
     require!(
         axis.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32
@@ -947,6 +896,7 @@ fn shape_keyed(
     min_opset: i32,
     handler: crate::registry::OpHandler,
     claim: crate::registry::ClaimPredicate,
+    reason: &'static str,
 ) {
     registry.register_shape_keyed(
         OpRegistration {
@@ -957,7 +907,7 @@ fn shape_keyed(
             handler,
             claim,
         },
-        crate::registry::MLX_SCAN_SHAPE_REASON,
+        reason,
     );
 }
 
@@ -1034,21 +984,35 @@ pub fn register(registry: &mut OpRegistry) {
     );
     shapeless(registry, "ArgMax", K_ANY_OPSET, argmax_op, argminmax_claim);
     shapeless(registry, "ArgMin", K_ANY_OPSET, argmin_op, argminmax_claim);
-    shape_keyed(registry, "CumSum", 11, cumsum_op, cumsum_claim);
-    shapeless(registry, "CumProd", 26, cumprod_op, cumprod_claim);
+    shape_keyed(
+        registry,
+        "CumSum",
+        11,
+        cumsum_op,
+        cumsum_claim,
+        crate::registry::MLX_SCAN_SHAPE_REASON,
+    );
+    shape_keyed(
+        registry,
+        "CumProd",
+        26,
+        cumprod_op,
+        cumprod_claim,
+        crate::registry::MLX_SCAN_SHAPE_REASON,
+    );
     shapeless(registry, "Hardmax", K_ANY_OPSET, hardmax_op, hardmax_claim);
     shapeless(registry, "TopK", 10, topk_op, topk_claim);
 }
 
 #[cfg(test)]
-mod cumsum_shape_tests {
-    use super::{infer_cumsum_output_shape, shape_metadata_compatible};
+mod cumulative_shape_tests {
+    use super::{infer_cumulative_output_shape, shape_metadata_compatible};
 
     #[test]
     fn output_shape_is_the_data_shape_for_static_and_dynamic_dims() {
-        assert_eq!(infer_cumsum_output_shape(&[2, 3, 4]), vec![2, 3, 4]);
+        assert_eq!(infer_cumulative_output_shape(&[2, 3, 4]), vec![2, 3, 4]);
         assert_eq!(
-            infer_cumsum_output_shape(&[-1, 1, -1]),
+            infer_cumulative_output_shape(&[-1, 1, -1]),
             vec![-1, 1, -1],
             "symbolic extents must be preserved without reading axis data"
         );
