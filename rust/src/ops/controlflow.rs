@@ -22,7 +22,7 @@ use crate::engine::{MlxError, NodeDesc, SubgraphDesc, TensorRef, TranslationCont
 use crate::ops::selective_scan;
 use crate::registry::{
     ClaimPredicate, ClaimResult, GraphView, K_ANY_OPSET, NodeView, OpHandler, OpRegistration,
-    OpRegistry,
+    OpRegistry, ValueKind,
 };
 use crate::sys::mlx;
 use crate::sys::ort;
@@ -87,6 +87,37 @@ fn normalized_axis(axis: i64, rank: usize) -> Option<usize> {
     (0..rank).contains(&axis).then_some(axis as usize)
 }
 
+/// Control-flow bodies execute inside one fused plugin-EP node. ORT 1.29 exposes only
+/// `KernelContext_GetOutput(dimensions)` at that boundary, which creates tensors rather than
+/// sequence/optional values. Keep every non-tensor control-flow boundary on CPU instead of
+/// producing an invalid fused graph.
+fn require_tensor_control_flow_boundary(node: &NodeView, op: &str) -> ClaimResult {
+    for i in 0..node.num_inputs() {
+        if !node.input_present(i) {
+            continue;
+        }
+        match node.input_kind(i) {
+            Some(ValueKind::Tensor(_)) => {}
+            Some(kind) => deny!(
+                "{op}: {} input[{i}] cannot cross the ORT 1.29 plugin EP tensor boundary",
+                kind.description()
+            ),
+            None => deny!("{op}: input[{i}] type information is unavailable"),
+        }
+    }
+    for i in 0..node.num_outputs() {
+        match node.output_kind(i) {
+            Some(ValueKind::Tensor(_)) => {}
+            Some(kind) => deny!(
+                "{op}: {} output[{i}] cannot cross the ORT 1.29 plugin EP tensor boundary",
+                kind.description()
+            ),
+            None => deny!("{op}: output[{i}] type information is unavailable"),
+        }
+    }
+    Ok(())
+}
+
 fn scan_attr(n: &NodeDesc, name: &str, len: usize) -> Result<Vec<i64>, MlxError> {
     match n.int_arrays.get(name) {
         Some(values) if values.len() == len => Ok(values.clone()),
@@ -123,6 +154,7 @@ fn if_claim(node: &NodeView) -> ClaimResult {
         node.num_inputs(),
         node.num_outputs()
     );
+    require_tensor_control_flow_boundary(node, "If")?;
     require!(is_bool(node, 0), "condition input must have bool dtype");
     // The branch is selected host-side at translate time (`if_op` reads the cond via `raw_host`),
     // so the condition MUST be host-readable: a graph input, initializer, or outer-scope value.
@@ -377,6 +409,7 @@ fn scan_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
 fn scan_claim(node: &NodeView) -> ClaimResult {
     let ninputs = node.num_inputs();
     let noutputs = node.num_outputs();
+    require_tensor_control_flow_boundary(node, "Scan")?;
     let num_scan = node.int_attr("num_scan_inputs", -1);
     require!(
         num_scan > 0 && (ninputs as i64) >= num_scan,
@@ -568,6 +601,7 @@ fn loop_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
 fn loop_claim(node: &NodeView) -> ClaimResult {
     const UNSUPPORTED: &str = "Loop: only static carried-state loops (constant trip-count + passthrough cond, no scan outputs) are unrolled; scan outputs / dynamic control stay on CPU";
     let ninputs = node.num_inputs();
+    require_tensor_control_flow_boundary(node, "Loop")?;
     require!(ninputs >= 2, "{}", UNSUPPORTED);
     let num_state = ninputs - 2;
     require!(is_int64(node, 0) && is_bool(node, 1), "{}", UNSUPPORTED);

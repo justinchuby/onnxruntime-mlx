@@ -101,12 +101,12 @@ def _session(model: bytes, providers: list[str]) -> ort.InferenceSession:
     return ort.InferenceSession(model, options, providers=providers)
 
 
-def run_mlx(model: bytes, feeds: dict[str, np.ndarray]) -> list[np.ndarray]:
+def run_mlx(model: bytes, feeds: dict[str, object]) -> list[object]:
     """Run a model through the MLX EP (CPU fallback available) and return its outputs."""
     return _session(model, EP_PROVIDERS).run(None, feeds)
 
 
-def run_cpu(model: bytes, feeds: dict[str, np.ndarray]) -> list[np.ndarray]:
+def run_cpu(model: bytes, feeds: dict[str, object]) -> list[object]:
     """Run a model through ORT's CPU EP."""
     return _session(model, ["CPUExecutionProvider"]).run(None, feeds)
 
@@ -200,6 +200,36 @@ def assert_op_claimed(
         f"Ops left on CPU: {sorted(n for n in on_cpu if n)}"
     )
     assert_matches_cpu(model, feeds, rtol=rtol, atol=atol)
+
+
+def assert_op_declined(model: bytes, feeds: dict[str, object], op_type: str) -> None:
+    """Assert `op_type` runs on ORT CPU rather than being incorrectly claimed by MLX."""
+    import json
+    import os
+
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    options.enable_profiling = True
+    options.profile_file_prefix = "mlx_op_decline_probe"
+    session = ort.InferenceSession(model, options, providers=EP_PROVIDERS)
+    session.run(None, feeds)
+    profile_path = session.end_profiling()
+    try:
+        with open(profile_path) as profile:
+            events = json.load(profile)
+    finally:
+        os.remove(profile_path)
+
+    on_cpu = {
+        event["args"].get("op_name")
+        for event in events
+        if event.get("cat") == "Node"
+        and event.get("args", {}).get("provider") == "CPUExecutionProvider"
+    }
+    assert op_type in on_cpu, (
+        f"{op_type} was unexpectedly claimed by MLX. "
+        f"Ops left on CPU: {sorted(n for n in on_cpu if n)}"
+    )
 
 
 def assert_matches_ref(

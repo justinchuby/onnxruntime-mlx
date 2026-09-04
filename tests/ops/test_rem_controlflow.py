@@ -107,6 +107,22 @@ def check_claimed(model: bytes, feeds: dict[str, np.ndarray], cf_type: str) -> N
     m.assert_matches_cpu(model, feeds, rtol=1e-5, atol=1e-6)
 
 
+@pytest.mark.parametrize("value", [np.arange(3, dtype=FLOAT), None])
+def test_if_optional_container_propagation_stays_on_cpu(value: np.ndarray | None) -> None:
+    model = if_optional_model()
+    feeds = {"x": value, "cond": np.array(True)}
+    assert_mlx_declines(model, feeds, "If")
+    _container_result_matches_cpu(model, feeds)
+
+
+@pytest.mark.parametrize("value", [np.arange(3, dtype=FLOAT), None])
+def test_loop_optional_container_propagation_stays_on_cpu(value: np.ndarray | None) -> None:
+    model = loop_optional_model()
+    feeds = {"trip": np.array(2, dtype=np.int64), "cond": np.array(True), "state": value}
+    assert_mlx_declines(model, feeds, "Loop")
+    _container_result_matches_cpu(model, feeds)
+
+
 # --- model builders ------------------------------------------------------------------------------
 def if_model() -> bytes:
     """then: x + 1 ; else: x - 1 (runtime bool cond selects the branch)."""
@@ -131,6 +147,80 @@ def if_model() -> bytes:
         attributes={"then_branch": then_g, "else_branch": else_g},
     )
     return _model(ir.Graph([x, cond], [y], nodes=[if_node], name="ifm", opset_imports={"": 18}))
+
+
+def _container_result_matches_cpu(model: bytes, feeds: dict[str, object]) -> None:
+    expected = m.run_cpu(model, feeds)
+    actual = m.run_mlx(model, feeds)
+    assert len(actual) == len(expected)
+    for got, want in zip(actual, expected, strict=True):
+        if want is None:
+            assert got is None
+        else:
+            np.testing.assert_array_equal(got, want)
+
+
+def if_optional_model() -> bytes:
+    """If and its branch Identity propagate optional(tensor), which must remain on CPU."""
+    x = ir.Value(name="x", type=ir.OptionalType(ir.TensorType(DT.FLOAT)))
+    cond = _t("cond", DT.BOOL, [])
+    y = ir.Value(name="y", type=ir.OptionalType(ir.TensorType(DT.FLOAT)))
+    then_out = ir.Value(name="then_out", type=ir.OptionalType(ir.TensorType(DT.FLOAT)))
+    else_out = ir.Value(name="else_out", type=ir.OptionalType(ir.TensorType(DT.FLOAT)))
+    then_branch = ir.Graph(
+        [],
+        [then_out],
+        nodes=[ir.node("Identity", [x], outputs=[then_out])],
+        name="if_optional_then",
+        opset_imports={"": 24},
+    )
+    else_branch = ir.Graph(
+        [],
+        [else_out],
+        nodes=[ir.node("Identity", [x], outputs=[else_out])],
+        name="if_optional_else",
+        opset_imports={"": 24},
+    )
+    node = ir.node(
+        "If",
+        [cond],
+        outputs=[y],
+        attributes={"then_branch": then_branch, "else_branch": else_branch},
+    )
+    return _model(ir.Graph([x, cond], [y], nodes=[node], name="if_optional", opset_imports={"": 24}))
+
+
+def loop_optional_model() -> bytes:
+    """A static Loop that carries optional(tensor) through body Identity."""
+    trip = _t("trip", DT.INT64, [])
+    cond = _t("cond", DT.BOOL, [])
+    state = ir.Value(name="state", type=ir.OptionalType(ir.TensorType(DT.FLOAT)))
+    output = ir.Value(name="output", type=ir.OptionalType(ir.TensorType(DT.FLOAT)))
+    iteration = _t("iteration", DT.INT64, [])
+    body_cond = _t("body_cond", DT.BOOL, [])
+    body_state = ir.Value(name="body_state", type=ir.OptionalType(ir.TensorType(DT.FLOAT)))
+    body_cond_out = _t("body_cond_out", DT.BOOL, [])
+    body_state_out = ir.Value(name="body_state_out", type=ir.OptionalType(ir.TensorType(DT.FLOAT)))
+    body = ir.Graph(
+        [iteration, body_cond, body_state],
+        [body_cond_out, body_state_out],
+        nodes=[
+            ir.node("Identity", [body_cond], outputs=[body_cond_out]),
+            ir.node("Identity", [body_state], outputs=[body_state_out]),
+        ],
+        name="loop_optional_body",
+        opset_imports={"": 24},
+    )
+    node = ir.node("Loop", [trip, cond, state], outputs=[output], attributes={"body": body})
+    return _model(
+        ir.Graph(
+            [trip, cond, state],
+            [output],
+            nodes=[node],
+            name="loop_optional",
+            opset_imports={"": 24},
+        )
+    )
 
 
 def scan_model() -> bytes:

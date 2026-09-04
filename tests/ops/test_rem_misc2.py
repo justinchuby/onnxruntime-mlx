@@ -11,6 +11,7 @@ import numpy as np
 import onnx_ir as ir
 import pytest
 
+import _models as m
 from _models import (
     DataType,
     assert_matches_cpu,
@@ -135,7 +136,43 @@ def test_unique_all_outputs() -> None:
     assert_matches_cpu(model, {"x": x}, rtol=0, atol=0)
 
 
-# --- Optional family (tensor-present forms) ------------------------------------------------------
+# --- Optional family -------------------------------------------------------------------------------
+def _optional_input_model(op_type: str) -> bytes:
+    x = ir.Value(name="x", type=ir.OptionalType(ir.TensorType(DataType.FLOAT)))
+    if op_type == "OptionalHasElement":
+        y = tensor("y", DataType.BOOL, [])
+    else:
+        y = tensor("y", DataType.FLOAT, [2, 3])
+    node = ir.node(op_type, [x], outputs=[y])
+    graph = ir.Graph([x], [y], nodes=[node], name=f"mlx_{op_type}", opset_imports={"": 24})
+    return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
+
+
+def _optional_wrapper_model(opset: int = 24) -> bytes:
+    x = tensor("x", DataType.FLOAT, [2, 3])
+    y = ir.Value(name="y", type=ir.OptionalType(ir.TensorType(DataType.FLOAT)))
+    node = ir.node("Optional", [x], outputs=[y])
+    graph = ir.Graph([x], [y], nodes=[node], name="mlx_Optional", opset_imports={"": opset})
+    return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
+
+
+def _optional_sequence_has_element_model() -> bytes:
+    x = ir.Value(
+        name="x",
+        type=ir.OptionalType(ir.SequenceType(ir.TensorType(DataType.FLOAT))),
+    )
+    y = tensor("y", DataType.BOOL, [])
+    node = ir.node("OptionalHasElement", [x], outputs=[y])
+    graph = ir.Graph(
+        [x],
+        [y],
+        nodes=[node],
+        name="mlx_OptionalHasElement_sequence",
+        opset_imports={"": 24},
+    )
+    return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
+
+
 def test_optional_has_element() -> None:
     x = np.arange(5, dtype=np.float32)
     model = make_model(
@@ -146,6 +183,19 @@ def test_optional_has_element() -> None:
     assert_matches_cpu(model, {"x": x})
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (np.arange(6, dtype=np.float32).reshape(2, 3), True),
+        (None, False),
+    ],
+)
+def test_optional_has_element_optional_tensor_claimed(value: np.ndarray | None, expected: bool) -> None:
+    model = _optional_input_model("OptionalHasElement")
+    m.assert_op_claimed(model, {"x": value}, "OptionalHasElement", rtol=0, atol=0)
+    assert bool(m.run_mlx(model, {"x": value})[0]) is expected
+
+
 def test_optional_get_element() -> None:
     x = np.arange(6, dtype=np.float32).reshape(2, 3)
     model = make_model(
@@ -154,6 +204,39 @@ def test_optional_get_element() -> None:
         [tensor("y", DataType.FLOAT, [2, 3])],
     )
     assert_matches_cpu(model, {"x": x})
+
+
+def test_optional_get_element_present_optional_tensor_stays_on_cpu() -> None:
+    x = np.arange(6, dtype=np.float32).reshape(2, 3)
+    model = _optional_input_model("OptionalGetElement")
+    m.assert_op_declined(model, {"x": x}, "OptionalGetElement")
+    assert_matches_cpu(model, {"x": x}, rtol=0, atol=0)
+
+
+def test_optional_get_element_empty_optional_fails() -> None:
+    model = _optional_input_model("OptionalGetElement")
+    with pytest.raises(Exception, match="OptionalGetElement"):
+        m.run_mlx(model, {"x": None})
+
+
+@pytest.mark.parametrize("opset", [15, 24, 26])
+def test_optional_wrapper_stays_on_cpu_at_plugin_boundary(opset: int) -> None:
+    # ORT 1.29 loads through opset 26, not the ONNX-main opset 28 schema. The unbounded
+    # registration intentionally keeps the container-boundary refusal valid for newer schemas.
+    model = _optional_wrapper_model(opset)
+    feeds = {"x": np.arange(6, dtype=np.float32).reshape(2, 3)}
+    m.assert_op_declined(model, feeds, "Optional")
+    assert_matches_cpu(model, feeds)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [[np.arange(2, dtype=np.float32)], None],
+)
+def test_optional_sequence_declines_safely(value: list[np.ndarray] | None) -> None:
+    model = _optional_sequence_has_element_model()
+    m.assert_op_declined(model, {"x": value}, "OptionalHasElement")
+    assert_matches_cpu(model, {"x": value})
 
 
 # --- NegativeLogLikelihoodLoss -------------------------------------------------------------------

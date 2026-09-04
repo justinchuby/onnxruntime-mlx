@@ -172,6 +172,20 @@ impl OpRegistry {
         });
     }
 
+    /// Register a lowering that must execute eagerly because it reads runtime host state.
+    pub fn register_eager(&mut self, entry: OpRegistration, reason: &'static str) {
+        assert!(
+            !reason.is_empty(),
+            "eager registration for {}::{} requires a reason",
+            entry.domain,
+            entry.op_type
+        );
+        self.table.push(RegisteredOp {
+            entry,
+            compile_shape_rule: CompileShapeRule::Always(CompileShapeSafety::EagerOnly { reason }),
+        });
+    }
+
     /// Register a lowering whose concrete node form decides whether shapeless compilation is safe.
     pub fn register_shape_classified(
         &mut self,
@@ -381,10 +395,49 @@ pub struct NodeView {
     node: *const ort::OrtNode,
 }
 
-/// Tensor element type + shape of a node value slot; `None` for an omitted optional / non-tensor.
+/// Tensor element type + shape of a node value slot.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SlotInfo {
     pub dtype: ort::ONNXTensorElementDataType,
     pub shape: Vec<i64>,
+}
+
+/// ONNX value kind exposed by the plugin-EP graph API.
+///
+/// `KernelContext_GetOutput` only allocates tensors, so container-producing nodes must never be
+/// claimed at an EP boundary. The contained kind is retained to make those refusals precise and to
+/// allow consumers of graph-input optionals to validate their actual tensor payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ValueKind {
+    Tensor(SlotInfo),
+    Sequence(Box<ValueKind>),
+    Optional(Box<ValueKind>),
+    Other,
+}
+
+impl ValueKind {
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Tensor(_) => "tensor",
+            Self::Sequence(_) => "sequence",
+            Self::Optional(_) => "optional",
+            Self::Other => "non-tensor container",
+        }
+    }
+
+    pub fn tensor(&self) -> Option<&SlotInfo> {
+        match self {
+            Self::Tensor(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    pub fn optional_tensor(&self) -> Option<&SlotInfo> {
+        match self {
+            Self::Optional(inner) => inner.tensor(),
+            _ => None,
+        }
+    }
 }
 
 impl NodeView {
@@ -471,7 +524,88 @@ impl NodeView {
         v
     }
 
-    fn slot_info(&self, vi: *const ort::OrtValueInfo) -> Option<SlotInfo> {
+    unsafe fn type_info_kind(&self, ti: *const ort::OrtTypeInfo) -> ValueKind {
+        unsafe {
+            if ti.is_null() {
+                return ValueKind::Other;
+            }
+            let api = self.api();
+            let mut onnx_type: ort::ONNXType = 0;
+            let st = (api.GetOnnxTypeFromTypeInfo.unwrap())(ti, &mut onnx_type);
+            if !st.is_null() {
+                self.release_status(st);
+                return ValueKind::Other;
+            }
+            match onnx_type {
+                t if t == ort::ONNXType_ONNX_TYPE_TENSOR => {
+                    let mut tsi: *const ort::OrtTensorTypeAndShapeInfo = std::ptr::null();
+                    let st = (api.CastTypeInfoToTensorInfo.unwrap())(ti, &mut tsi);
+                    if !st.is_null() || tsi.is_null() {
+                        self.release_status(st);
+                        return ValueKind::Other;
+                    }
+                    let mut dtype: ort::ONNXTensorElementDataType = 0;
+                    let st = (api.GetTensorElementType.unwrap())(tsi, &mut dtype);
+                    if !st.is_null() {
+                        self.release_status(st);
+                        return ValueKind::Other;
+                    }
+                    let mut nd: usize = 0;
+                    let st = (api.GetDimensionsCount.unwrap())(tsi, &mut nd);
+                    if !st.is_null() {
+                        self.release_status(st);
+                        return ValueKind::Other;
+                    }
+                    let mut shape = vec![0i64; nd];
+                    if nd > 0 {
+                        let st = (api.GetDimensions.unwrap())(tsi, shape.as_mut_ptr(), nd);
+                        if !st.is_null() {
+                            self.release_status(st);
+                            return ValueKind::Other;
+                        }
+                    }
+                    ValueKind::Tensor(SlotInfo { dtype, shape })
+                }
+                t if t == ort::ONNXType_ONNX_TYPE_SEQUENCE => {
+                    let mut sequence: *const ort::OrtSequenceTypeInfo = std::ptr::null();
+                    let st = (api.CastTypeInfoToSequenceTypeInfo.unwrap())(ti, &mut sequence);
+                    if !st.is_null() || sequence.is_null() {
+                        self.release_status(st);
+                        return ValueKind::Other;
+                    }
+                    let mut element: *mut ort::OrtTypeInfo = std::ptr::null_mut();
+                    let st = (api.GetSequenceElementType.unwrap())(sequence, &mut element);
+                    if !st.is_null() || element.is_null() {
+                        self.release_status(st);
+                        return ValueKind::Other;
+                    }
+                    let kind = self.type_info_kind(element);
+                    (api.ReleaseTypeInfo.unwrap())(element);
+                    ValueKind::Sequence(Box::new(kind))
+                }
+                t if t == ort::ONNXType_ONNX_TYPE_OPTIONAL => {
+                    let mut optional: *const ort::OrtOptionalTypeInfo = std::ptr::null();
+                    let st = (api.CastTypeInfoToOptionalTypeInfo.unwrap())(ti, &mut optional);
+                    if !st.is_null() || optional.is_null() {
+                        self.release_status(st);
+                        return ValueKind::Other;
+                    }
+                    let mut contained: *mut ort::OrtTypeInfo = std::ptr::null_mut();
+                    let st = (api.GetOptionalContainedTypeInfo.unwrap())(optional, &mut contained);
+                    if !st.is_null() || contained.is_null() {
+                        self.release_status(st);
+                        return ValueKind::Other;
+                    }
+                    let kind = self.type_info_kind(contained);
+                    (api.ReleaseTypeInfo.unwrap())(contained);
+                    ValueKind::Optional(Box::new(kind))
+                }
+                _ => ValueKind::Other,
+            }
+        }
+    }
+
+    fn value_kind(&self, vi: *const ort::OrtValueInfo) -> Option<ValueKind> {
         if vi.is_null() {
             return None;
         }
@@ -480,40 +614,39 @@ impl NodeView {
             let mut ti: *const ort::OrtTypeInfo = std::ptr::null();
             let st = (api.GetValueInfoTypeInfo.unwrap())(vi, &mut ti);
             if !st.is_null() || ti.is_null() {
+                self.release_status(st);
                 return None;
             }
-            let mut onnx_type: ort::ONNXType = 0;
-            (api.GetOnnxTypeFromTypeInfo.unwrap())(ti, &mut onnx_type);
-            if onnx_type != ort::ONNXType_ONNX_TYPE_TENSOR {
-                return None;
-            }
-            let mut tsi: *const ort::OrtTensorTypeAndShapeInfo = std::ptr::null();
-            (api.CastTypeInfoToTensorInfo.unwrap())(ti, &mut tsi);
-            if tsi.is_null() {
-                return None;
-            }
-            let mut dtype: ort::ONNXTensorElementDataType = 0;
-            (api.GetTensorElementType.unwrap())(tsi, &mut dtype);
-            let mut nd: usize = 0;
-            (api.GetDimensionsCount.unwrap())(tsi, &mut nd);
-            let mut dims = vec![0i64; nd];
-            if nd > 0 {
-                (api.GetDimensions.unwrap())(tsi, dims.as_mut_ptr(), nd);
-            }
-            Some(SlotInfo { dtype, shape: dims })
+            Some(self.type_info_kind(ti))
         }
     }
 
     /// Element type + shape of input `i` (None if omitted / non-tensor).
     pub fn input_info(&self, i: usize) -> Option<SlotInfo> {
         let ins = self.inputs_raw();
-        ins.get(i).and_then(|&vi| self.slot_info(vi))
+        ins.get(i)
+            .and_then(|&vi| self.value_kind(vi))
+            .and_then(|kind| kind.tensor().cloned())
     }
 
     /// Element type + shape of output `i` (None if omitted / non-tensor).
     pub fn output_info(&self, i: usize) -> Option<SlotInfo> {
         let outs = self.outputs_raw();
-        outs.get(i).and_then(|&vi| self.slot_info(vi))
+        outs.get(i)
+            .and_then(|&vi| self.value_kind(vi))
+            .and_then(|kind| kind.tensor().cloned())
+    }
+
+    /// Full ONNX kind of input `i`, including sequence and optional containment.
+    pub fn input_kind(&self, i: usize) -> Option<ValueKind> {
+        let ins = self.inputs_raw();
+        ins.get(i).and_then(|&vi| self.value_kind(vi))
+    }
+
+    /// Full ONNX kind of output `i`, including sequence and optional containment.
+    pub fn output_kind(&self, i: usize) -> Option<ValueKind> {
+        let outs = self.outputs_raw();
+        outs.get(i).and_then(|&vi| self.value_kind(vi))
     }
 
     /// Release a non-null `OrtStatus` returned on an error/not-found path (the OrtApi allocates a

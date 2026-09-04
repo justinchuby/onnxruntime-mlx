@@ -383,6 +383,66 @@ def test_split_num_outputs():
     m.assert_matches_cpu(model, {"d": data}, **tol(np.float32))
 
 
+# --- SplitToSequence-24 -------------------------------------------------------------------------
+def _split_to_sequence_model(
+    data_shape: list[int],
+    *,
+    split: np.ndarray | None,
+    axis: int,
+    keepdims: int,
+) -> bytes:
+    data = m.tensor("d", DT.FLOAT, data_shape)
+    output = ir.Value(name="seq", type=ir.SequenceType(ir.TensorType(DT.FLOAT)))
+    inputs = [data]
+    initializers = []
+    if split is not None:
+        split_value = initz("split", split)
+        inputs.append(split_value)
+        initializers.append(split_value)
+    node = ir.node(
+        "SplitToSequence",
+        inputs,
+        attributes={"axis": axis, "keepdims": keepdims},
+        outputs=[output],
+    )
+    graph = ir.Graph(
+        [data],
+        [output],
+        nodes=[node],
+        initializers=initializers,
+        name="mlx_SplitToSequence",
+        opset_imports={"": 24},
+    )
+    return ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
+
+
+@pytest.mark.parametrize(
+    ("split", "axis", "keepdims"),
+    [
+        (None, 0, 1),  # Default split size one.
+        (np.array(2, dtype=np.int64), 1, 1),  # Scalar split size.
+        (np.array([1, 3], dtype=np.int64), 1, 1),  # Per-output split sizes.
+        (np.array([2, 2], dtype=np.int64), 1, 0),  # Remove split axis from each output.
+    ],
+)
+def test_split_to_sequence_v24_declines_container_output(
+    split: np.ndarray | None, axis: int, keepdims: int
+) -> None:
+    data = sample(np.float32, [2, 4])
+    model = _split_to_sequence_model(
+        [2, 4],
+        split=split,
+        axis=axis,
+        keepdims=keepdims,
+    )
+    m.assert_op_declined(model, {"d": data}, "SplitToSequence")
+    expected = m.run_cpu(model, {"d": data})[0]
+    actual = m.run_mlx(model, {"d": data})[0]
+    assert len(actual) == len(expected)
+    for got, want in zip(actual, expected, strict=True):
+        np.testing.assert_array_equal(got, want)
+
+
 # --- Tile -------------------------------------------------------------------------------------
 @pytest.mark.parametrize("dt", MOVE_DTYPES)
 def test_tile(dt):
