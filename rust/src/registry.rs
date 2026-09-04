@@ -1687,4 +1687,24 @@ mod tests {
             CompileShapeRule::Classified(_)
         ));
     }
+
+    #[test]
+    fn future_quantize_schemas_remain_registered_without_ort_loading_them() {
+        // ORT 1.29 cannot load the later ONNX opsets, so exercise the registry directly. The
+        // quant predicates themselves distinguish the supported integer forms from packed/fp8.
+        for version in [24, 25, 28] {
+            assert!(
+                registry()
+                    .find_entry("", "QuantizeLinear", version)
+                    .is_some(),
+                "QuantizeLinear-{version} lost its registration"
+            );
+            assert!(
+                registry()
+                    .find_entry("", "DequantizeLinear", version)
+                    .is_some(),
+                "DequantizeLinear-{version} lost its registration"
+            );
+        }
+    }
 }
