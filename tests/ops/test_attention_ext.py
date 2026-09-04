@@ -247,6 +247,102 @@ def test_attention(case: tuple) -> None:
     check(model, feeds)
 
 
+def test_attention_cached_decode_replays_dynamic_mask_and_kv_shapes() -> None:
+    """A shapeless decoder closure must not bake the first call's mask/KV length into Broadcast."""
+    import onnxruntime as ort
+
+    batch, q_heads, kv_heads, head = 1, 4, 2, 16
+    hidden = q_heads * head
+    kv_hidden = kv_heads * head
+    model = build_model(
+        "Attention",
+        [
+            _t("Q", [batch, 1, hidden]),
+            _t("K", [batch, 1, kv_hidden]),
+            _t("V", [batch, 1, kv_hidden]),
+            _t("M", [batch, 1, 1, "total"], DT.BOOL),
+            _t("PK", [batch, kv_heads, "past", head]),
+            _t("PV", [batch, kv_heads, "past", head]),
+        ],
+        [
+            _t("Y", [batch, 1, hidden]),
+            _t("PRK", [batch, kv_heads, "total", head]),
+            _t("PRV", [batch, kv_heads, "total", head]),
+        ],
+        attributes={
+            "q_num_heads": q_heads,
+            "kv_num_heads": kv_heads,
+            "is_causal": 1,
+            "scale": float(1.0 / np.sqrt(head)),
+        },
+        opset=24,
+    )
+    rng = np.random.default_rng(20260904)
+    empty = np.empty((batch, kv_heads, 0, head), dtype=FLOAT)
+
+    def feeds(past_key: np.ndarray, past_value: np.ndarray) -> dict[str, np.ndarray]:
+        total = past_key.shape[2] + 1
+        return {
+            "Q": rng.standard_normal((batch, 1, hidden)).astype(FLOAT),
+            "K": rng.standard_normal((batch, 1, kv_hidden)).astype(FLOAT),
+            "V": rng.standard_normal((batch, 1, kv_hidden)).astype(FLOAT),
+            "M": np.ones((batch, 1, 1, total), dtype=bool),
+            "PK": past_key,
+            "PV": past_value,
+        }
+
+    first_feeds = feeds(empty, empty)
+    if not _cpu_supports(model, first_feeds):
+        pytest.skip("ORT CPU EP has no native Attention kernel")
+    cpu_session = ort.InferenceSession(model, providers=["CPUExecutionProvider"])
+    mlx_session = ort.InferenceSession(model, providers=m.EP_PROVIDERS)
+
+    first_expected = cpu_session.run(None, first_feeds)
+    first_actual = mlx_session.run(None, first_feeds)
+    for got, want in zip(first_actual, first_expected, strict=True):
+        np.testing.assert_allclose(got, want, rtol=2e-3, atol=2e-3)
+
+    second_feeds = feeds(first_expected[1], first_expected[2])
+    second_expected = cpu_session.run(None, second_feeds)
+    second_actual = mlx_session.run(None, second_feeds)
+    for got, want in zip(second_actual, second_expected, strict=True):
+        np.testing.assert_allclose(got, want, rtol=2e-3, atol=2e-3)
+
+
+def test_attention_cached_decode_uses_compiled_replay(tmp_path) -> None:
+    """Trace evidence must prove that the second dynamic-shape call hits the decode closure."""
+    import json
+    import subprocess
+    import sys
+
+    trace = tmp_path / "attention_replay_trace.json"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            f"{Path(__file__).name}::test_attention_cached_decode_replays_dynamic_mask_and_kv_shapes",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ],
+        check=True,
+        env={**os.environ, "ONNXRUNTIME_EP_MLX_TRACE": str(trace)},
+        cwd=str(Path(__file__).parent),
+        timeout=300,
+    )
+
+    events = json.loads(trace.read_text())
+    decode = [
+        event
+        for event in events
+        if event.get("name") == "mlx.compute[decode]"
+        and event.get("args", {}).get("ops") == "Attention"
+    ]
+    assert [event["args"].get("cache") for event in decode] == ["MISS", "HIT"], decode
+    assert len({event["args"].get("partition_id") for event in decode}) == 1, decode
+
+
 def test_attention_reuses_mutated_input_buffers_safely() -> None:
     """A standalone cross-attention Run has no generation-reset signal, so K/V must stay live."""
     rng = np.random.default_rng(20260806)

@@ -118,6 +118,22 @@ fn sdpa(
     mask_mode: &[u8],
     mask: mlx::mlx_array,
 ) -> Result<mlx::mlx_array, MlxError> {
+    let mask = if mask_mode == b"array\0" && ctx.shapeless_compile() {
+        // MLX SDPA otherwise inserts a one-input Broadcast whose target captures the first KV
+        // length. Materialize the full [B,H,Q,K] mask through a two-input broadcast so shapeless
+        // decode can infer the changed K extent from live inputs on every call.
+        let q_zeros = ctx.zeros_like(q)?;
+        let head_template =
+            ctx.emit(|res, s| unsafe { mlx::mlx_sum_axis(res, q_zeros, 3, true, s) })?;
+        if ctx.dtype_of(mask) == mlx::mlx_dtype__MLX_BOOL {
+            let head_template = ctx.astype(head_template, mlx::mlx_dtype__MLX_BOOL)?;
+            ctx.binary(mlx::mlx_logical_or, mask, head_template)?
+        } else {
+            ctx.add(mask, head_template)?
+        }
+    } else {
+        mask
+    };
     let mode = mask_mode.as_ptr() as *const c_char;
     ctx.mark_fast("mlx_fast_scaled_dot_product_attention");
     ctx.emit(|res, s| unsafe {
@@ -251,6 +267,12 @@ fn combined_causal_mask(
     } else {
         ctx.astype(mask, dt)?
     };
+    // In token-at-a-time cached self-attention the sole query follows every past key, so the
+    // causal mask is all zeros. Returning the external mask directly also avoids MLX baking the
+    // current KV extent into an internal Broadcast during shapeless compilation.
+    if q_len == 1 && past_seq == k_len - 1 {
+        return Ok(additive);
+    }
     ctx.add(causal, additive)
 }
 

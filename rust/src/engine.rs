@@ -760,6 +760,8 @@ pub struct TranslationContext<'a> {
     /// matrix-matrix compiled prefill work (M>1) always shows up here; decode (M==1, Shapeless) never
     /// does. Used to gate opt-in fast kernels that must never run during decode.
     shape_keyed_compile: bool,
+    /// True only while translating any compiled closure; eager translation leaves this false.
+    in_compiled_trace: bool,
 }
 
 impl<'a> TranslationContext<'a> {
@@ -788,6 +790,7 @@ impl<'a> TranslationContext<'a> {
             in_general_trace: false,
             compiled_kv_present: Vec::new(),
             shape_keyed_compile: false,
+            in_compiled_trace: false,
         }
     }
 
@@ -1843,6 +1846,7 @@ impl<'a> TranslationContext<'a> {
     /// translation. Call once, right after `TranslationContext::new`, from the closure's
     /// `CompiledConfig::shape_mode` (see [`Self::shape_keyed_compile`]).
     pub(crate) fn set_shape_keyed_compile(&mut self, shape_keyed: bool) {
+        self.in_compiled_trace = true;
         self.shape_keyed_compile = shape_keyed;
     }
 
@@ -1853,6 +1857,12 @@ impl<'a> TranslationContext<'a> {
     #[inline]
     pub fn shape_keyed_compile(&self) -> bool {
         self.shape_keyed_compile
+    }
+
+    /// True while tracing the shape-polymorphic token-at-a-time decode closure.
+    #[inline]
+    pub fn shapeless_compile(&self) -> bool {
+        self.in_compiled_trace && !self.shape_keyed_compile
     }
 
     pub(crate) fn native_attention_decode(&self) -> bool {
