@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "onnxruntime-ep-mlx"
-version = "0.29.6.dev1"
+version = "0.29.6"
 description = "MLX-native ONNX Runtime execution provider (plugin EP) for Apple Silicon"
 readme = "README.md"
 requires-python = ">=3.10"
