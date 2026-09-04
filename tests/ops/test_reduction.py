@@ -16,6 +16,16 @@ from onnx_ir import DataType as DT
 
 import _models as m
 
+
+def _initializer(name: str, value: np.ndarray) -> ir.Value:
+    tensor = ir.tensor(value, name=name)
+    return ir.Value(
+        name=name,
+        type=ir.TensorType(tensor.dtype),
+        shape=ir.Shape(list(value.shape)),
+        const_value=tensor,
+    )
+
 _ABORT_CHILD_ENV = "ONNXRUNTIME_EP_MLX_CUMSUM_ABORT_CHILD"
 
 
@@ -810,18 +820,41 @@ def test_cumsum_failures_do_not_abort_host() -> None:
 
 
 @pytest.mark.parametrize("largest", [0, 1], ids=["smallest", "largest"])
-def test_topk(largest: int) -> None:
-    model = m.make_model(
+@pytest.mark.parametrize("opset", [11, 24], ids=["opset11", "opset24"])
+@pytest.mark.parametrize(
+    "dtype,np_dtype",
+    [
+        (DT.FLOAT, np.float32),
+        (DT.DOUBLE, np.float64),
+        (DT.INT32, np.int32),
+        (DT.INT64, np.int64),
+    ],
+    ids=["fp32", "fp64", "i32", "i64"],
+)
+def test_topk(largest: int, opset: int, dtype: DT, np_dtype) -> None:
+    x = m.tensor("x", dtype, [2, 5])
+    k = _initializer("k", np.array([3], dtype=np.int64))
+    values = m.tensor("values", dtype, [2, 3])
+    indices = m.tensor("indices", DT.INT64, [2, 3])
+    node = ir.node(
         "TopK",
-        [m.tensor("x", DT.FLOAT, [2, 5]), m.tensor("k", DT.INT64, [1])],
-        [m.tensor("values", DT.FLOAT, [2, 3]), m.tensor("indices", DT.INT64, [2, 3])],
+        [x, k],
         attributes={"axis": -1, "largest": largest, "sorted": 1},
-        opset=11,
+        outputs=[values, indices],
     )
+    graph = ir.Graph(
+        [x],
+        [values, indices],
+        nodes=[node],
+        initializers=[k],
+        name="mlx_topk",
+        opset_imports={"": opset},
+    )
+    model = ir.to_proto(ir.Model(graph, ir_version=11)).SerializeToString()
     feeds = {
-        "x": np.array([[1, 5, 3, 2, 4], [-1, -5, -3, -2, -4]], dtype=np.float32),
-        "k": np.array([3], dtype=np.int64),
+        "x": np.array([[1, 5, 3, 2, 4], [0, 6, 3, 2, 4]], dtype=np_dtype),
     }
+    m.assert_mlx_claims(model, feeds)
     m.assert_matches_cpu(model, feeds, rtol=0, atol=0)
 
 

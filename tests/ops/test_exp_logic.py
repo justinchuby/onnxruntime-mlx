@@ -221,8 +221,8 @@ def test_hardmax(axis: int, dtype: DT, np_dtype, tol: float) -> None:
 )
 @pytest.mark.parametrize(
     "dtype,np_dtype,tol",
-    [(DT.FLOAT, np.float32, 1e-5), (DT.INT32, np.int32, 0)],
-    ids=["fp32", "int32"],
+    [(DT.FLOAT, np.float32, 1e-5), (DT.DOUBLE, np.float64, 1e-14), (DT.INT32, np.int32, 0)],
+    ids=["fp32", "fp64", "int32"],
 )
 def test_cumprod(exclusive: int, reverse: int, dtype: DT, np_dtype, tol: float) -> None:
     model = m.make_model(

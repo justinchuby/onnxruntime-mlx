@@ -550,7 +550,7 @@ fn einsum_claim(node: &NodeView) -> ClaimResult {
     let dtype = in0.dtype;
     require!(
         is_mlx_cpu_float(dtype) && out.dtype == dtype,
-        "all tensors must share an MLX float dtype, got first input {} and output {}",
+        "all tensors must share an MLX fp32/fp16/bf16/fp64 dtype; v28 integer, float8, and sub-byte Einsum forms stay on CPU because MLX 0.32.2's native Einsum path does not execute integer contractions safely, got first input {} and output {}",
         crate::registry::ort_dtype_name(dtype),
         crate::registry::ort_dtype_name(out.dtype)
     );

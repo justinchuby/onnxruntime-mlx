@@ -257,7 +257,14 @@ fn mod_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
         let nonneg = ctx.binary(mlx::mlx_greater_equal, q, zero)?;
         let trunc = ctx.where_(nonneg, fl, cl)?;
         let prod = ctx.binary(mlx::mlx_multiply, trunc, b)?;
-        ctx.binary(mlx::mlx_subtract, a, prod)?
+        let computed = ctx.binary(mlx::mlx_subtract, a, prod)?;
+        // `0 * +/-inf` is NaN, but C fmod(x, +/-inf) is x for finite x.
+        // Preserve NaN and infinite dividends by only selecting this fast edge.
+        let b_inf = ctx.unary(mlx::mlx_isinf, b)?;
+        let a_inf = ctx.unary(mlx::mlx_isinf, a)?;
+        let finite_a = ctx.unary(mlx::mlx_logical_not, a_inf)?;
+        let infinity_divisor = ctx.binary(mlx::mlx_logical_and, b_inf, finite_a)?;
+        ctx.where_(infinity_divisor, a, computed)?
     };
     bind_as_out(ctx, n, r)
 }
@@ -851,10 +858,14 @@ fn mod_claim(node: &NodeView) -> ClaimResult {
         a.shape,
         b.shape
     );
-    let fmod = node.int_attr("fmod", 0) != 0;
-    if fmod {
+    let fmod = node.int_attr("fmod", 0);
+    require!(
+        fmod == 0 || fmod == 1,
+        "fmod must be 0 (floor quotient) or 1 (truncation quotient), got {fmod}"
+    );
+    if fmod == 1 {
         require!(
-            is_mlx_float(a.dtype),
+            is_mlx_cpu_float(a.dtype),
             "fmod=1 (C fmod) is float-only; integer dtype {} stays on CPU",
             crate::registry::ort_dtype_name(a.dtype)
         );
@@ -868,8 +879,7 @@ fn mod_claim(node: &NodeView) -> ClaimResult {
     Ok(())
 }
 
-/// BitShift: two same-dtype unsigned-integer inputs/output (excluding uint64, which has no CopyOut
-/// path), scalar-or-suffix broadcast.
+/// BitShift: v11 accepts unsigned types; v28 additionally accepts signed types.
 fn bitshift_claim(node: &NodeView) -> ClaimResult {
     require!(
         node.num_inputs() == 2 && node.num_outputs() == 1,
@@ -881,7 +891,6 @@ fn bitshift_claim(node: &NodeView) -> ClaimResult {
         (Some(a), Some(b), Some(o)) => (a, b, o),
         _ => deny!("missing tensor type/shape info on an input or the output"),
     };
-    let u64_t = ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64;
     require!(
         a.dtype == b.dtype && b.dtype == out.dtype,
         "inputs/output must share one dtype (got {}, {} -> {})",
@@ -889,10 +898,17 @@ fn bitshift_claim(node: &NodeView) -> ClaimResult {
         crate::registry::ort_dtype_name(b.dtype),
         crate::registry::ort_dtype_name(out.dtype)
     );
+    let signed_v28 = node.since_version() >= 28 && is_signed_integer(a.dtype);
     require!(
-        is_unsigned_integer(a.dtype) && a.dtype != u64_t,
-        "BitShift needs an unsigned-integer dtype other than uint64 (got {})",
-        crate::registry::ort_dtype_name(a.dtype)
+        is_unsigned_integer(a.dtype) || signed_v28,
+        "BitShift requires an unsigned integer, or a signed integer at opset>=28 (got {} at opset {})",
+        crate::registry::ort_dtype_name(a.dtype),
+        node.since_version()
+    );
+    let direction = node.string_attr("direction", "");
+    require!(
+        direction == "LEFT" || direction == "RIGHT",
+        "direction must be the required string LEFT or RIGHT, got {direction:?}"
     );
     require!(
         scalar_or_suffix_broadcast(&a.shape, &b.shape),
@@ -1086,6 +1102,6 @@ pub fn register(registry: &mut OpRegistry) {
     shapeless_since(registry, "IsNaN", 9, is_nan_op, float_predicate_claim);
 
     // Misc elementwise.
-    shapeless(registry, "Mod", mod_op, mod_claim);
-    shapeless(registry, "BitShift", bitshift_op, bitshift_claim);
+    shapeless_since(registry, "Mod", 10, mod_op, mod_claim);
+    shapeless_since(registry, "BitShift", 11, bitshift_op, bitshift_claim);
 }

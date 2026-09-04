@@ -1873,4 +1873,19 @@ mod tests {
         }
         assert!(registry().find_entry("", "TensorScatter", 23).is_none());
     }
+
+    #[test]
+    fn standard_opset_introductions_are_version_gated() {
+        let registry = registry();
+        for (op, before, first) in [("Celu", 11, 12), ("Swish", 23, 24), ("SwiGLU", 27, 28)] {
+            assert!(
+                registry.find_entry("", op, before).is_none(),
+                "{op} must not be registered before opset {first}"
+            );
+            assert!(
+                registry.find_entry("", op, first).is_some(),
+                "{op} must be registered at opset {first}"
+            );
+        }
+    }
 }
