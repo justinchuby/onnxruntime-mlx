@@ -20,6 +20,7 @@ def _model(
     outputs: list[ir.Value],
     *,
     attributes: dict[str, object],
+    opset: int = 17,
 ) -> bytes:
     node = ir.node(op_type, inputs, attributes=attributes, outputs=outputs)
     graph = ir.Graph(
@@ -27,7 +28,7 @@ def _model(
         outputs,
         nodes=[node],
         name=f"mlx_{op_type}",
-        opset_imports={"": 17},
+        opset_imports={"": opset},
     )
     return ir.to_proto(ir.Model(graph, ir_version=9)).SerializeToString()
 
@@ -154,6 +155,18 @@ def test_multinomial() -> None:
     [
         ("ij,jk->ik", [(3, 4), (4, 5)], (3, 5)),
         ("bij,bjk->bik", [(2, 3, 4), (2, 4, 5)], (2, 3, 5)),
+        ("i,i->", [(4,), (4,)], ()),
+        ("ij->", [(3, 4)], ()),
+        (",ij->ij", [(), (3, 4)], (3, 4)),
+        ("ij,,jk->ik", [(3, 4), (), (4, 5)], (3, 5)),
+        ("ij->ji", [(3, 4)], (4, 3)),
+        ("ij->i", [(3, 4)], (3,)),
+        ("i,j->ij", [(3,), (4,)], (3, 4)),
+        ("bij,bjk,bkl->bil", [(2, 3, 4), (2, 4, 5), (2, 5, 6)], (2, 3, 6)),
+        ("ii->i", [(4, 4)], (4,)),
+        ("...ij,...jk->...ik", [(2, 3, 4), (2, 4, 5)], (2, 3, 5)),
+        ("ij,jk", [(3, 4), (4, 5)], (3, 5)),
+        ("Ii->I", [(4, 4)], (4,)),
     ],
 )
 def test_einsum(
@@ -171,6 +184,48 @@ def test_einsum(
     feeds = {value.name: data for value, data in zip(inputs, values, strict=True)}
     _run_and_assert_mlx(model, feeds)
     m.assert_matches_cpu(model, feeds, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "np_dtype", "rtol", "atol"),
+    [
+        (DT.FLOAT16, np.float16, 2e-3, 2e-3),
+        (DT.DOUBLE, np.float64, 1e-14, 1e-14),
+    ],
+)
+def test_einsum_additional_float_dtypes(dtype, np_dtype, rtol: float, atol: float) -> None:
+    rng = np.random.default_rng(456)
+    values = [
+        rng.standard_normal((3, 4)).astype(np_dtype),
+        rng.standard_normal((4, 5)).astype(np_dtype),
+    ]
+    inputs = [m.tensor("X0", dtype, [3, 4]), m.tensor("X1", dtype, [4, 5])]
+    model = _model(
+        "Einsum",
+        inputs,
+        [m.tensor("Y", dtype, [3, 5])],
+        attributes={"equation": "ij,jk->ik"},
+    )
+    feeds = {value.name: data for value, data in zip(inputs, values, strict=True)}
+    _run_and_assert_mlx(model, feeds)
+    m.assert_matches_cpu(model, feeds, rtol=rtol, atol=atol)
+
+
+def test_einsum_zero_size_broadcast_falls_back_safely() -> None:
+    inputs = [m.tensor("X0", DT.FLOAT, [0]), m.tensor("X1", DT.FLOAT, [1])]
+    model = _model(
+        "Einsum",
+        inputs,
+        [m.tensor("Y", DT.FLOAT, [])],
+        attributes={"equation": "i,i->"},
+    )
+    feeds = {
+        "X0": np.empty((0,), dtype=np.float32),
+        "X1": np.ones((1,), dtype=np.float32),
+    }
+    session = ort.InferenceSession(model, providers=m.EP_PROVIDERS)
+    (output,) = session.run(None, feeds)
+    np.testing.assert_array_equal(output, np.array(0.0, dtype=np.float32))
 
 
 @pytest.mark.skip(reason="mlx-c 0.6 has no nonzero/argwhere primitive; left on ORT CPU")
