@@ -245,6 +245,25 @@ unsafe fn get_capability_impl(
                 crate::registry::node_uses_float64(&view)
             })
             .collect();
+        // MLX shapeless compilation requires every emitted primitive to implement
+        // `Primitive::output_shapes`. In a decoder graph, keep nodes that lower to a missing
+        // implementation in their own shape-specialized cluster: they still run on MLX, but cannot
+        // poison the surrounding decoder's shapeless closure. Non-decoder graphs use only the
+        // shape-keyed general route, so splitting them would add boundaries for no benefit.
+        let decoder_graph = nodes
+            .iter()
+            .any(|&node| is_decoder_attention_anchor(&NodeView::new(ep.ort_api, node)));
+        let shape_specialized: Vec<bool> = nodes
+            .iter()
+            .map(|&node| {
+                let view = NodeView::new(ep.ort_api, node);
+                decoder_graph
+                    && crate::compiled::requires_shape_specialized_compile(
+                        &view.domain(),
+                        &view.op_type(),
+                    )
+            })
+            .collect();
 
         // Claiming view: build the per-op fallback reasons for the declined nodes (only when
         // observability is active, so this extra FFI never touches the traced-off fast path). The
@@ -304,9 +323,9 @@ unsafe fn get_capability_impl(
         // every node that could lie between two members is included, while still avoiding the
         // thousands of singleton partitions previously used for this graph.
         let clusters = if mixed_vision_quant_graph {
-            build_contiguous_clusters(&supported, &float64)
+            build_contiguous_clusters(&supported, &float64, &shape_specialized)
         } else {
-            build_convex_clusters(api, &nodes, &supported, &float64)
+            build_convex_clusters(api, &nodes, &supported, &float64, &shape_specialized)
         };
         let layer_boundary_outputs = if in_cf_body {
             HashSet::new()
@@ -586,7 +605,11 @@ mod layer_partition_tests {
     }
 }
 
-fn build_contiguous_clusters(supported: &[bool], float64: &[bool]) -> Vec<Vec<usize>> {
+fn build_contiguous_clusters(
+    supported: &[bool],
+    float64: &[bool],
+    shape_specialized: &[bool],
+) -> Vec<Vec<usize>> {
     let mut clusters = Vec::new();
     let mut start = 0usize;
     while start < supported.len() {
@@ -597,9 +620,13 @@ fn build_contiguous_clusters(supported: &[bool], float64: &[bool]) -> Vec<Vec<us
             break;
         }
         let mut end = start + 1;
-        // An fp64 run and an fp32 run never share a cluster: the fp64 side must run on an MLX CPU
-        // stream, and merging them would drag the fp32 work off the GPU.
-        while end < supported.len() && supported[end] && float64[end] == float64[start] {
+        // Different execution colours never share a cluster: fp64 needs the MLX CPU stream, while
+        // shape-specialized nodes must stay out of a surrounding shapeless decoder closure.
+        while end < supported.len()
+            && supported[end]
+            && float64[end] == float64[start]
+            && shape_specialized[end] == shape_specialized[start]
+        {
             end += 1;
         }
         clusters.push((start..end).collect());
@@ -713,11 +740,16 @@ unsafe fn graph_metadata_value(
 /// cluster. MLX cannot run float64 on Metal, so an fp64 cluster is executed on an MLX CPU stream;
 /// without this rule the maximal-cluster search would happily absorb neighbouring fp32 nodes
 /// (they are graph-connected through `Cast`) and silently move GPU work onto the CPU.
+///
+/// `shape_specialized` is a second colour: nodes whose MLX primitive lacks shapeless output-shape
+/// inference stay in a separate cluster, so they can use shape-keyed/eager execution without
+/// disabling shapeless compilation for the surrounding decoder.
 fn build_convex_clusters(
     api: &ort::OrtApi,
     nodes: &[*const ort::OrtNode],
     supported: &[bool],
     float64: &[bool],
+    shape_specialized: &[bool],
 ) -> Vec<Vec<usize>> {
     let n = nodes.len();
 
@@ -750,7 +782,7 @@ fn build_convex_clusters(
         }
     }
 
-    cluster_edges(n, supported, float64, &succ, &pred)
+    cluster_edges(n, supported, float64, shape_specialized, &succ, &pred)
 }
 
 /// The pure graph half of [`build_convex_clusters`], over an explicit adjacency (no ORT FFI) so the
@@ -759,6 +791,7 @@ fn cluster_edges(
     n: usize,
     supported: &[bool],
     float64: &[bool],
+    shape_specialized: &[bool],
     succ: &[Vec<usize>],
     pred: &[Vec<usize>],
 ) -> Vec<Vec<usize>> {
@@ -802,15 +835,19 @@ fn cluster_edges(
         }
     }
 
-    // Candidate merge edges: direct data edges between two supported nodes OF THE SAME fp64 colour.
-    // Withholding the mixed-colour edges is what makes an fp64 region its own cluster.
+    // Candidate merge edges: direct data edges between two supported nodes OF THE SAME execution
+    // colour. Withholding mixed fp64 or shape-specialization edges keeps each required route in its
+    // own cluster.
     let mut edges: Vec<(usize, usize)> = Vec::new();
     for u in 0..n {
         if !supported[u] {
             continue;
         }
         for &v in &succ[u] {
-            if supported[v] && float64[u] == float64[v] {
+            if supported[v]
+                && float64[u] == float64[v]
+                && shape_specialized[u] == shape_specialized[v]
+            {
                 edges.push((u, v));
             }
         }
@@ -1253,7 +1290,7 @@ unsafe fn build_plan(
             plan.dedicated_decode_stream = false;
         }
         plan.compiled.enabled =
-            crate::compiled::compile_enabled(has_control_flow || has_compile_barrier);
+            crate::compiled::decode_enabled(has_control_flow || has_compile_barrier, &plan.nodes);
         plan.prefill.enabled =
             crate::compiled::prefill_enabled(has_control_flow || has_compile_barrier, &plan.nodes);
         plan.general.enabled = crate::compiled::general_enabled(has_compile_barrier, &plan.nodes);
@@ -2380,8 +2417,9 @@ mod float64_cluster_tests {
         let (succ, pred) = chain(n);
         let supported = vec![true; n];
         let float64 = vec![false, false, true, true, true, true, false, false];
+        let shape_specialized = vec![false; n];
 
-        let clusters = cluster_edges(n, &supported, &float64, &succ, &pred);
+        let clusters = cluster_edges(n, &supported, &float64, &shape_specialized, &succ, &pred);
 
         assert_eq!(
             clusters,
@@ -2395,7 +2433,14 @@ mod float64_cluster_tests {
     fn all_float32_still_forms_one_maximal_cluster() {
         let n = 8;
         let (succ, pred) = chain(n);
-        let clusters = cluster_edges(n, &vec![true; n], &vec![false; n], &succ, &pred);
+        let clusters = cluster_edges(
+            n,
+            &vec![true; n],
+            &vec![false; n],
+            &vec![false; n],
+            &succ,
+            &pred,
+        );
         assert_eq!(clusters, vec![(0..n).collect::<Vec<_>>()]);
     }
 
@@ -2411,8 +2456,30 @@ mod float64_cluster_tests {
         let n = 4;
         let succ = vec![vec![1, 2], vec![3], vec![3], vec![]];
         let pred = vec![vec![], vec![0], vec![0], vec![1, 2]];
-        let clusters = cluster_edges(n, &vec![true; n], &vec![true; n], &succ, &pred);
+        let clusters = cluster_edges(
+            n,
+            &vec![true; n],
+            &vec![true; n],
+            &vec![false; n],
+            &succ,
+            &pred,
+        );
         assert_eq!(clusters, vec![vec![0, 1, 2, 3]]);
+    }
+
+    /// A shape-preserving CumSum still needs its own shape-keyed cluster because the linked MLX
+    /// Scan primitive cannot provide `output_shapes` to a shapeless decoder closure.
+    #[test]
+    fn shape_specialized_node_forms_its_own_cluster() {
+        let n = 5;
+        let (succ, pred) = chain(n);
+        let supported = vec![true; n];
+        let float64 = vec![false; n];
+        let shape_specialized = vec![false, false, true, false, false];
+        assert_eq!(
+            cluster_edges(n, &supported, &float64, &shape_specialized, &succ, &pred,),
+            vec![vec![0, 1], vec![2], vec![3, 4]]
+        );
     }
 
     /// The contiguous-cluster fallback (used for the mixed vision/quant export) applies the same
@@ -2422,8 +2489,19 @@ mod float64_cluster_tests {
         let supported = vec![true, true, true, true, true];
         let float64 = vec![false, false, true, true, false];
         assert_eq!(
-            build_contiguous_clusters(&supported, &float64),
+            build_contiguous_clusters(&supported, &float64, &vec![false; supported.len()]),
             vec![vec![0, 1], vec![2, 3], vec![4]]
+        );
+    }
+
+    #[test]
+    fn contiguous_clusters_split_on_shape_specialization_boundary() {
+        let supported = vec![true; 5];
+        let float64 = vec![false; 5];
+        let shape_specialized = vec![false, true, true, false, false];
+        assert_eq!(
+            build_contiguous_clusters(&supported, &float64, &shape_specialized),
+            vec![vec![0], vec![1, 2], vec![3, 4]]
         );
     }
 }

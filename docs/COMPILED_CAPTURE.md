@@ -53,10 +53,12 @@ trace/apply/eval error). The compiled path never crashes and never diverges (`co
 | **`Shapeless`** | The compiled closure is shape-*agnostic*: a dimension may **grow/change every call with zero retrace**. One closure serves every step. | **decode** (growing KV length costs one compile ever, not one per token) |
 | **`ShapeKeyed`** | `mlx_compile` keys on input shapes/dtypes and **transparently retraces** (re-invokes the thunk) when they change, so a new shape recompiles rather than miscomputes. | **general** static-shape subgraphs; **prefill** (varying query length `S`) |
 
-Shapeless `mlx_compile` **cannot shape-infer a `Slice`** and cannot eval mid-trace, so a shapeless
-subgraph must contain neither. ShapeKeyed can, but pays one recompile per distinct `(shape, dtype)` tuple
-— cheap when the shape set is small and repeating (prefill prompt lengths, CNN batch sizes),
-pathological if unbounded.
+MLX 0.32's shapeless `mlx_compile` cannot shape-infer its `Slice` or `Scan` primitives (`CumSum`
+lowers to `Scan`) and cannot eval mid-trace. In decoder graphs, the EP therefore gives ONNX
+`Slice`/`CumSum` nodes a separate partition colour: they remain claimed by MLX, but execute through a
+shape-keyed or eager partition instead of aborting the surrounding shapeless decoder closure.
+ShapeKeyed pays one recompile per distinct `(shape, dtype)` tuple — cheap when the shape set is small
+and repeating (prefill prompt lengths, CNN batch sizes), pathological if unbounded.
 
 ### Two distinct senses of "dynamic"
 
@@ -87,11 +89,12 @@ violates one falls back to eager (or, for attention, to the growing-concat route
 1. **No control flow** (`If` / `Loop` / `Scan`). The graph *structure* would depend on runtime data
    (`compile_enabled`, `compiled.rs:46-51`).
 
-2. **No data-dependent shapes.** `Reshape` / `Expand` target (input 1), `Slice` starts/ends/axes/steps
-   (1–4), and `Range` bounds (0–2) must be **constant or shape-const** (derived from `Shape`/`Size`),
-   never a plain runtime intermediate (`reads_data_dependent_shape`, `compiled.rs:84-96`). Shape-const is
-   OK because it resolves to a compile-time integer; a data-dependent value forces a mid-trace eval that
-   crashes shapeless compile. (This is exactly why runtime-bounded `Range` is deferred — see
+2. **No data-dependent translation parameters.** `Reshape` / `Expand` target (input 1), `Slice`
+   starts/ends/axes/steps (1–4), `Range` bounds (0–2), and the `CumSum` axis (1) must be **constant or
+   shape-const** (derived from `Shape`/`Size`), never plain runtime data
+   (`reads_data_dependent_parameter`). Shape-const is OK because it changes with the shape-keyed cache
+   key; an ordinary runtime tensor value does not participate in that key and would otherwise be
+   silently baked into later calls. (This is exactly why runtime-bounded `Range` is deferred — see
    `OP_ARCHITECTURE`/README Range note.)
 
 3. **No host-computed / data-dependent-output-shape ops** — `Det`, `NonZero`, `Unique` GPU-eval their
