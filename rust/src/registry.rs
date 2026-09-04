@@ -1839,9 +1839,10 @@ mod tests {
                 "DequantizeLinear-{version} lost its registration"
             );
         }
+    }
 
-        #[test]
-        fn current_tensor_opset_dispatches_remain_registered() {
+    #[test]
+    fn current_tensor_opset_dispatches_remain_registered() {
         // ORT 1.29 loads models through opset 27, while ONNX main has tensor schema revisions
         // through opset 28. Keep the registry's future-version dispatch explicit so a newer ORT
         // cannot silently lose these lowerings when it starts reporting those schema versions.
@@ -1869,7 +1870,7 @@ mod tests {
                 registry().find_entry("", op_type, version).is_some(),
                 "{op_type} must remain dispatched at opset {version}"
             );
-      }
-      assert!(registry().find_entry("", "TensorScatter", 23).is_none());
-  }
+        }
+        assert!(registry().find_entry("", "TensorScatter", 23).is_none());
+    }
 }
