@@ -371,6 +371,35 @@ def test_attention_reuses_mutated_input_buffers_safely() -> None:
         np.testing.assert_allclose(got, want, rtol=2e-3, atol=2e-3)
 
 
+def test_attention_present_without_past_is_claimed() -> None:
+    """v24 permits present K/V outputs without an input cache; they are the current K/V."""
+    B, qh, kvh, S, hd = 1, 4, 2, 3, 16
+    rng = np.random.default_rng(20260905)
+    feeds = {
+        "Q": rng.standard_normal((B, S, qh * hd)).astype(FLOAT),
+        "K": rng.standard_normal((B, S, kvh * hd)).astype(FLOAT),
+        "V": rng.standard_normal((B, S, kvh * hd)).astype(FLOAT),
+    }
+    model = build_model(
+        "Attention",
+        [
+            _t("Q", [B, S, qh * hd]),
+            _t("K", [B, S, kvh * hd]),
+            _t("V", [B, S, kvh * hd]),
+        ],
+        [
+            _t("Y", [B, S, qh * hd]),
+            _t("PK", [B, kvh, S, hd]),
+            _t("PV", [B, kvh, S, hd]),
+        ],
+        attributes={"q_num_heads": qh, "kv_num_heads": kvh},
+        opset=24,
+    )
+    if not _cpu_supports(model, feeds):
+        pytest.skip("ORT CPU EP has no native Attention kernel")
+    check(model, feeds)
+
+
 # --- MultiHeadAttention (com.microsoft) ----------------------------------------------------------
 # Separate Q/K/V (+ optional bias), num_heads, scale, unidirectional. The masked (attention_bias /
 # key_padding_mask) and past/present-KV forms are left on CPU (they require an interior optional gap

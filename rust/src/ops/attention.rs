@@ -3,8 +3,9 @@
 //!
 //!   * GroupQueryAttention (com.microsoft) — separate Q/K/V, in-op RoPE + KV-cache append + causal
 //!     SDPA. Multi-output (attn, present_key, present_value). Decode-critical.
-//!   * Attention (ai.onnx opset 23 & 24)   — MHA / GQA / MQA, 3D (B,S,H*hd) or 4D (B,H,S,hd),
-//!     optional attn_mask, is_causal, custom scale, in-op past/present KV concat.
+//!   * Attention (ai.onnx opset 23-28) — MHA / GQA / MQA, 3D (B,S,H*hd) or 4D (B,H,S,hd),
+//!     optional attn_mask, nonpad lengths, causal/window masks, logit soft-cap, QK outputs, and
+//!     in-op past/present KV concat.
 //!   * Attention (com.microsoft) — fused QKV projection followed by MHA.
 //!   * MultiHeadAttention (com.microsoft)  — separate Q/K/V with optional projection bias,
 //!     unidirectional (causal), custom scale.
@@ -975,6 +976,251 @@ fn group_query_attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Resul
     Ok(())
 }
 
+/// Convert an ONNX boolean attention mask (`true = attend`) to the additive representation used
+/// by the composed Attention path.
+fn mask_as_additive(
+    ctx: &mut TranslationContext,
+    mask: mlx::mlx_array,
+    dt: mlx::mlx_dtype,
+) -> Result<mlx::mlx_array, MlxError> {
+    if ctx.dtype_of(mask) != mlx::mlx_dtype__MLX_BOOL {
+        return ctx.astype(mask, dt);
+    }
+    let zero = ctx.scalar_f32(0.0);
+    let zero = ctx.astype(zero, dt)?;
+    let neg = ctx.scalar_f32(f32::NEG_INFINITY);
+    let neg = ctx.astype(neg, dt)?;
+    ctx.where_(mask, zero, neg)
+}
+
+/// Materialize a schema-broadcastable attention mask to score shape. ONNX permits a short final
+/// key axis and defines its missing suffix as `-inf`; MLX broadcast alone cannot express that pad.
+fn attention_mask_to_score_shape(
+    ctx: &mut TranslationContext,
+    mask: mlx::mlx_array,
+    b: i32,
+    h: i32,
+    q_len: i32,
+    k_len: i32,
+    dt: mlx::mlx_dtype,
+) -> Result<mlx::mlx_array, MlxError> {
+    let mask = mask_as_additive(ctx, mask, dt)?;
+    let mask_shape = ctx.shape_of(mask);
+    let width = mask_shape.last().copied().unwrap_or(k_len);
+    if width > k_len {
+        return Err(format!(
+            "Attention: attn_mask key dimension {width} exceeds total key sequence length {k_len}"
+        ));
+    }
+    let shape = [b, h, q_len, width];
+    let mask = ctx.emit(|res, st| unsafe {
+        mlx::mlx_broadcast_to(res, mask, shape.as_ptr(), shape.len(), st)
+    })?;
+    if width == k_len {
+        return Ok(mask);
+    }
+    let tail = ctx.zeros(&[b, h, q_len, k_len - width], dt)?;
+    let neg = ctx.scalar_f32(f32::NEG_INFINITY);
+    let neg = ctx.astype(neg, dt)?;
+    let tail = add(ctx, tail, neg)?;
+    concat2(ctx, mask, tail, 3)
+}
+
+/// Repeat grouped K/V heads for the composed Attention path. The fast SDPA path keeps native GQA;
+/// only softcap/QK-output forms need this materialization.
+fn gqa_repeat_heads_batched(
+    ctx: &mut TranslationContext,
+    x: mlx::mlx_array,
+    b: i32,
+    kv: i32,
+    groups: i32,
+    s: i32,
+    hd: i32,
+) -> Result<mlx::mlx_array, MlxError> {
+    if groups == 1 {
+        return Ok(x);
+    }
+    let r = ctx.reshape(x, &[b, kv, 1, s, hd])?;
+    let shape = [b, kv, groups, s, hd];
+    let expanded = ctx.emit(|res, st| unsafe {
+        mlx::mlx_broadcast_to(res, r, shape.as_ptr(), shape.len(), st)
+    })?;
+    ctx.reshape(expanded, &[b, kv * groups, s, hd])
+}
+
+/// Build the v25 Attention additive overlay for causal/window/nonpad contracts. `None` means
+/// neither the op nor its caller needs a mask, preserving the fused SDPA route.
+#[allow(clippy::too_many_arguments)]
+fn attention_overlay_mask(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    b: i32,
+    q_len: i32,
+    k_len: i32,
+    past_len: i32,
+    dt: mlx::mlx_dtype,
+    mask: Option<mlx::mlx_array>,
+) -> Result<Option<mlx::mlx_array>, MlxError> {
+    let causal = attr_int(n, "is_causal", 0) != 0;
+    let left = attr_int(n, "left_window_size", -1) as i32;
+    let right = attr_int(n, "right_window_size", -1) as i32;
+    let nonpad = present(n, 6);
+    if !causal && left < 0 && right < 0 && !nonpad {
+        return mask.map(|m| mask_as_additive(ctx, m, dt)).transpose();
+    }
+
+    let i32t = mlx::mlx_dtype__MLX_INT32;
+    let key = ctx.arange(0.0, k_len as f64, 1.0, i32t)?;
+    let key = ctx.reshape(key, &[1, 1, 1, k_len])?;
+    let query = ctx.arange(0.0, q_len as f64, 1.0, i32t)?;
+    let query = ctx.reshape(query, &[1, 1, q_len, 1])?;
+    let query = if nonpad {
+        let lengths = ctx.resolve(&n.inputs[6])?;
+        let lengths = ctx.astype(lengths, i32t)?;
+        let q_len = ctx.scalar_f32(q_len as f32);
+        let q_len = ctx.astype(q_len, i32t)?;
+        let offset = sub(ctx, lengths, q_len)?;
+        let offset = ctx.reshape(offset, &[b, 1, 1, 1])?;
+        add(ctx, query, offset)?
+    } else if past_len != 0 {
+        let past_len = ctx.scalar_f32(past_len as f32);
+        let past_len = ctx.astype(past_len, i32t)?;
+        add(ctx, query, past_len)?
+    } else {
+        query
+    };
+
+    let mut allowed = if causal {
+        ctx.less_equal(key, query)?
+    } else {
+        ctx.binary(mlx::mlx_equal, key, key)?
+    };
+    if left >= 0 {
+        let left = ctx.scalar_f32(left as f32);
+        let left = ctx.astype(left, i32t)?;
+        let left_limit = sub(ctx, query, left)?;
+        let within_left = ctx.less_equal(left_limit, key)?;
+        allowed = ctx.binary(mlx::mlx_logical_and, allowed, within_left)?;
+    }
+    if right >= 0 {
+        let right = ctx.scalar_f32(right as f32);
+        let right = ctx.astype(right, i32t)?;
+        let right_limit = add(ctx, query, right)?;
+        let within_right = ctx.less_equal(key, right_limit)?;
+        allowed = ctx.binary(mlx::mlx_logical_and, allowed, within_right)?;
+    }
+    if nonpad {
+        let lengths = ctx.resolve(&n.inputs[6])?;
+        let lengths = ctx.astype(lengths, i32t)?;
+        let lengths = ctx.reshape(lengths, &[b, 1, 1, 1])?;
+        let valid_key = ctx.binary(mlx::mlx_less, key, lengths)?;
+        allowed = ctx.binary(mlx::mlx_logical_and, allowed, valid_key)?;
+    }
+    let zero = ctx.scalar_f32(0.0);
+    let zero = ctx.astype(zero, dt)?;
+    let neg = ctx.scalar_f32(f32::NEG_INFINITY);
+    let neg = ctx.astype(neg, dt)?;
+    let mut overlay = ctx.where_(allowed, zero, neg)?;
+    if let Some(mask) = mask {
+        let mask = mask_as_additive(ctx, mask, dt)?;
+        overlay = add(ctx, overlay, mask)?;
+    }
+    Ok(Some(overlay))
+}
+
+fn attention_softmax(
+    ctx: &mut TranslationContext,
+    scores: mlx::mlx_array,
+    precision: mlx::mlx_dtype,
+    output_dt: mlx::mlx_dtype,
+) -> Result<mlx::mlx_array, MlxError> {
+    let scores = ctx.astype(scores, precision)?;
+    let probs = ctx.emit(|res, st| unsafe { mlx::mlx_softmax_axis(res, scores, 3, false, st) })?;
+    ctx.astype(probs, output_dt)
+}
+
+fn attention_qk_output_op(
+    ctx: &mut TranslationContext,
+    n: &NodeDesc,
+    q: mlx::mlx_array,
+    k: mlx::mlx_array,
+    v: mlx::mlx_array,
+    b: i32,
+    qh: i32,
+    kvh: i32,
+    q_len: i32,
+    k_len: i32,
+    q_hd: i32,
+    v_hd: i32,
+    past_len: i32,
+    dt: mlx::mlx_dtype,
+    mask: Option<mlx::mlx_array>,
+) -> Result<mlx::mlx_array, MlxError> {
+    let groups = qh / kvh;
+    let k = gqa_repeat_heads_batched(ctx, k, b, kvh, groups, k_len, q_hd)?;
+    let kt = ctx.transpose(k, &[0, 1, 3, 2])?;
+    let scale = ctx.scalar_f32(attr_scale(n, q_hd).sqrt());
+    let scale = ctx.astype(scale, dt)?;
+    let q = mul(ctx, q, scale)?;
+    let kt = mul(ctx, kt, scale)?;
+    let raw = ctx.matmul(q, kt)?;
+    let softcap = n.floats.get("softcap").copied().unwrap_or(0.0);
+    let capped = if softcap == 0.0 {
+        raw
+    } else {
+        let cap = ctx.scalar_f32(softcap);
+        let cap = ctx.astype(cap, dt)?;
+        let scaled = ctx.binary(mlx::mlx_divide, raw, cap)?;
+        let tanh = ctx.unary(mlx::mlx_tanh, scaled)?;
+        mul(ctx, tanh, cap)?
+    };
+    let mask = mask
+        .map(|mask| attention_mask_to_score_shape(ctx, mask, b, qh, q_len, k_len, dt))
+        .transpose()?;
+    let overlay = attention_overlay_mask(ctx, n, b, q_len, k_len, past_len, dt, mask)?;
+    // The fully-masked-row guard reduces score axis 3, so materialize every schema-broadcastable
+    // mask rank (including [K], [Q,K], and [H,Q,K]) to the score's four-dimensional shape first.
+    let overlay = overlay
+        .map(|overlay| {
+            let shape = [b, qh, q_len, k_len];
+            ctx.emit(|res, st| unsafe {
+                mlx::mlx_broadcast_to(res, overlay, shape.as_ptr(), shape.len(), st)
+            })
+        })
+        .transpose()?;
+    let biased = match overlay {
+        Some(overlay) => add(ctx, capped, overlay)?,
+        None => capped,
+    };
+    let precision = mlx_softmax_precision(n.ints.get("softmax_precision").copied()).unwrap_or(dt);
+    let mut probs = attention_softmax(ctx, biased, precision, dt)?;
+    if let Some(overlay) = overlay {
+        let row_max =
+            ctx.emit(|res, st| unsafe { mlx::mlx_max_axis(res, overlay, 3, true, st) })?;
+        let neg = ctx.scalar_f32(f32::NEG_INFINITY);
+        let neg = ctx.astype(neg, dt)?;
+        let all_masked = ctx.binary(mlx::mlx_equal, row_max, neg)?;
+        let zero = ctx.scalar_f32(0.0);
+        let zero = ctx.astype(zero, dt)?;
+        probs = ctx.where_(all_masked, zero, probs)?;
+    }
+
+    if n.outputs.len() > 3 && !n.outputs[3].name.is_empty() {
+        let mode = attr_int(n, "qk_matmul_output_mode", 0);
+        let output = match mode {
+            1 => capped,
+            2 => biased,
+            3 => probs,
+            _ => raw,
+        };
+        ctx.bind(&n.outputs[3], output);
+    }
+    let v = gqa_repeat_heads_batched(ctx, v, b, kvh, groups, k_len, v_hd)?;
+    let probs_for_v = ctx.astype(probs, ctx.dtype_of(v))?;
+    let out = ctx.matmul(probs_for_v, v)?;
+    ctx.astype(out, dt)
+}
+
 // ---- Attention (ai.onnx) -----------------------------------------------------------------------
 
 fn attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxError> {
@@ -987,7 +1233,7 @@ fn attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
     let is3d = qs.len() == 3;
     let b = qs[0];
 
-    let (qh, s, hd_v, qh4, kh4, vh4) = if is3d {
+    let (qh, kvh, s, hd_q, hd_v, qh4, kh4, vh4) = if is3d {
         let qh = attr_int(n, "q_num_heads", 0) as i32;
         let kvh = attr_int(n, "kv_num_heads", 0) as i32;
         let s = qs[1];
@@ -999,12 +1245,14 @@ fn attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
         let qh4 = split_heads(ctx, q_in, b, s, qh, hd_q)?;
         let kh4 = split_heads(ctx, k_in, b, ks[1], kvh, hd_k)?;
         let vh4 = split_heads(ctx, v_in, b, vs[1], kvh, hd_v)?;
-        (qh, s, hd_v, qh4, kh4, vh4)
+        (qh, kvh, s, hd_q, hd_v, qh4, kh4, vh4)
     } else {
         let qh = qs[1];
+        let kvh = ctx.shape_of(k_in)[1];
         let s = qs[2];
+        let hd_q = qs[3];
         let hd_v = ctx.shape_of(v_in)[3];
-        (qh, s, hd_v, q_in, k_in, v_in)
+        (qh, kvh, s, hd_q, hd_v, q_in, k_in, v_in)
     };
 
     let has_past = present(n, 4) && present(n, 5);
@@ -1016,7 +1264,6 @@ fn attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
         (kh4, vh4)
     };
 
-    let hd_q = ctx.shape_of(qh4)[3];
     let scale = attr_scale(n, hd_q);
     let causal = attr_int(n, "is_causal", 0) != 0;
     let mask = if present(n, 3) {
@@ -1025,14 +1272,25 @@ fn attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
         None
     };
 
-    let attn = if causal {
+    let k_len = ctx.shape_of(present_k)[2];
+    let past_len = k_len - ctx.shape_of(kh4)[2];
+    let special_form = present(n, 6)
+        || n.since_version >= 25
+        || n.floats.get("softcap").copied().unwrap_or(0.0) != 0.0
+        || (n.outputs.len() > 3 && !n.outputs[3].name.is_empty())
+        || attr_int(n, "left_window_size", -1) >= 0
+        || attr_int(n, "right_window_size", -1) >= 0
+        || n.ints.contains_key("softmax_precision")
+        || ctx.dtype_of(vh4) != dt;
+    let attn = if special_form {
+        attention_qk_output_op(
+            ctx, n, qh4, present_k, present_v, b, qh, kvh, s, k_len, hd_q, hd_v, past_len, dt, mask,
+        )?
+    } else if causal {
         // ONNX `is_causal` uses upper-left alignment: the past keys (present K length minus the new
         // K length) are always visible and the causal triangle covers the new-key region. MLX's
         // built-in "causal" mode is lower-right aligned, so build the ONNX mask explicitly instead.
-        let k_len = ctx.shape_of(present_k)[2];
-        let cur_kv = ctx.shape_of(kh4)[2];
-        let past_seq = k_len - cur_kv;
-        let cmask = combined_causal_mask(ctx, s, k_len, past_seq, dt, mask)?;
+        let cmask = combined_causal_mask(ctx, s, k_len, past_len, dt, mask)?;
         sdpa(ctx, qh4, present_k, present_v, scale, b"array\0", cmask)?
     } else {
         sdpa_dispatch(ctx, qh4, present_k, present_v, scale, false, mask, dt)?
@@ -1046,13 +1304,11 @@ fn attention_op(ctx: &mut TranslationContext, n: &NodeDesc) -> Result<(), MlxErr
     } else {
         ctx.bind(&n.outputs[0], attn); // already [B,qh,S,hd_v]
     }
-    if has_past {
-        if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
-            ctx.bind(&n.outputs[1], present_k);
-        }
-        if n.outputs.len() >= 3 && !n.outputs[2].name.is_empty() {
-            ctx.bind(&n.outputs[2], present_v);
-        }
+    if n.outputs.len() >= 2 && !n.outputs[1].name.is_empty() {
+        ctx.bind(&n.outputs[1], present_k);
+    }
+    if n.outputs.len() >= 3 && !n.outputs[2].name.is_empty() {
+        ctx.bind(&n.outputs[2], present_v);
     }
     Ok(())
 }
@@ -1767,6 +2023,8 @@ const GQA_SLIDING_COMPILE_REASON: &str =
     "sliding-window GroupQueryAttention emits MLX Slice and is not compile-eligible";
 const GQA_BIAS_COMPILE_REASON: &str =
     "attention-bias GroupQueryAttention emits MLX Slice and its bias semantics are eager-only";
+const ATTENTION_COMPOSED_COMPILE_REASON: &str =
+    "Attention v24/v25 logits or dynamic mask form uses composed MLX operations and is eager-only";
 
 fn group_query_attention_compile_shape_safety_for(
     claimable: bool,
@@ -1798,7 +2056,35 @@ fn group_query_attention_compile_shape_safety(node: &NodeView) -> CompileShapeSa
     )
 }
 
-/// Q/K/V present and same MLX float dtype as the output.
+fn attention_requires_composed_path(node: &NodeView) -> bool {
+    node.since_version() >= 25
+        || node.input_present(6)
+        || node.output_present(3)
+        || node.float_attr("softcap", 0.0) != 0.0
+        || node.int_attr("left_window_size", -1) >= 0
+        || node.int_attr("right_window_size", -1) >= 0
+        || node.has_attr("softmax_precision")
+        || matches!((dtype_of(node, 0), dtype_of(node, 2)), (Some(q), Some(v)) if q != v)
+}
+
+fn attention_compile_shape_safety_for(claimable: bool, composed: bool) -> CompileShapeSafety {
+    if !claimable || composed {
+        CompileShapeSafety::EagerOnly {
+            reason: ATTENTION_COMPOSED_COMPILE_REASON,
+        }
+    } else {
+        CompileShapeSafety::Shapeless
+    }
+}
+
+fn attention_compile_shape_safety(node: &NodeView) -> CompileShapeSafety {
+    attention_compile_shape_safety_for(
+        attention_claim(node).is_ok(),
+        attention_requires_composed_path(node),
+    )
+}
+
+/// Q/K and output 0 use Attention's T1; V is T2 and may be a different MLX float dtype.
 fn check_qkv_float(node: &NodeView) -> Option<ort::ONNXTensorElementDataType> {
     if node.num_inputs() < 3 || node.num_outputs() == 0 {
         return None;
@@ -1810,19 +2096,20 @@ fn check_qkv_float(node: &NodeView) -> Option<ort::ONNXTensorElementDataType> {
     let kd = dtype_of(node, 1)?;
     let vd = dtype_of(node, 2)?;
     let od = node.output_info(0)?.dtype;
-    if is_mlx_float(qd) && kd == qd && vd == qd && od == qd {
+    if is_mlx_float(qd) && kd == qd && is_mlx_float(vd) && od == qd {
         Some(qd)
     } else {
         None
     }
 }
 
-/// A past/present pair must be used together, share the query dtype; present outputs require past.
+/// A past/present pair must be used together and preserve Attention's separate T1/T2 dtype rules.
 fn check_kv_cache(
     node: &NodeView,
     past_k: usize,
     past_v: usize,
     qd: ort::ONNXTensorElementDataType,
+    vd: ort::ONNXTensorElementDataType,
 ) -> bool {
     let pk = node.input_present(past_k);
     let pv = node.input_present(past_v);
@@ -1831,11 +2118,19 @@ fn check_kv_cache(
     }
     if pk {
         match (dtype_of(node, past_k), dtype_of(node, past_v)) {
-            (Some(a), Some(b)) if a == qd && b == qd => {}
+            (Some(a), Some(b)) if a == qd && b == vd => {}
             _ => return false,
         }
     }
-    if !pk && (node.output_present(1) || node.output_present(2)) {
+    if node.output_present(1) != node.output_present(2) {
+        return false;
+    }
+    if node.output_present(1)
+        && !matches!(
+            (node.output_info(1), node.output_info(2)),
+            (Some(k), Some(v)) if k.dtype == qd && v.dtype == vd
+        )
+    {
         return false;
     }
     true
@@ -1865,11 +2160,60 @@ fn check_mask(node: &NodeView, mask_idx: usize) -> bool {
     }
 }
 
-/// Attention (ai.onnx, opset 23 and 24). 3D/4D SDPA, optional attn_mask + past/present KV.
+fn attention_mask_is_broadcastable(
+    node: &NodeView,
+    mask_idx: usize,
+    b: i64,
+    h: i64,
+    q: i64,
+    k: i64,
+) -> bool {
+    let Some(mask) = node.input_info(mask_idx) else {
+        return !node.input_present(mask_idx);
+    };
+    if mask.shape.len() > 4 {
+        return false;
+    }
+    let target = [b, h, q, k];
+    let skip = target.len() - mask.shape.len();
+    mask.shape.iter().enumerate().all(|(i, &dim)| {
+        attention_mask_dimension_is_compatible(
+            dim,
+            target[skip + i],
+            node.since_version() >= 25 && skip + i == 3,
+        )
+    })
+}
+
+fn attention_mask_dimension_is_compatible(dim: i64, target: i64, key_axis: bool) -> bool {
+    dim < 0 || dim == 1 || target < 0 || dim == target || (key_axis && dim >= 0 && dim < target)
+}
+
+fn supported_softmax_precision(node: &NodeView) -> bool {
+    !node.has_attr("softmax_precision")
+        || mlx_softmax_precision(Some(node.int_attr("softmax_precision", 0))).is_some()
+}
+
+fn mlx_softmax_precision(precision: Option<i64>) -> Option<mlx::mlx_dtype> {
+    match precision {
+        None => None,
+        Some(1) => Some(mlx::mlx_dtype__MLX_FLOAT32),
+        Some(10) => Some(mlx::mlx_dtype__MLX_FLOAT16),
+        Some(16) => Some(mlx::mlx_dtype__MLX_BFLOAT16),
+        _ => None,
+    }
+}
+
+/// Attention (ai.onnx, opset 23-28). Fast SDPA is retained for the legacy form; v24/v25 features
+/// requiring logits, nonpad/window masks, or a requested QK output take an explicit composed path.
 fn attention_claim(node: &NodeView) -> ClaimResult {
     let qd = match check_qkv_float(node) {
         Some(qd) => qd,
-        None => deny!("Q, K, V, and output 0 must be present and share one MLX float dtype"),
+        None => deny!("Q/K/output must use one MLX float T1 and V must use an MLX float T2"),
+    };
+    let vd = match dtype_of(node, 2) {
+        Some(vd) => vd,
+        None => deny!("V lacks tensor type/shape info"),
     };
     let qshape = match node.input_info(0) {
         Some(i) => i.shape,
@@ -1897,7 +2241,7 @@ fn attention_claim(node: &NodeView) -> ClaimResult {
         vshape.len()
     );
 
-    let (qh, kvh) = if rank == 3 {
+    let (qh, kvh, b, q_len, k_len) = if rank == 3 {
         let qh = node.int_attr("q_num_heads", 0);
         let kvh = node.int_attr("kv_num_heads", 0);
         require!(
@@ -1926,7 +2270,19 @@ fn attention_claim(node: &NodeView) -> ClaimResult {
             qh,
             kvh
         );
-        (qh, kvh)
+        require!(
+            qshape[0] < 0 || kshape[0] < 0 || qshape[0] == kshape[0],
+            "Q and K batch dimensions must match"
+        );
+        require!(
+            qshape[0] < 0 || vshape[0] < 0 || qshape[0] == vshape[0],
+            "Q and V batch dimensions must match"
+        );
+        require!(
+            qshape[2] / qh == kshape[2] / kvh,
+            "Q and K head sizes must match"
+        );
+        (qh, kvh, qshape[0], qshape[1], kshape[1])
     } else {
         let qh = qshape[1];
         let kvh = kshape[1];
@@ -1936,7 +2292,28 @@ fn attention_claim(node: &NodeView) -> ClaimResult {
             qh,
             kvh
         );
-        (qh, kvh)
+        require!(
+            qshape[0] < 0 || kshape[0] < 0 || qshape[0] == kshape[0],
+            "Q and K batch dimensions must match"
+        );
+        require!(
+            qshape[0] < 0 || vshape[0] < 0 || qshape[0] == vshape[0],
+            "Q and V batch dimensions must match"
+        );
+        require!(
+            qshape[3] > 0 && kshape[3] > 0 && qshape[3] == kshape[3],
+            "Q and K head sizes must match and be positive"
+        );
+        require!(
+            kshape[1] == vshape[1] && kshape[2] == vshape[2],
+            "K and V head and sequence dimensions must match"
+        );
+        require!(
+            node.since_version() < 25
+                || (!node.has_attr("q_num_heads") && !node.has_attr("kv_num_heads")),
+            "q_num_heads and kv_num_heads must be absent for rank-4 inputs"
+        );
+        (qh, kvh, qshape[0], qshape[2], kshape[2])
     };
     require!(
         qh % kvh == 0,
@@ -1945,20 +2322,69 @@ fn attention_claim(node: &NodeView) -> ClaimResult {
         kvh
     );
     require!(
-        node.float_attr("softcap", 0.0) == 0.0,
-        "logit soft-cap is unsupported"
-    );
-    require!(!node.output_present(3), "qk_matmul_output is unsupported");
-    require!(!node.input_present(6), "nonpad_kv_seqlen is unsupported");
-    require!(
         check_mask(node, 3),
-        "attention mask must be bool or the query float dtype; this guards SDPA mask dispatch"
+        "attention mask must be bool or an MLX float dtype"
+    );
+    let total_k_len = if node.input_present(4) {
+        match node.input_info(4) {
+            Some(past) if past.shape.len() == 4 && past.shape[2] >= 0 && k_len >= 0 => {
+                past.shape[2] + k_len
+            }
+            _ => -1,
+        }
+    } else {
+        k_len
+    };
+    require!(
+        attention_mask_is_broadcastable(node, 3, b, qh, q_len, total_k_len),
+        "attention mask must be broadcastable to [batch,q_heads,q_sequence,total_kv_sequence] \
+         (short final dimensions are not representable without MLX Pad)"
     );
     require!(
-        check_kv_cache(node, 4, 5, qd),
-        "past K/V must be paired and match query dtype {}; present K/V require a cache",
-        crate::registry::ort_dtype_name(qd)
+        check_kv_cache(node, 4, 5, qd, vd),
+        "past/present K/V must be paired and use their respective T1/T2 dtypes"
     );
+    require!(
+        !node.input_present(6) || (!node.input_present(4) && !node.output_present(1)),
+        "nonpad_kv_seqlen cannot be combined with past or present cache tensors"
+    );
+    if node.input_present(6) {
+        let nonpad = match node.input_info(6) {
+            Some(info) => info,
+            None => deny!("nonpad_kv_seqlen lacks tensor type/shape info"),
+        };
+        require!(
+            nonpad.dtype == ort::ONNXTensorElementDataType_ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64
+                && nonpad.shape.len() == 1
+                && (b < 0 || nonpad.shape[0] < 0 || nonpad.shape[0] == b),
+            "nonpad_kv_seqlen must be int64 [batch]"
+        );
+    }
+    require!(
+        supported_softmax_precision(node),
+        "softmax_precision must be an MLX GPU float type (FLOAT=1, FLOAT16=10, or BFLOAT16=16); DOUBLE=11 is unsupported"
+    );
+    for name in ["left_window_size", "right_window_size"] {
+        require!(
+            node.int_attr(name, -1) >= -1,
+            "{name} must be -1 or nonnegative"
+        );
+    }
+    if node.output_present(3) {
+        let qk = match node.output_info(3) {
+            Some(info) => info,
+            None => deny!("qk_matmul_output lacks tensor type/shape info"),
+        };
+        require!(
+            qk.dtype == qd
+                && qk.shape.len() == 4
+                && (b < 0 || qk.shape[0] < 0 || qk.shape[0] == b)
+                && (qk.shape[1] < 0 || qk.shape[1] == qh)
+                && (qk.shape[2] < 0 || q_len < 0 || qk.shape[2] == q_len)
+                && (qk.shape[3] < 0 || total_k_len < 0 || qk.shape[3] == total_k_len),
+            "qk_matmul_output must be T1 [batch,q_heads,q_sequence,total_kv_sequence]"
+        );
+    }
     Ok(())
 }
 
@@ -3085,24 +3511,19 @@ pub fn register_attention(registry: &mut OpRegistry) {
         },
         group_query_attention_compile_shape_safety,
     );
-    // Attention entered ai.onnx at opset 23; opset 24 adds the trailing nonpad_kv_seqlen input.
-    shapeless(
-        registry,
-        "",
-        "Attention",
-        23,
-        23,
-        attention_op,
-        attention_claim,
-    );
-    shapeless(
-        registry,
-        "",
-        "Attention",
-        24,
-        K_ANY_OPSET,
-        attention_op,
-        attention_claim,
+    // Attention entered ai.onnx at opset 23; v24 adds nonpad lengths and v25 adds logits,
+    // windows, softcap, and softmax precision. Legacy SDPA remains shapeless; composed forms are
+    // deliberately eager so dynamic decode never captures a first-call shape.
+    registry.register_shape_classified(
+        OpRegistration {
+            domain: "",
+            op_type: "Attention",
+            min_opset: 23,
+            max_opset: K_ANY_OPSET,
+            handler: attention_op,
+            claim: attention_claim,
+        },
+        attention_compile_shape_safety,
     );
     shape_keyed(
         registry,
@@ -3169,10 +3590,13 @@ pub fn register_attention(registry: &mut OpRegistry) {
 #[cfg(test)]
 mod tests {
     use super::{
-        GQA_BIAS_COMPILE_REASON, GQA_SLIDING_COMPILE_REASON, GQA_UNSUPPORTED_COMPILE_REASON,
-        group_query_attention_compile_shape_safety_for,
+        ATTENTION_COMPOSED_COMPILE_REASON, GQA_BIAS_COMPILE_REASON, GQA_SLIDING_COMPILE_REASON,
+        GQA_UNSUPPORTED_COMPILE_REASON, attention_compile_shape_safety_for,
+        attention_mask_dimension_is_compatible, group_query_attention_compile_shape_safety_for,
+        mlx_softmax_precision,
     };
     use crate::registry::CompileShapeSafety;
+    use crate::sys::mlx;
 
     #[test]
     fn group_query_attention_compile_shape_safety_matrix() {
@@ -3207,5 +3631,51 @@ mod tests {
             },
             "invalid or unsupported GQA forms must never be classified shapeless"
         );
+    }
+
+    #[test]
+    fn attention_v25_composed_forms_stay_eager_and_legacy_decode_stays_shapeless() {
+        assert_eq!(
+            attention_compile_shape_safety_for(true, false),
+            CompileShapeSafety::Shapeless,
+            "the pre-v25 fast-SDPA form must retain dynamic decode replay"
+        );
+        assert_eq!(
+            attention_compile_shape_safety_for(true, true),
+            CompileShapeSafety::EagerOnly {
+                reason: ATTENTION_COMPOSED_COMPILE_REASON
+            },
+            "nonpad, window, softcap, QK-output, or mixed-T1/T2 forms must not capture a first-call shape"
+        );
+    }
+
+    #[test]
+    fn attention_v25_softmax_precision_rejects_double_without_claiming_it() {
+        assert_eq!(
+            mlx_softmax_precision(Some(1)),
+            Some(mlx::mlx_dtype__MLX_FLOAT32)
+        );
+        assert_eq!(
+            mlx_softmax_precision(Some(10)),
+            Some(mlx::mlx_dtype__MLX_FLOAT16)
+        );
+        assert_eq!(
+            mlx_softmax_precision(Some(16)),
+            Some(mlx::mlx_dtype__MLX_BFLOAT16)
+        );
+        assert_eq!(
+            mlx_softmax_precision(Some(11)),
+            None,
+            "MLX EP has no GPU fp64 Attention path, so the v25 DOUBLE request must be declined"
+        );
+    }
+
+    #[test]
+    fn attention_v25_short_key_mask_is_accepted_but_other_axes_must_broadcast() {
+        // ORT 1.29 cannot execute the v25 schema, so this directly pins the schema-only claim
+        // rule rather than pretending the v24 kernel implements the newer short-mask contract.
+        assert!(attention_mask_dimension_is_compatible(3, 4, true));
+        assert!(!attention_mask_dimension_is_compatible(3, 4, false));
+        assert!(!attention_mask_dimension_is_compatible(5, 4, true));
     }
 }
