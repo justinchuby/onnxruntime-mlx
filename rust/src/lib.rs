@@ -26,6 +26,7 @@ mod mlx;
 mod ops;
 mod ort_graph;
 mod partition;
+mod plan_builder;
 mod registry;
 mod sys;
 mod trace;

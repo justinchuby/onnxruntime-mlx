@@ -2,7 +2,7 @@
 //!
 //! This is deliberately not an ONNX protobuf loader: ORT has already optimized
 //! and partitioned the graph when this boundary is called. Initializer *metadata*
-//! is captured here, but initializer bytes remain owned and copied by `ep::build_plan`
+//! is captured here, but initializer bytes remain owned and copied by `plan_builder::build_plan`
 //! during Compile because ORT's borrowed initializer storage cannot outlive that call.
 
 use std::collections::{BTreeSet, HashMap};

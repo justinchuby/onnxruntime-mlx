@@ -1,7 +1,7 @@
 //! Control-flow op handlers: If, Scan, Loop. Faithful port of the C++ `ops/controlflow.cc`.
 //!
 //! Unlike ordinary ops these carry their computation as a nested subgraph (GraphProto) ATTRIBUTE — a
-//! body ORT surfaces to a plugin EP via `Node_GetSubgraphs` (`ep::build_subgraphs` captures each body
+//! body ORT surfaces to a plugin EP via `Node_GetSubgraphs` (`plan_builder` captures each body
 //! as a `NodeDesc::subgraphs` entry). The MLX EP owns the control-flow node WHOLE (its body is
 //! declined for independent offload in `ep::get_capability`) and realizes the control flow by
 //! translating the body inline through `TranslationContext::run_subgraph`:
