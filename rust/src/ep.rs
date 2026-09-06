@@ -20,6 +20,7 @@ use crate::engine::{
 };
 use crate::factory::ORT_API_VERSION;
 use crate::mlx::Stream;
+use crate::ort_graph::OrtGraphSnapshot;
 use crate::registry::{CompilePartitionClass, NodeView, claimable};
 use crate::sys::{mlx, ort};
 
@@ -1063,6 +1064,10 @@ unsafe fn build_plan(
     fused_node: *const ort::OrtNode,
 ) -> Result<Plan, String> {
     unsafe {
+        // Capture the optimized graph while ORT's ABI view is live. This is metadata-only:
+        // execution still owns initializer-byte copying below, and no plan consumes this yet.
+        let _optimized_graph_ir = OrtGraphSnapshot::from_ort(api, graph)?;
+
         // Fused-node input/output name -> OrtKernelContext index (the runtime I/O boundary).
         let ctx_input_index: HashMap<String, usize> = node_input_names(api, fused_node)
             .into_iter()

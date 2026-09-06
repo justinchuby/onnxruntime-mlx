@@ -24,6 +24,7 @@ mod factory;
 mod logging;
 mod mlx;
 mod ops;
+mod ort_graph;
 mod registry;
 mod sys;
 mod trace;
