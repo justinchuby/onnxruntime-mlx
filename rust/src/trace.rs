@@ -121,7 +121,7 @@ pub const CAT_OP_WORKER: &str = "op.worker";
 const DEVICE_METAL: &str = "metal";
 
 /// Which execution path a fused subgraph's Compute took — the "execution-path view".
-/// Mirrors the dispatch order in [`crate::ep`]'s `compute`: compiled decode → compiled
+/// Mirrors the dispatch order in [`crate::runtime`]'s `compute`: compiled decode → compiled
 /// prefill → compiled general → eager translator.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ComputePath {

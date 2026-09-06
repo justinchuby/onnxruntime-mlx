@@ -17,6 +17,7 @@
 //! Ops the EP does not claim are left to ORT's CPU EP. Correctness is validated MLX-vs-ORT-CPU by
 //! the `tests/ops` suite and against ONNX's own backend node tests.
 
+mod capability;
 mod compiled;
 mod engine;
 mod ep;
@@ -28,6 +29,7 @@ mod ort_graph;
 mod partition;
 mod plan_builder;
 mod registry;
+mod runtime;
 mod sys;
 mod trace;
 
@@ -82,6 +84,33 @@ pub(crate) fn panic_payload_message(payload: &Box<dyn std::any::Any + Send>) -> 
         s.clone()
     } else {
         "unrecoverable panic (non-string payload)".to_string()
+    }
+}
+
+#[cfg(test)]
+mod ffi_tests {
+    use std::ffi::c_char;
+
+    use super::guard_ffi_status;
+    use crate::sys::ort;
+
+    unsafe extern "C" fn create_status(
+        _code: ort::OrtErrorCode,
+        _message: *const c_char,
+    ) -> *mut ort::OrtStatus {
+        std::ptr::NonNull::<ort::OrtStatus>::dangling().as_ptr()
+    }
+
+    #[test]
+    fn ffi_guard_contains_panics_and_returns_failure_status() {
+        let mut api: ort::OrtApi = unsafe { std::mem::zeroed() };
+        api.CreateStatus = Some(create_status);
+        let status = unsafe {
+            guard_ffi_status(&api, "ffi_guard_contains_panics", || {
+                panic!("intentional FFI containment test")
+            })
+        };
+        assert!(!status.is_null());
     }
 }
 
