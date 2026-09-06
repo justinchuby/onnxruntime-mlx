@@ -20,7 +20,11 @@ use crate::engine::{
 };
 use crate::factory::ORT_API_VERSION;
 use crate::mlx::Stream;
-use crate::ort_graph::OrtGraphSnapshot;
+use crate::ort_graph::{NodeMetadata, OrtGraphSnapshot};
+use crate::partition::{
+    build_contiguous_clusters, build_convex_clusters, infer_layer_boundary_values,
+    split_annotated_layer_clusters,
+};
 use crate::registry::{CompilePartitionClass, NodeView, claimable};
 use crate::sys::{mlx, ort};
 
@@ -144,19 +148,43 @@ unsafe fn get_capability_impl(
         let ep = &*this(p);
         let api = &*ep.ort_api;
         let ep_api = &*ep.ep_api;
-
-        let mut num: usize = 0;
-        let st = (api.Graph_GetNumNodes.unwrap())(graph, &mut num);
-        if !st.is_null() {
-            return st;
-        }
-        if num == 0 {
+        let snapshot = match OrtGraphSnapshot::from_ort(api, graph) {
+            Ok(snapshot) => snapshot,
+            Err(error) => return ep_fail_status(api, error),
+        };
+        let node_order = match snapshot.ir.topological_order() {
+            Ok(order) => order,
+            Err(error) => {
+                return ep_fail_status(
+                    api,
+                    format!("optimized graph IR has no topological order: {error}"),
+                );
+            }
+        };
+        if node_order.is_empty() {
             return ptr::null_mut();
         }
-        let mut nodes: Vec<*const ort::OrtNode> = vec![ptr::null(); num];
-        let st = (api.Graph_GetNodes.unwrap())(graph, nodes.as_mut_ptr(), num);
+        // Registry predicates still inspect attributes and constant initializer values through ORT,
+        // but every topology decision below uses the owned snapshot keyed by stable ORT node IDs.
+        let mut raw_nodes: Vec<*const ort::OrtNode> = vec![ptr::null(); node_order.len()];
+        let st = (api.Graph_GetNodes.unwrap())(graph, raw_nodes.as_mut_ptr(), raw_nodes.len());
         if !st.is_null() {
             return st;
+        }
+        let mut raw_nodes_by_id = HashMap::with_capacity(raw_nodes.len());
+        for node in raw_nodes {
+            let mut ort_node_id = 0usize;
+            let st = (api.Node_GetId.unwrap())(node, &mut ort_node_id);
+            if !st.is_null() {
+                return st;
+            }
+            let Some(&node_id) = snapshot.node_by_ort_id.get(&ort_node_id) else {
+                return ep_fail_status(
+                    api,
+                    format!("optimized graph snapshot is missing ORT node ID {ort_node_id}"),
+                );
+            };
+            raw_nodes_by_id.insert(node_id, node);
         }
 
         // Control-flow support: ORT partitions bottom-up, presenting a CF node's body subgraph to
@@ -185,50 +213,53 @@ unsafe fn get_capability_impl(
         // Foundry's Q8 Whisper decoder has runtime Range/Tile nodes for position IDs. Keep the
         // complete decoder on MLX; the translator handles those two dynamic shape nodes inside the
         // EP so they do not create ORT CPU islands.
-        let native_q8_attention_graph = nodes.len() > 32
-            && nodes.iter().any(|&node| {
-                let view = NodeView::new(ep.ort_api, node);
-                is_separate_qkv_attention_op(&view.domain(), &view.op_type())
+        let native_q8_attention_graph = node_order.len() > 32
+            && node_order.iter().any(|&node| {
+                let metadata = &snapshot.nodes[&node];
+                is_separate_qkv_attention_op(&metadata.domain, &metadata.op_type)
             })
-            && nodes.iter().any(|&node| {
-                let view = NodeView::new(ep.ort_api, node);
+            && node_order.iter().any(|&node| {
+                let raw_node = raw_nodes_by_id[&node];
+                let view = NodeView::new(ep.ort_api, raw_node);
+                // Bits is an operator attribute, intentionally left to the registry's ORT view.
+                // The graph identity and topology remain owned by the snapshot.
                 view.op_type() == "MatMulNBits" && view.int_attr("bits", 4) == 8
             })
-            && nodes
+            && node_order
                 .iter()
                 .filter(|&&node| {
-                    let view = NodeView::new(ep.ort_api, node);
+                    let view = NodeView::new(ep.ort_api, raw_nodes_by_id[&node]);
                     view.op_type() == "Range"
                         && view.read_const_scalar_f64(2) == Some(1.0)
                         && (0..3).any(|index| view.read_const_scalar_f64(index).is_none())
                 })
                 .count()
                 == 1
-            && nodes
+            && node_order
                 .iter()
                 .filter(|&&node| {
-                    let view = NodeView::new(ep.ort_api, node);
+                    let view = NodeView::new(ep.ort_api, raw_nodes_by_id[&node]);
                     view.op_type() == "Tile" && !view.is_const_int64(1)
                 })
                 .count()
                 == 1;
 
-        let mixed_vision_quant_graph = nodes.iter().any(|&node| {
-            let view = NodeView::new(ep.ort_api, node);
-            view.domain() == "com.microsoft" && view.op_type() == "PackedMultiHeadAttention"
-        }) && nodes.iter().any(|&node| {
-            let view = NodeView::new(ep.ort_api, node);
-            view.domain() == "com.microsoft" && view.op_type() == "MatMulNBits"
+        let mixed_vision_quant_graph = node_order.iter().any(|&node| {
+            let metadata = &snapshot.nodes[&node];
+            metadata.domain == "com.microsoft" && metadata.op_type == "PackedMultiHeadAttention"
+        }) && node_order.iter().any(|&node| {
+            let metadata = &snapshot.nodes[&node];
+            metadata.domain == "com.microsoft" && metadata.op_type == "MatMulNBits"
         });
 
         // Which nodes can MLX translate exactly (registry claim predicate).
-        let supported: Vec<bool> = nodes
+        let supported: Vec<bool> = node_order
             .iter()
-            .map(|&node| {
+            .map(|&node_id| {
                 if in_cf_body {
                     return false;
                 }
-                let view = NodeView::new(ep.ort_api, node);
+                let view = NodeView::new(ep.ort_api, raw_nodes_by_id[&node_id]);
                 if native_q8_attention_graph && matches!(view.op_type().as_str(), "Range" | "Tile")
                 {
                     return true;
@@ -239,24 +270,24 @@ unsafe fn get_capability_impl(
 
         // fp64 colour: which claimed nodes carry a float64 tensor. Used to keep fp64 work in its own
         // cluster (and thus on its own MLX CPU stream) — see `build_convex_clusters`.
-        let float64: Vec<bool> = nodes
+        let float64: Vec<bool> = node_order
             .iter()
-            .map(|&node| {
-                let view = NodeView::new(ep.ort_api, node);
-                crate::registry::node_uses_float64(&view)
-            })
+            .map(|&node| snapshot_node_uses_float64(&snapshot, node))
             .collect();
         // In a decoder graph, colour each node by the registry's strongest allowed route:
         // shapeless, shape-keyed-only, or eager-only. A stricter node cannot poison compilation for
         // a more capable neighbour. Non-decoder graphs use only the general route, so splitting
         // them would add boundaries for no benefit.
-        let decoder_graph = nodes
+        let attention_anchors = node_order
             .iter()
-            .any(|&node| is_decoder_attention_anchor(&NodeView::new(ep.ort_api, node)));
-        let compile_class: Vec<CompilePartitionClass> = nodes
+            .copied()
+            .filter(|node| is_decoder_attention_anchor(&snapshot.nodes[node]))
+            .collect::<Vec<_>>();
+        let decoder_graph = !attention_anchors.is_empty();
+        let compile_class: Vec<CompilePartitionClass> = node_order
             .iter()
             .map(|&node| {
-                let view = NodeView::new(ep.ort_api, node);
+                let view = NodeView::new(ep.ort_api, raw_nodes_by_id[&node]);
                 if decoder_graph {
                     crate::registry::compile_shape_safety(&view).partition_class()
                 } else {
@@ -274,9 +305,9 @@ unsafe fn get_capability_impl(
             use std::collections::BTreeMap;
             // Per op-type: (count, first-reason, up to a few node names for locating them).
             let mut acc: BTreeMap<String, (usize, String, Vec<String>)> = BTreeMap::new();
-            for (&node, &ok) in nodes.iter().zip(supported.iter()) {
+            for (&node, &ok) in node_order.iter().zip(supported.iter()) {
                 if !ok {
-                    let view = NodeView::new(ep.ort_api, node);
+                    let view = NodeView::new(ep.ort_api, raw_nodes_by_id[&node]);
                     // Keyed by the domain-qualified name: `Attention` exists in
                     // both the default domain and `com.microsoft`, and merging
                     // them would report one count for two different ops.
@@ -323,9 +354,15 @@ unsafe fn get_capability_impl(
         // every node that could lie between two members is included, while still avoiding the
         // thousands of singleton partitions previously used for this graph.
         let clusters = if mixed_vision_quant_graph {
-            build_contiguous_clusters(&supported, &float64, &compile_class)
+            build_contiguous_clusters(&node_order, &supported, &float64, &compile_class)
         } else {
-            build_convex_clusters(api, &nodes, &supported, &float64, &compile_class)
+            build_convex_clusters(
+                &snapshot.ir,
+                &node_order,
+                &supported,
+                &float64,
+                &compile_class,
+            )
         };
         let layer_boundary_outputs = if in_cf_body {
             HashSet::new()
@@ -334,7 +371,8 @@ unsafe fn get_capability_impl(
                 Ok(Some(value)) => match serde_json::from_str::<Vec<String>>(&value) {
                     Ok(outputs) => outputs
                         .into_iter()
-                        .filter(|name| !name.is_empty())
+                        .filter_map(|name| snapshot.value_by_name.get(&name).copied())
+                        .filter(|&value| snapshot.ir.value(value).producer.is_some())
                         .collect(),
                     Err(error) => {
                         log::warn!(
@@ -344,16 +382,13 @@ unsafe fn get_capability_impl(
                         HashSet::new()
                     }
                 },
-                Ok(None) => infer_layer_boundary_outputs(api, &nodes),
+                Ok(None) => {
+                    infer_layer_boundary_values(&snapshot.ir, &node_order, &attention_anchors)
+                }
                 Err(st) => return st,
             }
         };
-        let layer_count = nodes
-            .iter()
-            .flat_map(|&node| node_output_names(api, node))
-            .filter(|name| layer_boundary_outputs.contains(name))
-            .collect::<HashSet<_>>()
-            .len();
+        let layer_count = layer_boundary_outputs.len();
         let layer_partition_span = select_layer_partition_span(
             std::env::var("ONNXRUNTIME_EP_MLX_LAYER_PARTITIONS")
                 .ok()
@@ -361,16 +396,20 @@ unsafe fn get_capability_impl(
             layer_count,
         );
         let clusters = match layer_partition_span {
-            Some(span) => {
-                split_annotated_layer_clusters(api, &nodes, clusters, &layer_boundary_outputs, span)
-            }
+            Some(span) => split_annotated_layer_clusters(
+                &snapshot.ir,
+                clusters,
+                &layer_boundary_outputs,
+                span,
+            ),
             None => clusters,
         };
 
         let add_fuse = ep_api.EpGraphSupportInfo_AddNodesToFuse.unwrap();
         let mut claimed = 0usize;
         for cluster in &clusters {
-            let group: Vec<*const ort::OrtNode> = cluster.iter().map(|&i| nodes[i]).collect();
+            let group: Vec<*const ort::OrtNode> =
+                cluster.iter().map(|node| raw_nodes_by_id[node]).collect();
             let mut opts: ort::OrtNodeFusionOptions = std::mem::zeroed();
             opts.ort_version_supported = ORT_API_VERSION;
             // Initializers are copied into Plan-owned storage during Compile, so they do not need
@@ -385,7 +424,7 @@ unsafe fn get_capability_impl(
         // Claiming view: claimed/total nodes, fused-subgraph count (fragmentation signal), and the
         // per-op fallback reasons — structured spans/counters + the session summary (near-zero cost
         // and no stderr spam when tracing is off). Replaces the old unconditional eprintlns.
-        tr.record_claim(claimed, num, clusters.len(), &rejected);
+        tr.record_claim(claimed, node_order.len(), clusters.len(), &rejected);
         ptr::null_mut()
     }
 }
@@ -403,155 +442,45 @@ fn select_layer_partition_span(value: Option<&str>, layer_count: usize) -> Optio
     }
 }
 
-fn is_decoder_attention_anchor(view: &NodeView) -> bool {
-    let op_type = view.op_type();
-    let domain = view.domain();
-    if domain == "com.microsoft" && op_type == "PagedAttention" {
+fn is_decoder_attention_anchor(node: &NodeMetadata) -> bool {
+    if node.domain == "com.microsoft" && node.op_type == "PagedAttention" {
         return true;
     }
-    let has_present_cache = view.output_present(1) && view.output_present(2);
+    let has_present_cache = node.output_slots.get(1).is_some_and(Option::is_some)
+        && node.output_slots.get(2).is_some_and(Option::is_some);
     has_present_cache
-        && ((domain == "com.microsoft"
+        && ((node.domain == "com.microsoft"
             && matches!(
-                op_type.as_str(),
+                node.op_type.as_str(),
                 "GroupQueryAttention" | "MultiHeadAttention"
             ))
-            || ((domain.is_empty() || domain == "ai.onnx") && op_type == "Attention"))
+            || (node.domain.is_empty() && node.op_type == "Attention"))
 }
 
-fn infer_boundary_indices(
-    op_types: &[String],
-    successors: &[Vec<usize>],
-    predecessors: &[Vec<usize>],
-    attention_anchors: &[usize],
-) -> Option<Vec<usize>> {
-    if attention_anchors.len() < 2 {
-        return None;
-    }
-
-    let mut boundaries = Vec::with_capacity(attention_anchors.len() - 1);
-    for pair in attention_anchors.windows(2) {
-        let (current, next) = (pair[0], pair[1]);
-
-        let mut downstream = vec![false; op_types.len()];
-        let mut stack = vec![current];
-        while let Some(index) = stack.pop() {
-            for &successor in &successors[index] {
-                if successor <= next && !downstream[successor] {
-                    downstream[successor] = true;
-                    stack.push(successor);
-                }
-            }
-        }
-
-        let mut upstream = vec![false; op_types.len()];
-        let mut stack = vec![next];
-        while let Some(index) = stack.pop() {
-            for &predecessor in &predecessors[index] {
-                if predecessor >= current && !upstream[predecessor] {
-                    upstream[predecessor] = true;
-                    stack.push(predecessor);
-                }
-            }
-        }
-
-        boundaries.push(
-            (current + 1..next)
-                .rev()
-                .find(|&index| op_types[index] == "Add" && downstream[index] && upstream[index])?,
-        );
-    }
-    Some(boundaries)
-}
-
-fn infer_layer_boundary_outputs(
-    api: &ort::OrtApi,
-    nodes: &[*const ort::OrtNode],
-) -> HashSet<String> {
-    let mut producer = HashMap::new();
-    let mut op_types = Vec::with_capacity(nodes.len());
-    let mut attention_anchors = Vec::new();
-    for (index, &node) in nodes.iter().enumerate() {
-        let view = NodeView::new(api, node);
-        if is_decoder_attention_anchor(&view) {
-            attention_anchors.push(index);
-        }
-        op_types.push(view.op_type());
-        for output in unsafe { node_output_names(api, node) } {
-            if !output.is_empty() {
-                producer.entry(output).or_insert(index);
-            }
-        }
-    }
-
-    let mut successors = vec![Vec::new(); nodes.len()];
-    let mut predecessors = vec![Vec::new(); nodes.len()];
-    for (index, &node) in nodes.iter().enumerate() {
-        let mut seen = HashSet::new();
-        for input in unsafe { node_input_names(api, node) } {
-            if let Some(&predecessor) = producer.get(&input)
-                && predecessor != index
-                && seen.insert(predecessor)
-            {
-                successors[predecessor].push(index);
-                predecessors[index].push(predecessor);
-            }
-        }
-    }
-
-    let Some(boundary_indices) =
-        infer_boundary_indices(&op_types, &successors, &predecessors, &attention_anchors)
-    else {
-        return HashSet::new();
-    };
-
-    boundary_indices
-        .into_iter()
-        .filter_map(|index| {
-            unsafe { node_output_names(api, nodes[index]) }
-                .into_iter()
-                .next()
+fn snapshot_node_uses_float64(snapshot: &OrtGraphSnapshot, node: onnx_runtime_ir::NodeId) -> bool {
+    snapshot.nodes[&node]
+        .input_slots
+        .iter()
+        .chain(snapshot.nodes[&node].output_slots.iter())
+        .flatten()
+        .any(|value| {
+            snapshot.values[value]
+                .tensor
+                .as_ref()
+                .and_then(|tensor| tensor.dtype)
+                == Some(onnx_runtime_ir::DataType::Float64)
         })
-        .filter(|name| !name.is_empty())
-        .collect()
 }
 
-/// Split after transformer-layer residual outputs. Metadata takes precedence; otherwise the
-/// boundaries are inferred from data flow between consecutive decoder-attention operators.
-fn split_annotated_layer_clusters(
-    api: &ort::OrtApi,
-    nodes: &[*const ort::OrtNode],
-    clusters: Vec<Vec<usize>>,
-    layer_boundary_outputs: &HashSet<String>,
-    layers_per_partition: usize,
-) -> Vec<Vec<usize>> {
-    let mut split = Vec::with_capacity(clusters.len());
-    for cluster in clusters {
-        let mut part = Vec::new();
-        let mut layers_in_part = 0usize;
-        for index in cluster {
-            part.push(index);
-            let layer_end = unsafe { node_output_names(api, nodes[index]) }
-                .iter()
-                .any(|name| layer_boundary_outputs.contains(name));
-            if layer_end {
-                layers_in_part += 1;
-                if layers_in_part == layers_per_partition {
-                    split.push(std::mem::take(&mut part));
-                    layers_in_part = 0;
-                }
-            }
-        }
-        if !part.is_empty() {
-            split.push(part);
-        }
-    }
-    split
+unsafe fn ep_fail_status(api: &ort::OrtApi, message: impl AsRef<str>) -> *mut ort::OrtStatus {
+    let message = CString::new(message.as_ref())
+        .unwrap_or_else(|_| CString::new("MLX capability inspection failed").unwrap());
+    unsafe { (api.CreateStatus.unwrap())(ort::OrtErrorCode_ORT_EP_FAIL, message.as_ptr()) }
 }
 
 #[cfg(test)]
 mod layer_partition_tests {
-    use super::{infer_boundary_indices, select_layer_partition_span};
+    use super::select_layer_partition_span;
 
     #[test]
     fn auto_layer_partition_span_scales_with_decoder_size() {
@@ -569,71 +498,6 @@ mod layer_partition_tests {
         assert_eq!(select_layer_partition_span(Some("5"), 52), Some(5));
         assert_eq!(select_layer_partition_span(Some("invalid"), 52), None);
     }
-
-    #[test]
-    fn structural_boundaries_use_the_last_residual_add() {
-        let layers = 24;
-        let mut op_types = Vec::new();
-        let mut successors = Vec::new();
-        let mut predecessors = Vec::new();
-        let mut anchors = Vec::new();
-        for _ in 0..layers {
-            let anchor = op_types.len();
-            anchors.push(anchor);
-            op_types.extend(["GroupQueryAttention", "Add", "MatMul", "Add"].map(String::from));
-            successors.extend([vec![], vec![], vec![], vec![]]);
-            predecessors.extend([vec![], vec![], vec![], vec![]]);
-        }
-        for &anchor in anchors.iter().take(layers - 1) {
-            let next = anchor + 4;
-            for (from, to) in [
-                (anchor, anchor + 1),
-                (anchor + 1, anchor + 2),
-                (anchor + 2, anchor + 3),
-                (anchor + 3, next),
-            ] {
-                successors[from].push(to);
-                predecessors[to].push(from);
-            }
-        }
-
-        let boundaries =
-            infer_boundary_indices(&op_types, &successors, &predecessors, &anchors).unwrap();
-        assert_eq!(boundaries.len(), layers - 1);
-        assert_eq!(boundaries[0], 3);
-        assert_eq!(boundaries[layers - 2], (layers - 2) * 4 + 3);
-    }
-}
-
-fn build_contiguous_clusters(
-    supported: &[bool],
-    float64: &[bool],
-    compile_class: &[CompilePartitionClass],
-) -> Vec<Vec<usize>> {
-    let mut clusters = Vec::new();
-    let mut start = 0usize;
-    while start < supported.len() {
-        while start < supported.len() && !supported[start] {
-            start += 1;
-        }
-        if start == supported.len() {
-            break;
-        }
-        let mut end = start + 1;
-        // Different execution colours never share a cluster: fp64 needs the MLX CPU stream, while
-        // Nodes with different compile classes must not share a partition: shapeless,
-        // shape-keyed, and eager-only plans have different execution guarantees.
-        while end < supported.len()
-            && supported[end]
-            && float64[end] == float64[start]
-            && compile_class[end] == compile_class[start]
-        {
-            end += 1;
-        }
-        clusters.push((start..end).collect());
-        start = end;
-    }
-    clusters
 }
 
 /// Release a non-null `OrtStatus` returned on an error / not-found path (the OrtApi allocates a
@@ -731,265 +595,6 @@ unsafe fn graph_metadata_value(
         (api.ReleaseModelMetadata.unwrap())(metadata);
         Ok(result)
     }
-}
-
-/// Groups supported nodes into maximal, convex, connected clusters. A set S is convex (a valid single
-/// fused node) iff no node x outside S lies on a path between two members of S. Faithful port of
-/// `BuildConvexClusters` (union-find + reachability bitsets).
-///
-/// `float64` colours the nodes: an fp64 node and a non-fp64 node are never merged into the same
-/// cluster. MLX cannot run float64 on Metal, so an fp64 cluster is executed on an MLX CPU stream;
-/// without this rule the maximal-cluster search would happily absorb neighbouring fp32 nodes
-/// (they are graph-connected through `Cast`) and silently move GPU work onto the CPU.
-///
-/// `compile_class` is a second colour: shapeless, shape-keyed-only, and eager-only nodes remain in
-/// separate clusters, so a stricter node cannot disable compilation for a more capable neighbour.
-fn build_convex_clusters(
-    api: &ort::OrtApi,
-    nodes: &[*const ort::OrtNode],
-    supported: &[bool],
-    float64: &[bool],
-    compile_class: &[CompilePartitionClass],
-) -> Vec<Vec<usize>> {
-    let n = nodes.len();
-
-    // tensor name -> producing node index.
-    let mut producer: HashMap<String, usize> = HashMap::new();
-    for (i, &node) in nodes.iter().enumerate() {
-        for name in unsafe { node_output_names(api, node) } {
-            if !name.is_empty() {
-                producer.entry(name).or_insert(i);
-            }
-        }
-    }
-
-    // Direct successors / predecessors within the graph.
-    let mut succ: Vec<Vec<usize>> = vec![Vec::new(); n];
-    let mut pred: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for j in 0..n {
-        let mut seen: HashSet<usize> = HashSet::new();
-        for name in unsafe { node_input_names(api, nodes[j]) } {
-            if name.is_empty() {
-                continue;
-            }
-            if let Some(&i) = producer.get(&name)
-                && i != j
-                && seen.insert(i)
-            {
-                succ[i].push(j);
-                pred[j].push(i);
-            }
-        }
-    }
-
-    cluster_edges(n, supported, float64, compile_class, &succ, &pred)
-}
-
-/// The pure graph half of [`build_convex_clusters`], over an explicit adjacency (no ORT FFI) so the
-/// convexity and fp64-colouring rules are unit-testable.
-fn cluster_edges(
-    n: usize,
-    supported: &[bool],
-    float64: &[bool],
-    compile_class: &[CompilePartitionClass],
-    succ: &[Vec<usize>],
-    pred: &[Vec<usize>],
-) -> Vec<Vec<usize>> {
-    let words = n.div_ceil(64);
-
-    // Kahn topological order for reachability accumulation.
-    let mut indeg: Vec<usize> = pred.iter().map(|p| p.len()).collect();
-    let mut stack: Vec<usize> = (0..n).filter(|&i| indeg[i] == 0).collect();
-    let mut order: Vec<usize> = Vec::with_capacity(n);
-    while let Some(u) = stack.pop() {
-        order.push(u);
-        for &v in &succ[u] {
-            indeg[v] -= 1;
-            if indeg[v] == 0 {
-                stack.push(v);
-            }
-        }
-    }
-    if order.len() != n {
-        order = (0..n).collect();
-    }
-
-    // reach[i] = set of nodes reachable from i (transitive successors, excluding i).
-    let mut reach: Vec<Vec<u64>> = vec![vec![0u64; words]; n];
-    for &u in order.iter().rev() {
-        for &v in &succ[u] {
-            bit_set(&mut reach[u], v);
-            let src = reach[v].clone();
-            bit_or_into(&mut reach[u], &src);
-        }
-    }
-
-    // Cluster state keyed by union-find root.
-    let mut parent: Vec<usize> = (0..n).collect();
-    let mut cluster_bits: Vec<Vec<u64>> = vec![vec![0u64; words]; n];
-    let mut reach_bits: Vec<Vec<u64>> = vec![vec![0u64; words]; n];
-    for i in 0..n {
-        if supported[i] {
-            bit_set(&mut cluster_bits[i], i);
-            reach_bits[i] = reach[i].clone();
-        }
-    }
-
-    // Candidate merge edges: direct data edges between two supported nodes OF THE SAME execution
-    // colour. Withholding mixed fp64 or shape-specialization edges keeps each required route in its
-    // own cluster.
-    let mut edges: Vec<(usize, usize)> = Vec::new();
-    for u in 0..n {
-        if !supported[u] {
-            continue;
-        }
-        for &v in &succ[u] {
-            if supported[v] && float64[u] == float64[v] && compile_class[u] == compile_class[v] {
-                edges.push((u, v));
-            }
-        }
-    }
-
-    let is_convex = |s_bits: &[u64], reach_s: &[u64], reach: &[Vec<u64>]| -> bool {
-        for (x, reaches) in reach.iter().enumerate() {
-            if bit_test(s_bits, x) {
-                continue;
-            }
-            if !bit_test(reach_s, x) {
-                continue; // S cannot reach x
-            }
-            if bit_intersects(reaches, s_bits) {
-                return false; // x can reach back into S
-            }
-        }
-        true
-    };
-
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for &(a, b) in &edges {
-            let ra = uf_find(&mut parent, a);
-            let rb = uf_find(&mut parent, b);
-            if ra == rb {
-                continue;
-            }
-            let mut merged = cluster_bits[ra].clone();
-            bit_or_into(&mut merged, &cluster_bits[rb]);
-            let mut merged_reach = reach_bits[ra].clone();
-            bit_or_into(&mut merged_reach, &reach_bits[rb]);
-            if !is_convex(&merged, &merged_reach, &reach) {
-                continue;
-            }
-            parent[rb] = ra;
-            cluster_bits[ra] = merged;
-            reach_bits[ra] = merged_reach;
-            changed = true;
-        }
-    }
-
-    let mut grouped: HashMap<usize, Vec<usize>> = HashMap::new();
-    for (i, &is_supported) in supported.iter().enumerate() {
-        if is_supported {
-            let root = uf_find(&mut parent, i);
-            grouped.entry(root).or_default().push(i);
-        }
-    }
-    let mut clusters: Vec<Vec<usize>> = grouped
-        .into_values()
-        .map(|mut c| {
-            c.sort_unstable();
-            c
-        })
-        .collect();
-
-    // ---- quotient-acyclicity guard --------------------------------------------------------------
-    // Per-cluster convexity is necessary but NOT sufficient: two individually-convex clusters can
-    // still cycle THROUGH the CPU nodes between them (a1->b1 in one direction, b2->a2 in the other),
-    // and ORT rejects a cyclic contraction ("the graph is not acyclic"). Contract the clusters into a
-    // quotient graph and, while it has a cycle, drop the smallest offending cluster (its nodes fall
-    // back to CPU) until acyclic. Terminates (each pass removes one cluster) and is a no-op whenever
-    // the partition is already acyclic (the common case).
-    loop {
-        let mut qid = vec![usize::MAX; n];
-        for (ci, cl) in clusters.iter().enumerate() {
-            for &node in cl {
-                qid[node] = ci;
-            }
-        }
-        let mut next = clusters.len();
-        for q in qid.iter_mut() {
-            if *q == usize::MAX {
-                *q = next;
-                next += 1;
-            }
-        }
-        let mut qsucc: Vec<HashSet<usize>> = vec![HashSet::new(); next];
-        let mut qindeg = vec![0usize; next];
-        for u in 0..n {
-            for &v in &succ[u] {
-                let (a, b) = (qid[u], qid[v]);
-                if a != b && qsucc[a].insert(b) {
-                    qindeg[b] += 1;
-                }
-            }
-        }
-        let mut stack: Vec<usize> = (0..next).filter(|&i| qindeg[i] == 0).collect();
-        let mut visited = 0usize;
-        while let Some(u) = stack.pop() {
-            visited += 1;
-            for &v in &qsucc[u] {
-                qindeg[v] -= 1;
-                if qindeg[v] == 0 {
-                    stack.push(v);
-                }
-            }
-        }
-        if visited == next {
-            break; // quotient is acyclic
-        }
-        // A cycle remains: nodes with residual in-degree are on/after it. Drop the smallest CLUSTER
-        // among them (super-node id < clusters.len()); its members return to CPU next pass.
-        let victim = (0..next)
-            .filter(|&i| qindeg[i] > 0 && i < clusters.len())
-            .min_by_key(|&ci| clusters[ci].len());
-        match victim {
-            Some(ci) => {
-                clusters.remove(ci);
-            }
-            None => break, // unreachable: singletons alone cannot cycle in an acyclic base graph
-        }
-    }
-
-    clusters.sort_by_key(|c| c[0]);
-    clusters
-}
-
-fn uf_find(parent: &mut [usize], mut x: usize) -> usize {
-    while parent[x] != x {
-        parent[x] = parent[parent[x]];
-        x = parent[x];
-    }
-    x
-}
-
-#[inline]
-fn bit_set(b: &mut [u64], i: usize) {
-    b[i >> 6] |= 1u64 << (i & 63);
-}
-#[inline]
-fn bit_test(b: &[u64], i: usize) -> bool {
-    (b[i >> 6] >> (i & 63)) & 1 != 0
-}
-#[inline]
-fn bit_or_into(dst: &mut [u64], src: &[u64]) {
-    for i in 0..dst.len() {
-        dst[i] |= src[i];
-    }
-}
-#[inline]
-fn bit_intersects(a: &[u64], b: &[u64]) -> bool {
-    a.iter().zip(b.iter()).any(|(x, y)| x & y != 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -2393,137 +1998,6 @@ mod tests {
         reset_stable_cross_caches(&mut plan, Some(42));
         assert_eq!(plan.compiled.stable_generation_key, Some(42));
         assert_eq!(plan.prefill.stable_generation_key, Some(42));
-    }
-}
-
-#[cfg(test)]
-mod float64_cluster_tests {
-    use super::{build_contiguous_clusters, cluster_edges};
-    use crate::registry::CompilePartitionClass::{Eager, ShapeKeyed, Shapeless};
-
-    /// Build `(succ, pred)` for a straight chain `0 -> 1 -> ... -> n-1`.
-    fn chain(n: usize) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
-        let mut succ = vec![Vec::new(); n];
-        let mut pred = vec![Vec::new(); n];
-        for i in 0..n.saturating_sub(1) {
-            succ[i].push(i + 1);
-            pred[i + 1].push(i);
-        }
-        (succ, pred)
-    }
-
-    /// The load-bearing rule: fp32 -> Cast -> fp64 region -> Cast -> fp32 must NOT collapse into one
-    /// cluster. If it did, the whole thing would need the MLX CPU stream and the fp32 work either
-    /// side would silently move off the GPU.
-    ///
-    /// Node colouring below mirrors what `node_uses_float64` reports: a `Cast` that touches a
-    /// float64 slot on either side is itself fp64-coloured.
-    #[test]
-    fn float64_region_forms_its_own_cluster() {
-        // 0,1 fp32 | 2 Cast(fp32->fp64) | 3,4 fp64 | 5 Cast(fp64->fp32) | 6,7 fp32
-        let n = 8;
-        let (succ, pred) = chain(n);
-        let supported = vec![true; n];
-        let float64 = vec![false, false, true, true, true, true, false, false];
-        let compile_class = vec![Shapeless; n];
-
-        let clusters = cluster_edges(n, &supported, &float64, &compile_class, &succ, &pred);
-
-        assert_eq!(
-            clusters,
-            vec![vec![0, 1], vec![2, 3, 4, 5], vec![6, 7]],
-            "an fp64 region must be its own cluster, with the fp32 regions kept separate"
-        );
-    }
-
-    /// Without any fp64 the colouring is inert: one maximal cluster, exactly as before.
-    #[test]
-    fn all_float32_still_forms_one_maximal_cluster() {
-        let n = 8;
-        let (succ, pred) = chain(n);
-        let clusters = cluster_edges(
-            n,
-            &vec![true; n],
-            &vec![false; n],
-            &vec![Shapeless; n],
-            &succ,
-            &pred,
-        );
-        assert_eq!(clusters, vec![(0..n).collect::<Vec<_>>()]);
-    }
-
-    /// A diamond where both branches are fp64 still merges (same colour), so the rule costs nothing
-    /// on a uniformly-fp64 graph.
-    #[test]
-    fn uniform_float64_graph_merges_normally() {
-        //     0
-        //    / \
-        //   1   2
-        //    \ /
-        //     3
-        let n = 4;
-        let succ = vec![vec![1, 2], vec![3], vec![3], vec![]];
-        let pred = vec![vec![], vec![0], vec![0], vec![1, 2]];
-        let clusters = cluster_edges(
-            n,
-            &vec![true; n],
-            &vec![true; n],
-            &vec![Shapeless; n],
-            &succ,
-            &pred,
-        );
-        assert_eq!(clusters, vec![vec![0, 1, 2, 3]]);
-    }
-
-    /// A shape-preserving CumSum still needs its own shape-keyed cluster because the linked MLX
-    /// Scan primitive cannot provide `output_shapes` to a shapeless decoder closure.
-    #[test]
-    fn shape_specialized_node_forms_its_own_cluster() {
-        let n = 5;
-        let (succ, pred) = chain(n);
-        let supported = vec![true; n];
-        let float64 = vec![false; n];
-        let compile_class = vec![Shapeless, Shapeless, ShapeKeyed, Shapeless, Shapeless];
-        assert_eq!(
-            cluster_edges(n, &supported, &float64, &compile_class, &succ, &pred,),
-            vec![vec![0, 1], vec![2], vec![3, 4]]
-        );
-    }
-
-    #[test]
-    fn eager_only_node_does_not_merge_with_shape_keyed_neighbours() {
-        let n = 5;
-        let (succ, pred) = chain(n);
-        let supported = vec![true; n];
-        let float64 = vec![false; n];
-        let compile_class = vec![Shapeless, ShapeKeyed, Eager, ShapeKeyed, Shapeless];
-        assert_eq!(
-            cluster_edges(n, &supported, &float64, &compile_class, &succ, &pred),
-            vec![vec![0], vec![1], vec![2], vec![3], vec![4]]
-        );
-    }
-
-    /// The contiguous-cluster fallback (used for the mixed vision/quant export) applies the same
-    /// boundary rule.
-    #[test]
-    fn contiguous_clusters_split_on_the_float64_boundary() {
-        let supported = vec![true, true, true, true, true];
-        let float64 = vec![false, false, true, true, false];
-        assert_eq!(
-            build_contiguous_clusters(&supported, &float64, &vec![Shapeless; supported.len()]),
-            vec![vec![0, 1], vec![2, 3], vec![4]]
-        );
-    }
-
-    #[test]
-    fn contiguous_clusters_split_on_shape_specialization_boundary() {
-        let supported = vec![true; 5];
-        let float64 = vec![false; 5];
-        let compile_class = vec![Shapeless, ShapeKeyed, ShapeKeyed, Shapeless, Shapeless];
-        assert_eq!(
-            build_contiguous_clusters(&supported, &float64, &compile_class),
-            vec![vec![0], vec![1, 2], vec![3, 4]]
-        );
     }
 }
 
