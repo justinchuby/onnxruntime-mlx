@@ -1,5 +1,8 @@
 # onnxruntime-mlx
 
+> **This repository has migrated to [onnxruntime/onnxruntime-ep-mlx](https://github.com/onnxruntime/onnxruntime-ep-mlx).**
+> Please use the new repository for the latest code, documentation, issues, and pull requests.
+
 [![PyPI Version](https://img.shields.io/pypi/v/onnxruntime-ep-mlx)](https://pypi.org/project/onnxruntime-ep-mlx/)
 [![Crates.io Version](https://img.shields.io/crates/v/onnxruntime-ep-mlx)](https://crates.io/crates/onnxruntime-ep-mlx)
 [![Rust](https://shields.io/badge/-Rust-3776AB?style=flat&logo=rust)](https://rustup.rs/)
